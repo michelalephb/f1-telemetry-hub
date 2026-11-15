@@ -7,7 +7,7 @@ import CompareView, { type Series } from '@/components/CompareView'
 import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getCornerMetrics, getCorners, getDrivers, getEvent, getLaps, getResults, getSession, getTrace, type Lap } from '@/lib/api'
-import { qualiSegments } from '@/lib/segments'
+import { finalSegmentKeys } from '@/lib/segments'
 import { lapTime, pairColors, SESSION_LABEL, teamColor } from '@/lib/format'
 import { deltaTime, lapTrace } from '@/lib/telemetry'
 
@@ -24,10 +24,9 @@ async function load(sid: string, qa: string | null, qb: string | null, qla: stri
 
   // Qualifying: only final segment (Q3) laps can be compared, ordered by the official result.
   const isQ = session.session_code === 'Q' || session.session_code === 'SQ'
-  const seg = qualiSegments(laps, session.session_code)
-  const finalSeg = seg.size ? Math.max(...seg.values()) : 0
+  const finalKeys = finalSegmentKeys(laps, session.session_code, results)
   const clean = laps
-    .filter((l) => l.is_accurate && l.lap_time_ms != null && (!isQ || finalSeg < 1 || seg.get(`${l.driver_number}/${l.lap_number}`) === finalSeg))
+    .filter((l) => l.is_accurate && l.lap_time_ms != null && (!finalKeys || finalKeys.has(`${l.driver_number}/${l.lap_number}`)))
     .sort((x, y) => (x.lap_time_ms ?? 0) - (y.lap_time_ms ?? 0))
   const withLaps = new Set(clean.map((l) => l.driver_number))
   const official = results.filter((r) => r.position != null).sort((x, y) => x.position! - y.position!).map((r) => r.driver_number).filter((d) => withLaps.has(d))

@@ -2,7 +2,7 @@
 // files) and asserts known facts. node --experimental-strip-types scripts/verify.ts 2026_20_R
 import assert from 'node:assert/strict'
 import { getCornerMetrics, getCorners, getDrivers, getLaps, getResults, getSession, getTrace, SUPABASE_URL } from '../lib/api.ts'
-import { qualiSegments } from '../lib/segments.ts'
+import { finalSegmentKeys } from '../lib/segments.ts'
 import { deltaAt, extrap, lapTrace } from '../lib/telemetry.ts'
 
 const sid = process.argv[2] ?? '2026_20_R'
@@ -50,10 +50,10 @@ if (s.session_code === 'Q') {
   if (!res.length) {
     console.log('official classification not in yet; Q3 check skipped')
   } else {
-    const seg = qualiSegments(laps, 'Q')
-    const q3 = Math.max(...seg.values())
-    for (const r of res.slice(0, 3)) {
-      const mine = laps.filter((l) => l.driver_number === r.driver_number && l.lap_time_ms != null && seg.get(`${l.driver_number}/${l.lap_number}`) === q3)
+    const all = await getResults(s.season, s.round, 'Q')
+    const keys = finalSegmentKeys(laps, 'Q', all)!
+    for (const r of res) {
+      const mine = laps.filter((l) => l.driver_number === r.driver_number && l.lap_time_ms != null && keys.has(`${l.driver_number}/${l.lap_number}`))
       const ours = Math.min(...mine.map((l) => l.lap_time_ms!))
       console.log(`P${r.position} ${r.driver_code}: official Q3 ${r.q3_ms} ms, our best Q3 lap ${ours} ms`)
       assert.ok(Math.abs(ours - r.q3_ms!) <= 50, `Q3 time for ${r.driver_code} within 50 ms of official`)

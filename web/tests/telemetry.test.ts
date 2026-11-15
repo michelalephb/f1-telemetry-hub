@@ -61,3 +61,13 @@ test('qualiSegments splits on the two longest breaks', async () => {
   assert.deepEqual(['1/1', '1/2', '1/3', '4/1', '4/2', '4/3', '1/4'].map((k) => seg.get(k)), [0, 0, 0, 1, 1, 2, 2])
   assert.equal(qualiSegments(laps, 'R').size, 0)
 })
+
+test('finalSegmentKeys: Q3 starts after the last lap of drivers out in Q2', async () => {
+  const { finalSegmentKeys } = await import('../lib/segments.ts')
+  const lap = (d: string, n: number, s: number) => ({ driver_number: d, lap_number: n, lap_start_s: s, lap_end_s: s + 90 })
+  // driver 1 reaches Q3; driver 9 is out in Q2 and last runs at 2000..2090. A long red flag sits inside Q3.
+  const laps = [lap('1', 1, 100), lap('1', 2, 1990), lap('9', 1, 2000), lap('1', 3, 2600), lap('1', 4, 5000)]
+  const keys = finalSegmentKeys(laps, 'Q', [{ driver_number: '1', q3_ms: 80000 }, { driver_number: '9', q3_ms: null }])!
+  assert.deepEqual([...keys].sort(), ['1/3', '1/4'])
+  assert.equal(finalSegmentKeys(laps, 'R'), null)
+})
