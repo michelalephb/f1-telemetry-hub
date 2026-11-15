@@ -114,7 +114,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-sync", action="store_true", help="skip the calendar and results sync (backfill jobs)")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    fastf1.Cache.enable_cache(os.environ.get("FASTF1_CACHE", ".fastf1_cache"))
+    cache_dir = os.environ.get("FASTF1_CACHE", ".fastf1_cache")
+    os.makedirs(cache_dir, exist_ok=True)  # FastF1 refuses a cache dir that does not exist
+    fastf1.Cache.configure(cache_dir=cache_dir)
 
     if a.cmd == "rounds":
         print(json.dumps(sorted({s["round"] for s in finished(schedule(a.season))})))
