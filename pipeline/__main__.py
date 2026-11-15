@@ -161,6 +161,7 @@ def main(argv=None) -> int:
     ap.add_argument("--max", type=int, default=6, help="max sessions per run in latest mode")
     ap.add_argument("--no-sync", action="store_true", help="skip the calendar and results sync (backfill jobs)")
     ap.add_argument("--dry-run", action="store_true", help="process for real but write nothing; print a quality report")
+    ap.add_argument("--codes", default="FP1,FP2,FP3,SQ,S,Q,R", help="session codes to ingest, e.g. R,Q,S,SQ")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cache_dir = os.environ.get("FASTF1_CACHE", ".fastf1_cache")
@@ -193,6 +194,8 @@ def main(argv=None) -> int:
                 todo.append(s)
         todo = sorted(todo, key=lambda s: s["start_utc"], reverse=True)[: a.max]
 
+    codes = {c.strip() for c in a.codes.split(",") if c.strip()}
+    todo = [s for s in todo if s["session_code"] in codes]
     log.info("%d session(s) to ingest: %s", len(todo), [s["session_id"] for s in todo])
     fails = sum(0 if run_one(sb, oc, s, a.cmd) else 1 for s in todo)
     if a.dry_run:

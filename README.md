@@ -51,7 +51,7 @@ Accuracy is bounded by the sample rate: at 300 km/h there are about 20 m between
 
 GitHub Actions does everything:
 
-* **ingest latest** (`ingest.yml`): every 3 hours. Syncs calendar and results, then ingests up to 6 finished sessions that are pending or failed. Sessions are picked up 1 hour after they end.
+* **ingest latest** (`ingest.yml`): every 3 hours, Race, Qualifying, Sprint and Sprint Qualifying only until storage for practice is decided (about 11 MB per practice session). Syncs calendar and results, then ingests up to 6 finished sessions that are pending or failed. Sessions are picked up 1 hour after they end.
 * **backfill season** (`backfill.yml`): manual. One job per finished round, one at a time (OpenF1 rate limit). About 2 minutes per session.
 * **test** (`test.yml`): unit tests on every push.
 

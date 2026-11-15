@@ -12,6 +12,9 @@ on:
       max:
         description: Max sessions this run
         default: "6"
+      codes:
+        description: Session codes (practice FP1,FP2,FP3 off until storage is decided)
+        default: "R,Q,S,SQ"
 
 concurrency:
   group: ingest
@@ -37,4 +40,4 @@ jobs:
           path: .fastf1_cache
           key: fastf1-${{ github.run_id }}
           restore-keys: fastf1-
-      - run: python -m pipeline latest --season "${{ inputs.season || '2026' }}" --max "${{ inputs.max || '6' }}"
+      - run: python -m pipeline latest --season "${{ inputs.season || '2026' }}" --max "${{ inputs.max || '6' }}" --codes "${{ inputs.codes || 'R,Q,S,SQ' }}"
