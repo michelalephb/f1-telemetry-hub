@@ -15,7 +15,7 @@ Data access, all public by design:
 * one trace file per driver per session from the public `web` bucket (`SEASON/ROUND/CODE/trace_<driver>.parquet`), parsed in the browser
 * raw samples stay in the private `telemetry` bucket and never reach the site
 
-Custom domain later: add it in repo Settings › Pages, then set `NEXT_PUBLIC_BASE_PATH` to an empty string in `pages.yml`.
+Every push to main republishes the site. The base path is read from the Pages settings, so moving to the custom domain (repo Settings › Pages › Custom domain) needs no code change.
 
 ```bash
 npm ci
