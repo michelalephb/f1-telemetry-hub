@@ -100,14 +100,17 @@ def refine_apexes(corners: pd.DataFrame, ref_lap: pd.DataFrame) -> pd.DataFrame:
                 apex = float(d[m][k])
         out.at[i, "apex_m"] = apex
     out["prev_apex_m"] = out["apex_m"].shift(1)
+    out["next_apex_m"] = out["apex_m"].shift(-1)
     return out
 
 
-def corner_metrics(lap: pd.DataFrame, apex_m: float, prev_apex_m: float | None = None) -> dict | None:
+def corner_metrics(lap: pd.DataFrame, apex_m: float, prev_apex_m: float | None = None,
+                   next_apex_m: float | None = None) -> dict | None:
     """Metrics for one lap through one corner. Returns None if the window is not fully covered.
 
     Braking and entry speed are searched only after the previous corner's apex, so a braking
-    zone is never credited to the corner after it.
+    zone is never credited to the corner after it. Minimum speed is searched only up to halfway
+    to each neighbouring apex.
     """
     rel = lap["lap_dist_m"].to_numpy() - apex_m
     rel = np.maximum.accumulate(rel)  # distance must not run backwards
@@ -132,7 +135,14 @@ def corner_metrics(lap: pd.DataFrame, apex_m: float, prev_apex_m: float | None =
             brake_point = 0.5 * (rel[j] + rel[j - 1])
             break
 
-    m = (rel >= -150.0) & (rel <= 100.0)
+    lo, hi = -150.0, 100.0
+    if prev_apex_m is not None and not np.isnan(prev_apex_m):
+        lo = max(lo, 0.5 * (prev_apex_m - apex_m))
+    if next_apex_m is not None and not np.isnan(next_apex_m):
+        hi = min(hi, 0.5 * (next_apex_m - apex_m))
+    m = (rel >= lo) & (rel <= hi)
+    if not m.any():
+        return None
     jmin = np.where(m)[0][np.argmin(sp[m])]
 
     entry_end = brake_point if brake_point is not None else -50.0

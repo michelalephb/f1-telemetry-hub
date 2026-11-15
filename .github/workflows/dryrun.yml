@@ -23,3 +23,5 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m pipeline round --season "${{ inputs.season || '2026' }}" --round "${{ inputs.round || '20' }}" --session "${{ inputs.session || 'Race' }}" --no-sync --dry-run
+      - if: github.event_name == 'push'
+        run: python -m pipeline round --season 2026 --round 20 --session Qualifying --no-sync --dry-run

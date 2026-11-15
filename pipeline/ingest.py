@@ -199,7 +199,8 @@ def auto_corners(ref_lap: pd.DataFrame, sid: str) -> pd.DataFrame:
     n = np.arange(1, len(idx) + 1)
     return pd.DataFrame({"session_id": sid, "corner": n.astype(str), "number": n, "letter": None,
                          "x": None, "y": None, "angle": None, "marker_m": d, "apex_m": d,
-                         "prev_apex_m": np.concatenate([[np.nan], d[:-1]])})
+                         "prev_apex_m": np.concatenate([[np.nan], d[:-1]]),
+                         "next_apex_m": np.concatenate([d[1:], [np.nan]])})
 
 
 def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd.DataFrame,
@@ -244,7 +245,7 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
             corner_source = "speed minima"
         for (drv, ln), lap in dist.groupby(["driver_number", "lap_number"]):
             for _, cr in corners.iterrows():
-                m = corner_metrics(lap, cr["apex_m"], cr.get("prev_apex_m"))
+                m = corner_metrics(lap, cr["apex_m"], cr.get("prev_apex_m"), cr.get("next_apex_m"))
                 if m:
                     metrics.append({"session_id": sid, "driver_number": drv, "lap_number": int(ln), "corner": cr["corner"], **m})
 
@@ -265,7 +266,7 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
     store.upsert(sb, "drivers", store.records(drivers.assign(session_id=sid)), "session_id,driver_number")
     store.upsert(sb, "laps", store.records(laps), "session_id,driver_number,lap_number")
     if len(corners):
-        store.upsert(sb, "corners", store.records(corners.drop(columns=["marker_m", "prev_apex_m"], errors="ignore")), "session_id,corner")
+        store.upsert(sb, "corners", store.records(corners.drop(columns=["marker_m", "prev_apex_m", "next_apex_m"], errors="ignore")), "session_id,corner")
     if metrics:
         known = set(zip(laps["driver_number"], laps["lap_number"].astype(int)))
         rows = [m for m in metrics if (m["driver_number"], m["lap_number"]) in known]
