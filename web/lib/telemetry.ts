@@ -48,9 +48,12 @@ const key = (t: number) => t.toFixed(3)
  * Join one lap's distance rows to the raw car samples (same timestamps) and to position
  * (interpolated at each car sample time). Only samples inside the lap are kept.
  */
-export function buildLapTrace(dist: DistRow[], car: CarRow[], pos: PosRow[], lapStartS: number): LapTrace {
+export function buildLapTrace(dist: DistRow[], car: CarRow[], pos: PosRow[], lapStartS: number, trackM?: number): LapTrace {
   const carByT = new Map(car.map((c) => [key(c.t), c]))
-  const rows = dist.filter((d) => d.in_lap).sort((a, b) => a.t - b.t)
+  // With a track length, keep samples from just before the line to just after the next crossing,
+  // so the trace (and the delta) reaches both ends of the lap.
+  const keep = trackM ? (d: DistRow) => d.lap_dist_m >= -40 && d.lap_dist_m <= trackM + 40 : (d: DistRow) => d.in_lap
+  const rows = dist.filter(keep).sort((a, b) => a.t - b.t)
   const posSorted = [...pos].sort((a, b) => a.t - b.t)
   const pt = posSorted.map((p) => p.t), px = posSorted.map((p) => p.x), py = posSorted.map((p) => p.y)
   const out: LapTrace = { dist: [], time: [], speed: [], throttle: [], brake: [], gear: [], drs: [], x: [], y: [] }
@@ -70,7 +73,26 @@ export function buildLapTrace(dist: DistRow[], car: CarRow[], pos: PosRow[], lap
     out.x.push(interp(d.t, pt, px))
     out.y.push(interp(d.t, pt, py))
   }
+  // Lap clock = 0 at the timing line (distance 0), not at the first sample.
+  if (trackM && out.dist.length > 1) {
+    const t0 = extrap(0, out.dist, out.time)
+    for (let i = 0; i < out.time.length; i++) out.time[i] -= t0
+  }
   return out
+}
+
+/** Like interp but extends the first or last segment linearly beyond the ends. */
+export function extrap(x: number, xs: number[], ys: number[]): number {
+  const n = xs.length
+  if (n < 2) return ys[0] ?? NaN
+  const [i, j] = x < xs[0] ? [0, 1] : x > xs[n - 1] ? [n - 2, n - 1] : [-1, -1]
+  if (i < 0) return interp(x, xs, ys)
+  return ys[i] + ((x - xs[i]) / (xs[j] - xs[i] || 1)) * (ys[j] - ys[i])
+}
+
+/** Time gap of B to A at distance d, with linear extension past the ends. */
+export function deltaAt(a: LapTrace, b: LapTrace, d: number): number {
+  return extrap(d, b.dist, b.time) - extrap(d, a.dist, a.time)
 }
 
 /**

@@ -42,6 +42,7 @@ export default async function ComparePage({ params, searchParams }: { params: Pr
       car.filter((r) => r.driver_number === l.driver_number && r.t >= lo && r.t <= hi),
       pos.filter((r) => r.driver_number === l.driver_number && r.t >= lo && r.t <= hi),
       l.lap_start_s ?? 0,
+      session.track_length_m ?? undefined,
     )
   }
   const tA = trace(lapA), tB = trace(lapB)

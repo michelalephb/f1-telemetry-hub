@@ -117,27 +117,51 @@ async function readRows(path: string, columns: string[]) {
   return parquetReadObjects({ file, compressors, columns }) as Promise<Record<string, unknown>[]>
 }
 
-export async function readCar(path: string, drivers: string[]): Promise<CarRow[]> {
-  const rows = await readRows(path, ['driver_number', 't', 'speed', 'throttle', 'brake', 'gear', 'rpm', 'drs'])
-  const want = new Set(drivers)
-  return rows.filter((r) => want.has(r.driver_number as string)).map((r) => ({
+// Parsed rows per (file, driver). A session file holds all drivers; parse once, keep each driver's
+// slice. Bounded so a long running instance does not grow without limit.
+const rowCache = new Map<string, Promise<unknown[]>>()
+const MAX_ROW_ENTRIES = 120
+
+async function perDriver<T>(path: string, columns: string[], drivers: string[], map: (r: Record<string, unknown>) => T): Promise<T[]> {
+  const missing = drivers.filter((d) => !rowCache.has(`${path}#${d}`))
+  if (missing.length) {
+    const parsed = readRows(path, columns).then((rows) => {
+      const by = new Map<string, T[]>()
+      for (const r of rows) {
+        const d = r.driver_number as string
+        if (!by.has(d)) by.set(d, [])
+        by.get(d)!.push(map(r))
+      }
+      return by
+    })
+    for (const d of missing) {
+      const p = parsed.then((by) => by.get(d) ?? [])
+      rowCache.set(`${path}#${d}`, p)
+      p.catch(() => rowCache.delete(`${path}#${d}`))
+    }
+    while (rowCache.size > MAX_ROW_ENTRIES) rowCache.delete(rowCache.keys().next().value as string)
+  }
+  const parts = await Promise.all(drivers.map((d) => rowCache.get(`${path}#${d}`) as Promise<T[]>))
+  return parts.flat()
+}
+
+export function readCar(path: string, drivers: string[]): Promise<CarRow[]> {
+  return perDriver(path, ['driver_number', 't', 'speed', 'throttle', 'brake', 'gear', 'rpm', 'drs'], drivers, (r) => ({
     driver_number: r.driver_number as string, t: num(r.t), speed: num(r.speed), throttle: num(r.throttle),
     brake: num(r.brake), gear: num(r.gear), rpm: num(r.rpm), drs: num(r.drs),
   }))
 }
 
-export async function readPos(path: string, drivers: string[]): Promise<PosRow[]> {
-  const rows = await readRows(path, ['driver_number', 't', 'x', 'y'])
-  const want = new Set(drivers)
-  return rows.filter((r) => want.has(r.driver_number as string)).map((r) => ({
+export function readPos(path: string, drivers: string[]): Promise<PosRow[]> {
+  return perDriver(path, ['driver_number', 't', 'x', 'y'], drivers, (r) => ({
     driver_number: r.driver_number as string, t: num(r.t), x: num(r.x), y: num(r.y),
   }))
 }
 
 export async function readDist(path: string, laps: { driver_number: string; lap_number: number }[]): Promise<DistRow[]> {
-  const rows = await readRows(path, ['driver_number', 'lap_number', 't', 'lap_dist_m', 'in_lap'])
-  const want = new Set(laps.map((l) => `${l.driver_number}/${l.lap_number}`))
-  return rows.filter((r) => want.has(`${r.driver_number}/${num(r.lap_number)}`)).map((r) => ({
+  const rows = await perDriver(path, ['driver_number', 'lap_number', 't', 'lap_dist_m', 'in_lap'], [...new Set(laps.map((l) => l.driver_number))], (r) => ({
     driver_number: r.driver_number as string, lap_number: num(r.lap_number), t: num(r.t), lap_dist_m: num(r.lap_dist_m), in_lap: Boolean(r.in_lap),
   }))
+  const want = new Set(laps.map((l) => `${l.driver_number}/${l.lap_number}`))
+  return rows.filter((r) => want.has(`${r.driver_number}/${r.lap_number}`))
 }
