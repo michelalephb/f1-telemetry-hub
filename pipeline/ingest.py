@@ -261,12 +261,28 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
     base = f"{season}/{rnd:02d}/{code}"
     car_path = store.upload_parquet(sb, f"{base}/car_raw.parquet", car)
     pos_path = store.upload_parquet(sb, f"{base}/pos_raw.parquet", pos)
-    # Distance only: join back to car_raw on (driver_number, t) for the channels. Keeps storage down.
+    # Public per driver traces for the website: every car sample with lap, distance and map position.
+    trace_prefix = None
     if len(dist):
-        slim = dist[["driver_number", "lap_number", "t", "lap_dist_m", "in_lap"]].astype({"lap_dist_m": "float32", "lap_number": "int16"})
-        dist_path = store.upload_parquet(sb, f"{base}/lap_distance.parquet", slim)
-    else:
-        dist_path = None
+        for drv, d in dist.groupby("driver_number"):
+            p = pos[pos["driver_number"] == drv].sort_values("t")
+            tr = pd.DataFrame({
+                "lap_number": d["lap_number"].astype("int16"),
+                "t": d["t"].astype("float64"),
+                "lap_dist_m": d["lap_dist_m"].astype("float32"),
+                "in_lap": d["in_lap"].astype(bool),
+                "speed": d["speed"].fillna(0).astype("int16"),
+                "throttle": d["throttle"].fillna(0).astype("int16"),
+                "brake": (d["brake"].fillna(0) > 0).astype("int8"),
+                "gear": d["gear"].fillna(0).astype("int8"),
+                "rpm": d["rpm"].fillna(0).astype("int16"),
+                "drs": d["drs"].fillna(0).astype("int8"),
+                "x": np.interp(d["t"], p["t"], p["x"]).astype("float32"),
+                "y": np.interp(d["t"], p["t"], p["y"]).astype("float32"),
+            }).sort_values(["lap_number", "t"])
+            store.upload_parquet(sb, f"{base}/trace_{drv}.parquet", tr, bucket=store.WEB_BUCKET)
+        trace_prefix = f"{base}/"
+    dist_path = None
 
     store.delete_session_rows(sb, sid)
     store.upsert(sb, "sessions", [{
@@ -274,7 +290,8 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
         "status": "ingested", "ingested_at": datetime.now(timezone.utc).isoformat(),
         "n_drivers": int(laps["driver_number"].nunique()), "n_laps": int(len(laps)),
         "track_length_m": round(line.length, 1), "car_path": car_path, "pos_path": pos_path,
-        "dist_path": dist_path, "fastf1_version": f"source openf1; corners {corner_source}", "error": None,
+        "dist_path": dist_path, "trace_prefix": trace_prefix,
+        "fastf1_version": f"source openf1; corners {corner_source}", "error": None,
     }], "session_id")
     store.upsert(sb, "drivers", store.records(drivers.assign(session_id=sid)), "session_id,driver_number")
     store.upsert(sb, "laps", store.records(laps), "session_id,driver_number,lap_number")
