@@ -51,3 +51,13 @@ test('every 2026 host country has a flag file', async () => {
     assert.ok(fs.existsSync(new URL(`../public/flags/${iso}.svg`, import.meta.url)), `no flag file for ${c}`)
   }
 })
+
+test('qualiSegments splits on the two longest breaks', async () => {
+  const { qualiSegments } = await import('../lib/segments.ts')
+  const lap = (d: string, n: number, s: number) => ({ driver_number: d, lap_number: n, lap_start_s: s, lap_end_s: s + 90 })
+  // Q1 0..490 with a 150 s lull, 420 s break, Q2 910..1180, 480 s break, Q3 1660..1840
+  const laps = [lap('1', 1, 0), lap('1', 2, 240), lap('1', 3, 400), lap('4', 1, 910), lap('4', 2, 1090), lap('4', 3, 1660), lap('1', 4, 1750)]
+  const seg = qualiSegments(laps, 'Q')
+  assert.deepEqual(['1/1', '1/2', '1/3', '4/1', '4/2', '4/3', '1/4'].map((k) => seg.get(k)), [0, 0, 0, 1, 1, 2, 2])
+  assert.equal(qualiSegments(laps, 'R').size, 0)
+})
