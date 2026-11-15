@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      max-parallel: 2   # be gentle with the F1 live timing servers
+      max-parallel: 1   # OpenF1 free tier: 30 requests per minute
       matrix:
         round: ${{ fromJSON(needs.calendar.outputs.rounds) }}
     steps:
