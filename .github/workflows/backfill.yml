@@ -1,0 +1,62 @@
+name: backfill season
+
+# Manual: ingest every session of every finished round of a season, one job per round.
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: Season
+        default: "2026"
+      rounds:
+        description: Optional JSON list of rounds, e.g. [20,21]. Empty = all finished rounds
+        default: ""
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+  FASTF1_CACHE: .fastf1_cache
+
+jobs:
+  calendar:
+    runs-on: ubuntu-latest
+    outputs:
+      rounds: ${{ steps.r.outputs.rounds }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pipeline calendar --season "${{ inputs.season }}"
+      - id: r
+        run: |
+          if [ -n "${{ inputs.rounds }}" ]; then echo 'rounds=${{ inputs.rounds }}' >> "$GITHUB_OUTPUT";
+          else echo "rounds=$(python -m pipeline rounds --season ${{ inputs.season }} | tail -n 1)" >> "$GITHUB_OUTPUT"; fi
+
+  round:
+    needs: calendar
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2   # be gentle with the F1 live timing servers
+      matrix:
+        round: ${{ fromJSON(needs.calendar.outputs.rounds) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: .fastf1_cache
+          key: fastf1-r${{ matrix.round }}-${{ github.run_id }}
+          restore-keys: fastf1-r${{ matrix.round }}-
+      - run: python -m pipeline round --season "${{ inputs.season }}" --round "${{ matrix.round }}" --no-sync
