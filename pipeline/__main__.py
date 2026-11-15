@@ -141,6 +141,7 @@ def run_one(sb, oc: OpenF1, s: dict, mode: str) -> bool:
         ok, msg = True, json.dumps(summary)
     except NoData as e:
         msg = f"no data: {e}"
+        log.warning("%s: %s", s["session_id"], msg)
         sb.table("sessions").update({"status": "no_data", "error": msg}).eq("session_id", s["session_id"]).execute()
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"[:2000]

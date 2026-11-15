@@ -124,6 +124,7 @@ def fetch_session(oc: OpenF1, s: dict) -> dict:
     laps = oc.frame("laps", session_key=k)
     if laps.empty:
         raise NoData("OpenF1 has no laps")
+    log.info("%s: %d laps from OpenF1, %d with a duration", s["session_id"], len(laps), int(laps["lap_duration"].notna().sum()))
     drivers = oc.frame("drivers", session_key=k)
     stints = oc.frame("stints", session_key=k)
     pits = oc.frame("pit", session_key=k)
@@ -144,7 +145,7 @@ def fetch_session(oc: OpenF1, s: dict) -> dict:
                 "x": p["x"], "y": p["y"], "z": p["z"], "status": "OnTrack",
             }))
     if not car or not pos:
-        raise NoData("OpenF1 has no car or location data")
+        raise NoData(f"OpenF1 has no car or location data in {win}")
     car = pd.concat(car, ignore_index=True).sort_values(["driver_number", "t"], ignore_index=True)
     pos = pd.concat(pos, ignore_index=True).sort_values(["driver_number", "t"], ignore_index=True)
 
@@ -185,7 +186,8 @@ def centre_line(laps: pd.DataFrame, pos: pd.DataFrame) -> CentreLine:
         if len(p) > 100:
             tracks.append(p[["x", "y", "z"]].to_numpy() / 10.0)
     if not tracks:
-        raise NoData("no accurate lap to build a centre line")
+        raise NoData(f"no accurate lap to build a centre line ({len(ok)} accurate laps, {len(best)} candidates, "
+                     f"position samples per candidate: {[int(((pos['driver_number'] == r.driver_number) & (pos['t'] >= r.lap_start_s) & (pos['t'] <= r.lap_end_s)).sum()) for r in best.itertuples()][:5]})")
     return CentreLine(build_centre_line(tracks))
 
 
