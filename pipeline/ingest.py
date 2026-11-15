@@ -118,12 +118,17 @@ def fetch_session(oc: OpenF1, s: dict) -> dict:
     """Everything OpenF1 has for one session, on a session clock (seconds from session start)."""
     k = s["session_key"]
     t0 = pd.Timestamp(s["start_utc"])
-    t_end = pd.Timestamp(s["end_utc"]) if s.get("end_utc") else t0 + timedelta(hours=3)
-    win = [f"date>={(t0 - SAMPLE_MARGIN).isoformat()}", f"date<={(t_end + SAMPLE_MARGIN).isoformat()}"]
 
     laps = oc.frame("laps", session_key=k)
     if laps.empty:
         raise NoData("OpenF1 has no laps")
+    # Sample window from the laps actually driven, not the timetable: sessions get delayed
+    # (São Paulo 2026 qualifying ran about 1.5 h late).
+    starts = pd.to_datetime(laps["date_start"], format="ISO8601", utc=True)
+    ends = starts + pd.to_timedelta(pd.to_numeric(laps["lap_duration"], errors="coerce").fillna(180), unit="s")
+    lo = min(starts.min(), t0) if starts.notna().any() else t0
+    hi = ends.max() if ends.notna().any() else (pd.Timestamp(s["end_utc"]) if s.get("end_utc") else t0 + timedelta(hours=3))
+    win = [f"date>={(lo - SAMPLE_MARGIN).isoformat()}", f"date<={(hi + SAMPLE_MARGIN).isoformat()}"]
     log.info("%s: %d laps from OpenF1, %d with a duration", s["session_id"], len(laps), int(laps["lap_duration"].notna().sum()))
     drivers = oc.frame("drivers", session_key=k)
     stints = oc.frame("stints", session_key=k)
