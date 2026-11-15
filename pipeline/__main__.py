@@ -26,21 +26,44 @@ SETTLE = timedelta(hours=1)        # OpenF1 data is historical (free) 30 min aft
 NO_DATA_RETRY = timedelta(days=3)  # keep retrying sessions with no data for this long
 
 
-def schedule(oc: OpenF1, season: int) -> list[dict]:
-    """Every championship session of the season from OpenF1.
+def official_rounds(season: int) -> dict:
+    """Round number by race date (UTC date string), from Jolpica, else FastF1's schedule."""
+    try:
+        return {e["event_date"]: e["round"] for e in jolpica.events(season)}
+    except Exception as e:
+        log.warning("Jolpica calendar failed (%s); using FastF1 schedule for round numbers", e)
+    try:
+        sched = fastf1.get_event_schedule(season, include_testing=False)
+        return {pd.Timestamp(r["EventDate"]).date().isoformat(): int(r["RoundNumber"]) for _, r in sched.iterrows()}
+    except Exception as e:
+        log.warning("FastF1 schedule failed too (%s)", e)
+        return {}
 
-    Round = position of the meeting in date order among meetings that have a Race session
-    (testing has none). Cancelled events are simply absent, as in the official numbering.
+
+def schedule(oc: OpenF1, season: int, rounds_by_date: dict | None = None) -> list[dict]:
+    """Every championship session of the season from OpenF1, numbered with the official rounds.
+
+    A meeting gets the official round whose race date is within one day of its Race session
+    (UTC vs local dates). Meetings with no Race session (testing) or no official match
+    (OpenF1 lists events that are not in the championship calendar) are skipped.
     """
     sessions = oc.frame("sessions", year=season)
     meetings = oc.frame("meetings", year=season)
     if sessions.empty:
         return []
+    if rounds_by_date is None:
+        rounds_by_date = official_rounds(season)
+    official = {pd.Timestamp(d): r for d, r in rounds_by_date.items()}
     sessions = sessions[sessions["session_name"].isin(SESSION_CODES)]
-    race_meetings = (sessions[sessions["session_name"] == "Race"]
-                     .assign(d=lambda x: pd.to_datetime(x["date_start"], format="ISO8601", utc=True))
-                     .sort_values("d")["meeting_key"].drop_duplicates().tolist())
-    rnd = {mk: i + 1 for i, mk in enumerate(race_meetings)}
+    races = sessions[sessions["session_name"] == "Race"].assign(
+        d=lambda x: pd.to_datetime(x["date_start"], format="ISO8601", utc=True).dt.tz_localize(None).dt.normalize())
+    rnd = {}
+    for _, r in races.iterrows():
+        near = [(abs((r["d"] - d).days), n) for d, n in official.items() if abs((r["d"] - d).days) <= 1]
+        if near:
+            rnd[r["meeting_key"]] = min(near)[1]
+        else:
+            log.info("OpenF1 meeting %s (race %s) has no official round, skipped", r["meeting_key"], r["d"].date())
     mt = meetings.set_index("meeting_key") if not meetings.empty else pd.DataFrame()
     out = []
     for _, s in sessions.iterrows():
@@ -62,16 +85,15 @@ def schedule(oc: OpenF1, season: int) -> list[dict]:
 
 
 def sync_calendar(sb, oc: OpenF1, season: int) -> list[dict]:
-    sess = schedule(oc, season)
-    by_round: dict[int, list[dict]] = {}
-    for s in sess:
-        by_round.setdefault(s["round"], []).append(s)
-
     try:
         jol = {e["round"]: e for e in jolpica.events(season)}
     except Exception as e:
         log.warning("Jolpica calendar failed (%s); using OpenF1 names", e)
         jol = {}
+    sess = schedule(oc, season, {e["event_date"]: r for r, e in jol.items()} if jol else None)
+    by_round: dict[int, list[dict]] = {}
+    for s in sess:
+        by_round.setdefault(s["round"], []).append(s)
 
     events = []
     for r, ss in sorted(by_round.items()):

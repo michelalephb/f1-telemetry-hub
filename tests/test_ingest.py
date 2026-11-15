@@ -63,10 +63,11 @@ class FakeOpenF1:
         return self.data.get(key, pd.DataFrame()).copy()
 
 
-def test_schedule_rounds_skip_testing():
-    s = schedule(FakeOpenF1(), 2026)
+def test_schedule_uses_official_rounds():
+    # OpenF1 lists an extra meeting; official calendar has Mexico as 19 and São Paulo as 20 (local race date)
+    s = schedule(FakeOpenF1(), 2026, {"2026-11-01": 19, "2026-11-07": 20})
     ids = [x["session_id"] for x in s]
-    assert ids == ["2026_01_R", "2026_02_Q", "2026_02_R"], ids
+    assert ids == ["2026_19_R", "2026_20_Q", "2026_20_R"], ids
     assert s[-1]["session_key"] == 9 and s[-1]["circuit_key"] == 14
 
 
