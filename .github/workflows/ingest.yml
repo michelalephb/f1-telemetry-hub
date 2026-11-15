@@ -1,0 +1,40 @@
+name: ingest latest
+
+# Every 3 hours: sync calendar and results, then ingest any finished session not yet stored.
+on:
+  schedule:
+    - cron: "23 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      season:
+        description: Season
+        default: "2026"
+      max:
+        description: Max sessions this run
+        default: "6"
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      FASTF1_CACHE: .fastf1_cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: .fastf1_cache
+          key: fastf1-${{ github.run_id }}
+          restore-keys: fastf1-
+      - run: python -m pipeline latest --season "${{ inputs.season || '2026' }}" --max "${{ inputs.max || '6' }}"
