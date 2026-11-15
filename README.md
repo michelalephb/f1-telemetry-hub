@@ -35,7 +35,7 @@ Storage bucket `telemetry` (private), per session `SEASON/ROUND/CODE/`:
 
 * `car_raw.parquet`: speed, rpm, gear, throttle, brake, DRS, untouched
 * `pos_raw.parquet`: X, Y, Z, status, untouched
-* `lap_distance.parquet`: every car sample with its distance from the timing line, per lap
+* `lap_distance.parquet`: distance from the timing line for every car sample, per lap (join to `car_raw` on `driver_number`, `t`)
 
 ## How distance is computed
 

@@ -261,8 +261,12 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
     base = f"{season}/{rnd:02d}/{code}"
     car_path = store.upload_parquet(sb, f"{base}/car_raw.parquet", car)
     pos_path = store.upload_parquet(sb, f"{base}/pos_raw.parquet", pos)
-    dist_cols = ["driver_number", "lap_number", "t", "lap_dist_m", "in_lap", "speed", "throttle", "brake", "gear", "rpm", "drs", "fit_scale"]
-    dist_path = store.upload_parquet(sb, f"{base}/lap_distance.parquet", dist[dist_cols]) if len(dist) else None
+    # Distance only: join back to car_raw on (driver_number, t) for the channels. Keeps storage down.
+    if len(dist):
+        slim = dist[["driver_number", "lap_number", "t", "lap_dist_m", "in_lap"]].astype({"lap_dist_m": "float32", "lap_number": "int16"})
+        dist_path = store.upload_parquet(sb, f"{base}/lap_distance.parquet", slim)
+    else:
+        dist_path = None
 
     store.delete_session_rows(sb, sid)
     store.upsert(sb, "sessions", [{
