@@ -197,12 +197,40 @@ def main(argv=None) -> int:
     codes = {c.strip() for c in a.codes.split(",") if c.strip()}
     todo = [s for s in todo if s["session_code"] in codes]
     log.info("%d session(s) to ingest: %s", len(todo), [s["session_id"] for s in todo])
-    fails = sum(0 if run_one(sb, oc, s, a.cmd) else 1 for s in todo)
+    results = {s["session_id"]: run_one(sb, oc, s, a.cmd) for s in todo}
+    fails = sum(0 if ok else 1 for ok in results.values())
     if a.dry_run:
         for r in sb.db.get("ingest_runs", []):
             print("run", r["session_id"])
         print(report(sb))
+    if a.cmd == "latest" and not a.dry_run:
+        return health(sb, sess, codes, results)
     return 1 if (a.cmd == "round" and fails) else 0
+
+
+def health(sb, sess: list[dict], codes: set[str], results: dict[str, bool]) -> int:
+    """Fail the scheduled job (GitHub then emails the owner) when the site is missing recent data.
+
+    Red when a session failed in this run, or when a session that ended between 3 hours and
+    7 days ago is still not ingested (no_data included: OpenF1 normally has it within an hour).
+    """
+    now = datetime.now(timezone.utc)
+    state = {r["session_id"]: r for r in sb.table("sessions").select("session_id,status,error").execute().data}
+    late = []
+    for s in sess:
+        end = pd.Timestamp(s.get("end_utc") or s["start_utc"])
+        if s["session_code"] in codes and now - timedelta(days=7) < end < now - timedelta(hours=3):
+            st = state.get(s["session_id"], {})
+            if st.get("status") != "ingested":
+                late.append(f"{s['session_id']} ({st.get('status', 'missing')}: {(st.get('error') or '')[:120]})")
+    failed = [sid for sid, ok in results.items() if not ok]
+    for sid in failed:
+        log.error("HEALTH: %s failed in this run", sid)
+    for x in late:
+        log.error("HEALTH: recent session not on the site: %s", x)
+    if not failed and not late:
+        log.info("HEALTH: every session from the last 7 days is on the site")
+    return 1 if failed or late else 0
 
 
 if __name__ == "__main__":

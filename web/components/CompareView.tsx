@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import type { CornerMetric } from '@/lib/api'
 import { TYRE } from '@/lib/format'
 import { bisect, interp, type LapTrace } from '@/lib/telemetry'
@@ -13,7 +13,7 @@ export type Series = {
 type CornerPt = { corner: string; apex_m: number; x: number | null; y: number | null }
 type Opt = { num: string; code: string; laps: { n: number; t: string }[] }
 
-const W = 960, PL = 52, PR = 12
+const W = 960, PL = 58, PR = 14
 const WIN_BEFORE = 250, WIN_AFTER = 150
 
 export default function CompareView({ sid, a, b, delta, corners, options, initialCorner, trackM }: {
@@ -196,54 +196,92 @@ function TrackMap({ a, b, corners, range, hoverD, selected }: {
 
 // ---------------------------------------------------------------- stacked traces
 
-type Panel = { key: string; label: string; h: number; lo: number; hi: number; step?: boolean; get: (s: Series) => number[]; ticks: number[] }
+type Panel = {
+  key: string; title: string; unit: string; h: number; lo: number; hi: number; ticks: number[]
+  fmt?: (v: number) => string
+}
+
+const TITLE_H = 18     // strip above each panel for its title
+const GAP = 10         // space between panels
+const CORNER_H = 34    // corner label strip at the top (two staggered rows)
+
+/** A tick step from the 1-2-5 series giving about `n` ticks. */
+function niceStep(span: number, n = 4): number {
+  const raw = span / Math.max(1, n)
+  const p = 10 ** Math.floor(Math.log10(raw || 1))
+  const m = raw / p
+  return (m >= 5 ? 5 : m >= 2 ? 2 : 1) * p * (m > 5 ? 2 : 1)
+}
+function niceTicks(lo: number, hi: number, n = 4): number[] {
+  const st = niceStep(hi - lo, n), out: number[] = []
+  for (let v = Math.ceil(lo / st) * st; v <= hi + 1e-9; v += st) out.push(Math.round(v / st) * st)
+  return out
+}
 
 function Traces({ a, b, delta, corners, range, hoverD, setHoverD }: {
   a: Series; b: Series; delta: number[]; corners: CornerPt[]; range: [number, number]; hoverD: number | null; setHoverD: (d: number | null) => void
 }) {
   const ref = useRef<SVGSVGElement>(null)
+  const uid = useId().replace(/:/g, '')
   const [x0, x1] = range
   const X = (d: number) => PL + ((d - x0) / (x1 - x0 || 1)) * (W - PL - PR)
-  const inR = (d: number) => d >= x0 - 30 && d <= x1 + 30
+  const inR = (d: number) => d >= x0 - 20 && d <= x1 + 20
+  const zoomed = x1 - x0 < 2000
 
-  const dMax = Math.max(0.05, ...delta.filter((_, i) => inR(a.trace.dist[i])).map(Math.abs)) * 1.15
+  // ---- scales from what is visible
+  const dv = delta.filter((_, i) => inR(a.trace.dist[i]))
+  const dLo = Math.min(0, ...dv), dHi = Math.max(0, ...dv)
+  const dPad = Math.max(0.02, (dHi - dLo) * 0.12)
   const vis = (s: Series) => s.trace.speed.filter((_, i) => inR(s.trace.dist[i]))
-  const sMin = Math.max(0, Math.min(...vis(a), ...vis(b)) - 15), sMax = Math.max(...vis(a), ...vis(b)) + 10
+  const sAll = [...vis(a), ...vis(b)]
+  const sLo = Math.max(0, Math.min(...sAll) - 10), sHi = Math.max(...sAll) + 10
   const panels: Panel[] = [
-    { key: 'delta', label: `Delta s`, h: 90, lo: -dMax, hi: dMax, get: () => [], ticks: [-dMax / 1.15, 0, dMax / 1.15] },
-    { key: 'speed', label: 'Speed km/h', h: 210, lo: sMin, hi: sMax, get: (s) => s.trace.speed, ticks: niceTicks(sMin, sMax) },
-    { key: 'throttle', label: 'Throttle %', h: 70, lo: 0, hi: 100, get: (s) => s.trace.throttle, ticks: [0, 100] },
-    { key: 'brake', label: 'Brake', h: 44, lo: 0, hi: 1, step: true, get: (s) => s.trace.brake, ticks: [] },
-    { key: 'gear', label: 'Gear', h: 70, lo: 1, hi: 8, step: true, get: (s) => s.trace.gear, ticks: [2, 4, 6, 8] },
+    { key: 'delta', title: `Gap  ·  above 0: ${a.code} ahead, below 0: ${b.code} ahead`, unit: 's', h: 96, lo: dLo - dPad, hi: dHi + dPad,
+      ticks: niceTicks(dLo - dPad, dHi + dPad, 3), fmt: (v) => `${v > 0 ? '+' : ''}${Math.abs(v) < 1 ? v.toFixed(2) : v.toFixed(1)}` },
+    { key: 'speed', title: 'Speed', unit: 'km/h', h: 220, lo: sLo, hi: sHi, ticks: niceTicks(sLo, sHi, 5) },
+    { key: 'throttle', title: 'Throttle', unit: '%', h: 72, lo: -4, hi: 104, ticks: [0, 50, 100] },
+    { key: 'brake', title: 'Brake', unit: '', h: 40, lo: 0, hi: 1, ticks: [] },
+    { key: 'gear', title: 'Gear', unit: '', h: 80, lo: 0.5, hi: 8.5, ticks: [2, 4, 6, 8] },
   ]
-  const GAP = 14
   const tops: number[] = []
-  let acc = 0
-  for (const p of panels) { tops.push(acc); acc += p.h + GAP }
-  const H = acc + 20
+  let acc = CORNER_H
+  for (const p of panels) { tops.push(acc + TITLE_H); acc += TITLE_H + p.h + GAP }
+  const H = acc + 22 // distance axis
+  const Yf = (p: Panel, top: number) => (v: number) => top + (1 - (v - p.lo) / (p.hi - p.lo || 1)) * p.h
 
-  const line = (s: Series, p: Panel, top: number) => {
-    const ys = p.get(s), ds = s.trace.dist
-    const Y = (v: number) => top + 4 + (1 - (v - p.lo) / (p.hi - p.lo || 1)) * (p.h - 8)
+  const path = (s: Series, ys: number[], p: Panel, top: number, step = false) => {
+    const Y = Yf(p, top), ds = s.trace.dist
     let d = ''
     for (let i = 0; i < ds.length; i++) {
       if (!inR(ds[i])) continue
       const x = X(ds[i]).toFixed(1), y = Y(ys[i]).toFixed(1)
-      if (!d) d = `M${x} ${y}`
-      else if (p.step) d += ` H${x} V${y}`
-      else d += ` L${x} ${y}`
+      d += !d ? `M${x} ${y}` : step ? ` H${x} V${y}` : ` L${x} ${y}`
     }
-    return <path d={d} fill="none" stroke={s.color} strokeWidth={p.key === 'speed' ? 2.2 : 1.8} strokeLinejoin="round" />
+    return d
   }
-  const deltaPath = (top: number, p: Panel) => {
-    const Y = (v: number) => top + 4 + (1 - (v - p.lo) / (p.hi - p.lo)) * (p.h - 8)
-    let d = ''
-    a.trace.dist.forEach((dd, i) => {
-      if (!inR(dd)) return
-      d += `${d ? ' L' : 'M'}${X(dd).toFixed(1)} ${Y(delta[i]).toFixed(1)}`
-    })
-    return <path d={d} fill="none" stroke="#E8ECF2" strokeWidth="2" />
+
+  // Corner labels: one strip at the top, staggered onto a second row when two would overlap.
+  const shown = corners.filter((c) => c.apex_m >= x0 && c.apex_m <= x1)
+  const labelRow: number[] = []
+  const lastX = [-1e9, -1e9]
+  for (const c of shown) {
+    const x = X(c.apex_m)
+    const row = x - lastX[0] >= 34 ? 0 : x - lastX[1] >= 34 ? 1 : 0
+    lastX[row] = x
+    labelRow.push(row)
   }
+
+  // Delta panel geometry
+  const pD = panels[0], topD = tops[0], YD = Yf(pD, topD)
+  let deltaLine = ''
+  const inPts: [number, number][] = []
+  a.trace.dist.forEach((dd, i) => {
+    if (!inR(dd)) return
+    inPts.push([X(dd), YD(delta[i])])
+  })
+  deltaLine = inPts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ')
+  const zeroY = YD(0)
+  const area = inPts.length ? `${deltaLine} L${inPts[inPts.length - 1][0].toFixed(1)} ${zeroY.toFixed(1)} L${inPts[0][0].toFixed(1)} ${zeroY.toFixed(1)} Z` : ''
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = ref.current?.getBoundingClientRect()
@@ -254,58 +292,116 @@ function Traces({ a, b, delta, corners, range, hoverD, setHoverD }: {
   }
   const read = (s: Series, arr: number[]) => (hoverD == null || !s.trace.dist.length ? null : arr[Math.max(0, bisect(s.trace.dist, hoverD))])
   const dAt = hoverD == null || !a.trace.dist.length ? null : interp(hoverD, a.trace.dist, delta)
+  // Distance axis: metres from the line, or metres to the apex when zoomed on a corner
+  const apex = x0 + WIN_BEFORE
+  const xTicks = zoomed ? niceTicks(x0 - apex, x1 - apex, 8).map((v) => ({ at: apex + v, label: v > 0 ? `+${v}` : `${v}` }))
+    : niceTicks(Math.max(0, x0), x1, 8).map((v) => ({ at: v, label: v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${v}` }))
 
   return (
     <div>
-      <div className="num mb-2 flex min-h-6 flex-wrap gap-x-4 text-sm">
+      {/* legend and live readout */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+        {[a, b].map((s) => (
+          <span key={s.num} className="flex items-center gap-2">
+            <span className="inline-block h-[3px] w-5 rounded" style={{ background: s.color }} />
+            <span className="font-semibold">{s.code}</span>
+            <span className="num text-mute">L{s.lap} · {s.lapTime}</span>
+          </span>
+        ))}
+      </div>
+      <div className="num mb-1 flex min-h-6 flex-wrap gap-x-4 text-sm">
         {hoverD == null ? <span className="text-mute">Move across the charts to read values and see both cars on the map</span> : (
           <>
             <span className="text-mute">{hoverD.toFixed(0)} m</span>
             {[a, b].map((s) => (
               <span key={s.num} style={{ color: s.color }}>
-                {s.code} {read(s, s.trace.speed)?.toFixed(0)} km/h · {read(s, s.trace.throttle)?.toFixed(0)}% · G{read(s, s.trace.gear)}{read(s, s.trace.brake) ? ' · BRAKE' : ''}
+                {s.code} {read(s, s.trace.speed)?.toFixed(0)} km/h · {read(s, s.trace.throttle)?.toFixed(0)}% · G{read(s, s.trace.gear)}{read(s, s.trace.brake) ? ' · brake' : ''}
               </span>
             ))}
-            {dAt != null && <span>Δ {dAt >= 0 ? '+' : ''}{dAt.toFixed(3)} s</span>}
+            {dAt != null && <span>gap {dAt >= 0 ? `${a.code} +` : `${b.code} +`}{Math.abs(dAt).toFixed(3)} s</span>}
           </>
         )}
       </div>
+
       <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="h-auto w-full touch-none select-none" onPointerMove={onMove} onPointerDown={onMove}
-        onPointerLeave={() => setHoverD(null)} role="img" aria-label="Delta, speed, throttle, brake and gear against distance">
+        onPointerLeave={() => setHoverD(null)} role="img" aria-label="Gap, speed, throttle, brake and gear against distance">
+
+        {/* corner labels and faint apex guides */}
+        {shown.map((c, i) => (
+          <g key={c.corner}>
+            <line x1={X(c.apex_m)} x2={X(c.apex_m)} y1={CORNER_H - 4} y2={H - 22} stroke="#FFFFFF" strokeOpacity="0.06" />
+            <text x={X(c.apex_m)} y={labelRow[i] ? 26 : 12} fill="#93A0B4" fontSize="11" textAnchor="middle" fontFamily="JetBrains Mono">T{c.corner}</text>
+          </g>
+        ))}
+
         {panels.map((p, k) => {
-          const top = tops[k]
-          const Y = (v: number) => top + 4 + (1 - (v - p.lo) / (p.hi - p.lo || 1)) * (p.h - 8)
+          const top = tops[k], Y = Yf(p, top)
           return (
             <g key={p.key}>
-              <rect x={PL} y={top} width={W - PL - PR} height={p.h} fill="#0F131B" />
-              <text x={PL + 6} y={top + 13} fill="#93A0B4" fontSize="11" fontFamily="Inter">{p.label}</text>
+              <text x={PL} y={top - 5} fill="#C8D0DC" fontSize="11.5" fontWeight="600" fontFamily="Inter">
+                {p.title}{p.unit && <tspan fill="#93A0B4" fontWeight="400">{`  ${p.unit}`}</tspan>}
+              </text>
+              <rect x={PL} y={top} width={W - PL - PR} height={p.h} fill="#0F131B" rx="3" />
               {p.ticks.map((v) => (
                 <g key={v}>
-                  <line x1={PL} x2={W - PR} y1={Y(v)} y2={Y(v)} stroke="#232D3F" />
-                  <text x={PL - 6} y={Y(v) + 4} fill="#93A0B4" fontSize="10" textAnchor="end" fontFamily="JetBrains Mono">
-                    {p.key === 'delta' ? `${v > 0 ? '+' : ''}${v.toFixed(2)}` : v.toFixed(0)}
-                  </text>
+                  <line x1={PL} x2={W - PR} y1={Y(v)} y2={Y(v)} stroke={p.key === 'delta' && v === 0 ? '#3A4558' : '#1C2533'} />
+                  <text x={PL - 8} y={Y(v) + 3.5} fill="#93A0B4" fontSize="10" textAnchor="end" fontFamily="JetBrains Mono">{p.fmt ? p.fmt(v) : v}</text>
                 </g>
               ))}
-              {corners.filter((c) => c.apex_m >= x0 && c.apex_m <= x1).map((c) => (
-                <line key={c.corner} x1={X(c.apex_m)} x2={X(c.apex_m)} y1={top} y2={top + p.h} stroke="#2A3445" strokeDasharray="3 4" />
+
+              {p.key === 'delta' && (
+                <>
+                  <clipPath id={`above${uid}`}><rect x={PL} y={top} width={W - PL - PR} height={Math.max(0, zeroY - top)} /></clipPath>
+                  <clipPath id={`below${uid}`}><rect x={PL} y={zeroY} width={W - PL - PR} height={Math.max(0, top + p.h - zeroY)} /></clipPath>
+                  <path d={area} fill={a.color} fillOpacity="0.22" clipPath={`url(#above${uid})`} />
+                  <path d={area} fill={b.color} fillOpacity="0.22" clipPath={`url(#below${uid})`} />
+                  <line x1={PL} x2={W - PR} y1={zeroY} y2={zeroY} stroke="#3A4558" />
+                  <path d={deltaLine} fill="none" stroke="#E8ECF2" strokeWidth="1.8" strokeLinejoin="round" />
+                </>
+              )}
+              {p.key === 'speed' && [b, a].map((s) => (
+                <path key={s.num} d={path(s, s.trace.speed, p, top)} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
               ))}
-              {p.key === 'delta' ? deltaPath(top, p) : <>{line(b, p, top)}{line(a, p, top)}</>}
+              {p.key === 'throttle' && [b, a].map((s) => (
+                <path key={s.num} d={path(s, s.trace.throttle, p, top)} fill="none" stroke={s.color} strokeWidth="1.6" strokeLinejoin="round" />
+              ))}
+              {p.key === 'gear' && [b, a].map((s) => (
+                <path key={s.num} d={path(s, s.trace.gear, p, top, true)} fill="none" stroke={s.color} strokeWidth="1.6" strokeLinejoin="round"
+                  strokeOpacity={s === b ? 0.85 : 1} />
+              ))}
+              {p.key === 'brake' && [a, b].map((s, lane) => {
+                // two lanes of solid bars: A on top, B below
+                const laneH = p.h / 2 - 4, y = top + 3 + lane * (p.h / 2)
+                const ds = s.trace.dist, br = s.trace.brake
+                const bars: [number, number][] = []
+                let start: number | null = null
+                for (let i = 0; i < ds.length; i++) {
+                  if (!inR(ds[i])) continue
+                  if (br[i] && start == null) start = ds[i]
+                  if (!br[i] && start != null) { bars.push([start, ds[i]]); start = null }
+                }
+                if (start != null) bars.push([start, ds[ds.length - 1]])
+                return (
+                  <g key={s.num}>
+                    <text x={PL - 8} y={y + laneH / 2 + 3.5} fill={s.color} fontSize="10" textAnchor="end" fontFamily="JetBrains Mono">{s.code}</text>
+                    {bars.map(([u, v], j) => (
+                      <rect key={j} x={X(u)} y={y} width={Math.max(1.5, X(v) - X(u))} height={laneH} rx="1.5" fill={s.color} fillOpacity="0.9" />
+                    ))}
+                  </g>
+                )
+              })}
             </g>
           )
         })}
-        {corners.filter((c) => c.apex_m >= x0 && c.apex_m <= x1).map((c) => (
-          <text key={c.corner} x={X(c.apex_m)} y={H - 4} fill="#93A0B4" fontSize="11" textAnchor="middle" fontFamily="JetBrains Mono">T{c.corner}</text>
+
+        {/* distance axis */}
+        {xTicks.map((t) => (
+          <text key={t.at} x={X(t.at)} y={H - 6} fill="#93A0B4" fontSize="10" textAnchor="middle" fontFamily="JetBrains Mono">{t.label}</text>
         ))}
-        {hoverD != null && <line x1={X(hoverD)} x2={X(hoverD)} y1={0} y2={H - 18} stroke="#00E5FF" strokeWidth="1" />}
+        <text x={W - PR} y={H - 6} fill="#93A0B4" fontSize="10" textAnchor="end" fontFamily="Inter">{zoomed ? 'm to apex' : 'm'}</text>
+
+        {hoverD != null && <line x1={X(hoverD)} x2={X(hoverD)} y1={CORNER_H} y2={H - 20} stroke="#00E5FF" strokeWidth="1" />}
       </svg>
     </div>
   )
-}
-
-function niceTicks(lo: number, hi: number): number[] {
-  const span = hi - lo, step = span > 200 ? 50 : span > 80 ? 25 : 10
-  const out = []
-  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(v)
-  return out
 }

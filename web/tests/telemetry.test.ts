@@ -13,7 +13,7 @@ test('bisect and interp', () => {
 const lapAt = (v: number, lap: number, L: number, offset = 0): Sample[] =>
   Array.from({ length: Math.ceil((L + 80) / (v * 0.24)) }, (_, i) => {
     const d = -40 + offset + i * v * 0.24
-    return { lap_number: lap, t: 100 + (d + 40) / v, lap_dist_m: d, in_lap: d >= 0 && d < L, speed: v * 3.6, throttle: 100, brake: 0, gear: 7, drs: 0, x: d, y: 0 }
+    return { lap_number: lap, t: 100 + (d + 40) / v, lap_dist_m: d, in_lap: d >= 0 && d < L, speed: v * 3.6, throttle: 100, brake: 0, gear: 7, drs: 0, x: d, y: 0, rpm: 10000 + i }
   })
 
 test('lapTrace: clock reads zero at the line, other laps excluded', () => {
@@ -30,4 +30,12 @@ test('delta at the line equals the lap time gap', () => {
   assert.ok(Math.abs(deltaAt(a, b, 1000) - (1000 / 40 - 1000 / 50)) < 1e-6)
   const d = deltaTime(a, b)
   assert.ok(d[d.length - 1] > 0)
+})
+
+test('lapTrace drops repeated (frozen) samples but keeps genuine constant speed at the end of a run', () => {
+  const base = lapAt(50, 1, 1000)
+  // samples 20 to 24 repeat sample 19 exactly (only time and distance move on)
+  const rows = base.map((r, i) => (i >= 20 && i <= 24 ? { ...base[19], t: r.t, lap_dist_m: r.lap_dist_m } : r))
+  const tr = lapTrace(rows, 1, 1000)
+  assert.equal(tr.dist.length, rows.length - 5)
 })

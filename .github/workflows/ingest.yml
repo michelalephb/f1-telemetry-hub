@@ -1,14 +1,16 @@
 name: ingest latest
 
-# Every 3 hours: sync calendar and results, then ingest any finished session not yet stored.
+# Hourly: sync calendar and results, ingest any finished session not yet on the site,
+# then fail (GitHub emails the repo owner) if a session from the last 7 days is missing.
+# GitHub skips or delays scheduled runs under load, so hourly gives many chances per session.
 on:
   schedule:
-    - cron: "23 */3 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       season:
-        description: Season
-        default: "2026"
+        description: Season (empty = current year)
+        default: ""
       max:
         description: Max sessions this run
         default: "6"
@@ -19,6 +21,10 @@ on:
 concurrency:
   group: ingest
   cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # keep this scheduled workflow enabled (see last step)
 
 jobs:
   latest:
@@ -40,4 +46,14 @@ jobs:
           path: .fastf1_cache
           key: fastf1-${{ github.run_id }}
           restore-keys: fastf1-
-      - run: python -m pipeline latest --season "${{ inputs.season || '2026' }}" --max "${{ inputs.max || '6' }}" --codes "${{ inputs.codes || 'R,Q,S,SQ' }}"
+      - name: Ingest and check the site is current
+        run: |
+          SEASON="${{ inputs.season }}"; SEASON="${SEASON:-$(date -u +%Y)}"
+          python -m pipeline latest --season "$SEASON" --max "${{ inputs.max || '6' }}" --codes "${{ inputs.codes || 'R,Q,S,SQ' }}"
+      - name: Keep the schedule alive
+        # GitHub disables scheduled workflows in public repos after 60 days without repository
+        # activity. Re-enabling through the API is the usual way to keep it running.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/ingest.yml/enable" || true
