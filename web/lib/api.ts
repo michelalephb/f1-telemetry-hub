@@ -38,6 +38,12 @@ async function all<T>(q: PromiseLike<{ data: unknown; error: { message: string }
   return (data as T[] | null) ?? []
 }
 
+/** Newest season with at least one analysed session (rolls over to the next year on its own). */
+export async function getLatestSeason(): Promise<number> {
+  const rows = await all<{ season: number }>(sb.from('sessions').select('season').eq('status', 'ingested').order('season', { ascending: false }).limit(1))
+  return rows[0]?.season ?? new Date().getUTCFullYear()
+}
+
 export const getEvents = (season: number) => all<Event>(sb.from('events').select('*').eq('season', season).order('round'))
 export const getSessions = (season: number) => all<Session>(sb.from('sessions').select('*').eq('season', season).order('start_utc'))
 export const getDrivers = (sid: string) => all<Driver>(sb.from('drivers').select('*').eq('session_id', sid))
