@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bisect, buildLapTrace, deltaTime, interp } from '../lib/telemetry.ts'
+import { bisect, deltaAt, deltaTime, interp, lapTrace, type Sample } from '../lib/telemetry.ts'
 
 test('bisect and interp', () => {
   const xs = [0, 10, 20, 30]
@@ -10,23 +10,24 @@ test('bisect and interp', () => {
   assert.equal(interp(15, xs, [0, 100, 200, 300]), 150)
 })
 
-test('buildLapTrace joins car, distance and position by time', () => {
-  const car = [0, 0.24, 0.48, 0.72].map((t, i) => ({ driver_number: '1', t, speed: 100 + i, throttle: 100, brake: i === 2 ? 100 : 0, gear: 5, rpm: 10000, drs: 0 }))
-  const dist = car.map((c, i) => ({ driver_number: '1', lap_number: 3, t: c.t, lap_dist_m: i * 7, in_lap: i > 0 }))
-  const pos = [{ driver_number: '1', t: 0, x: 0, y: 0 }, { driver_number: '1', t: 1, x: 100, y: -100 }]
-  const tr = buildLapTrace(dist, car, pos, 0.24)
-  assert.deepEqual(tr.dist, [7, 14, 21])
-  assert.deepEqual(tr.brake, [0, 1, 0])
-  assert.ok(Math.abs(tr.time[0]) < 1e-9)
-  assert.ok(Math.abs(tr.x[1] - 48) < 1e-6)
+const lapAt = (v: number, lap: number, L: number, offset = 0): Sample[] =>
+  Array.from({ length: Math.ceil((L + 80) / (v * 0.24)) }, (_, i) => {
+    const d = -40 + offset + i * v * 0.24
+    return { lap_number: lap, t: 100 + (d + 40) / v, lap_dist_m: d, in_lap: d >= 0 && d < L, speed: v * 3.6, throttle: 100, brake: 0, gear: 7, drs: 0, x: d, y: 0 }
+  })
+
+test('lapTrace: clock reads zero at the line, other laps excluded', () => {
+  const rows = [...lapAt(50, 3, 1000, 7), ...lapAt(40, 4, 1000)]
+  const tr = lapTrace(rows, 3, 1000)
+  assert.ok(tr.dist[0] < 0 && tr.dist[tr.dist.length - 1] > 1000)
+  const zero = tr.time[bisect(tr.dist, 0)] - (tr.dist[bisect(tr.dist, 0)]) / 50
+  assert.ok(Math.abs(zero) < 1e-9, String(zero))
+  assert.ok(tr.speed.every((s) => s === 180))
 })
 
-test('deltaTime is positive when B is slower', () => {
-  const mk = (v: number) => {
-    const dist = Array.from({ length: 50 }, (_, i) => i * 10)
-    return { dist, time: dist.map((d) => d / v), speed: [], throttle: [], brake: [], gear: [], drs: [], x: [], y: [] }
-  }
-  const d = deltaTime(mk(50), mk(40))
-  assert.ok(d[49] > 0)
-  assert.ok(Math.abs(d[49] - (490 / 40 - 490 / 50)) < 1e-6)
+test('delta at the line equals the lap time gap', () => {
+  const a = lapTrace(lapAt(50, 1, 1000, 3), 1, 1000), b = lapTrace(lapAt(40, 1, 1000, 11), 1, 1000)
+  assert.ok(Math.abs(deltaAt(a, b, 1000) - (1000 / 40 - 1000 / 50)) < 1e-6)
+  const d = deltaTime(a, b)
+  assert.ok(d[d.length - 1] > 0)
 })

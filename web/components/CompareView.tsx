@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useMemo, useRef, useState } from 'react'
-import type { CornerMetric } from '@/lib/db'
+import type { CornerMetric } from '@/lib/api'
 import { TYRE } from '@/lib/format'
 import { bisect, interp, type LapTrace } from '@/lib/telemetry'
 
@@ -26,11 +26,11 @@ export default function CompareView({ sid, a, b, delta, corners, options, initia
   const range: [number, number] = sel ? [sel.apex_m - WIN_BEFORE, sel.apex_m + WIN_AFTER] : [0, trackM]
 
   const go = (p: Record<string, string | number>) => {
-    const q = new URLSearchParams({ a: a.num, b: b.num, la: String(a.lap), lb: String(b.lap), ...(corner ? { c: corner } : {}) })
+    const q = new URLSearchParams({ id: sid, a: a.num, b: b.num, la: String(a.lap), lb: String(b.lap), ...(corner ? { c: corner } : {}) })
     for (const [k, v] of Object.entries(p)) q.set(k, String(v))
     if ('a' in p) q.delete('la')
     if ('b' in p) q.delete('lb')
-    router.push(`/s/${sid}/compare?${q.toString()}`)
+    router.push(`/compare/?${q.toString()}`)
   }
   const pickCorner = (c: string | null) => {
     setCorner(c)

@@ -264,7 +264,10 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
     # Public per driver traces for the website: every car sample with lap, distance and map position.
     trace_prefix = None
     if len(dist):
-        for drv, d in dist.groupby("driver_number"):
+        # Keep each lap from 60 m before the line to 60 m after the next crossing: enough for the
+        # site to line laps up at the line, without the 12 s margins used for corner windows.
+        near = dist[(dist["lap_dist_m"] >= -60) & (dist["lap_dist_m"] <= line.length + 60)]
+        for drv, d in near.groupby("driver_number"):
             p = pos[pos["driver_number"] == drv].sort_values("t")
             tr = pd.DataFrame({
                 "lap_number": d["lap_number"].astype("int16"),

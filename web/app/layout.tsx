@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
             <Link href="/" aria-label="F1 Telemetry Hub home" className="flex min-h-11 items-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.png" alt="F1 Telemetry Hub" className="h-6 w-auto" />
+              <img src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/logo.png`} alt="F1 Telemetry Hub" className="h-6 w-auto" />
             </Link>
             <span className="ml-auto rounded border border-line px-2 py-1 font-mono text-xs text-mute">TEST BUILD · data: OpenF1</span>
           </div>

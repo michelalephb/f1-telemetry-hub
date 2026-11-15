@@ -1,34 +1,25 @@
-# F1 Telemetry Hub web app (test build)
+# F1 Telemetry Hub website
 
-Next.js 15 (App Router, TypeScript, Tailwind). Reads the data the pipeline writes to Supabase.
+Static site (Next.js 15 export, TypeScript, Tailwind) published on GitHub Pages by `.github/workflows/pages.yml`.
+All data loads live in the browser from Supabase, so new sessions appear without a rebuild.
 
-| Route | What |
+| Page | What |
 |---|---|
 | `/` | Season: every round and its analysed sessions |
-| `/s/[sessionId]` | Fastest laps (sectors, tyres, theoretical best), pace and tyre degradation chart |
-| `/s/[sessionId]/compare?a=&b=&la=&lb=&c=` | Two driver telemetry: delta, speed, throttle, brake, gear against distance, track map with live cursor, corner zoom with brake point, minimum, entry and exit speed |
+| `/session/?id=2026_20_R` | Fastest laps (sectors, tyres, theoretical best), pace and tyre degradation |
+| `/compare/?id=2026_20_R&a=12&b=6&la=&lb=&c=4` | Two driver telemetry: delta, speed, throttle, brake, gear against distance; track map with live cursor; corner zoom |
 
-Data access is server side only:
+Data access, all public by design:
 
-* tables with the publishable key (RLS allows public read)
-* Parquet in the private `telemetry` bucket with the secret key, cached per server instance
+* tables through the publishable key (RLS: read only)
+* one trace file per driver per session from the public `web` bucket (`SEASON/ROUND/CODE/trace_<driver>.parquet`), parsed in the browser
+* raw samples stay in the private `telemetry` bucket and never reach the site
 
-## Environment
-
-| Variable | Value |
-|---|---|
-| `SUPABASE_URL` | `https://rcfguuehiojwjzodtrrj.supabase.co` |
-| `SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` (Supabase › Project Settings › API Keys) |
-| `SUPABASE_SECRET_KEY` | `sb_secret_...` (same page). Never prefix with `NEXT_PUBLIC_`. |
-
-## Run
+Custom domain later: add it in repo Settings › Pages, then set `NEXT_PUBLIC_BASE_PATH` to an empty string in `pages.yml`.
 
 ```bash
 npm ci
-cp .env.example .env.local   # fill the keys
-npm run dev
-npm test                     # unit tests
-node --experimental-strip-types --conditions=react-server scripts/verify.ts 2026_20_R   # real data check
+npm run dev                                          # http://localhost:3000
+npm test                                             # unit tests
+node --experimental-strip-types scripts/verify.ts 2026_20_R   # real data check, no secrets needed
 ```
-
-Deploy on Vercel with Root Directory `web`.

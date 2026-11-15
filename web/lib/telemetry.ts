@@ -1,8 +1,10 @@
 // Pure telemetry helpers, no I/O. Shared by the server pages and the unit tests.
 
-export type CarRow = { driver_number: string; t: number; speed: number; throttle: number; brake: number; gear: number; rpm: number; drs: number }
-export type DistRow = { driver_number: string; lap_number: number; t: number; lap_dist_m: number; in_lap: boolean }
-export type PosRow = { driver_number: string; t: number; x: number; y: number }
+/** One row of a per driver trace file (pipeline: trace_<driver>.parquet). */
+export type Sample = {
+  lap_number: number; t: number; lap_dist_m: number; in_lap: boolean
+  speed: number; throttle: number; brake: number; gear: number; drs: number; x: number; y: number
+}
 
 /** One lap of one driver: every raw car sample with its distance, lap time and map position. */
 export type LapTrace = {
@@ -42,39 +44,28 @@ export function interp(x: number, xs: ArrayLike<number>, ys: ArrayLike<number>):
   return ys[i] + f * (ys[i + 1] - ys[i])
 }
 
-const key = (t: number) => t.toFixed(3)
-
 /**
- * Join one lap's distance rows to the raw car samples (same timestamps) and to position
- * (interpolated at each car sample time). Only samples inside the lap are kept.
+ * One lap from a driver's samples: from just before the timing line to just after the next crossing,
+ * with the lap clock at zero at distance 0 (interpolated), so two laps line up exactly at the line.
  */
-export function buildLapTrace(dist: DistRow[], car: CarRow[], pos: PosRow[], lapStartS: number, trackM?: number): LapTrace {
-  const carByT = new Map(car.map((c) => [key(c.t), c]))
-  // With a track length, keep samples from just before the line to just after the next crossing,
-  // so the trace (and the delta) reaches both ends of the lap.
-  const keep = trackM ? (d: DistRow) => d.lap_dist_m >= -40 && d.lap_dist_m <= trackM + 40 : (d: DistRow) => d.in_lap
-  const rows = dist.filter(keep).sort((a, b) => a.t - b.t)
-  const posSorted = [...pos].sort((a, b) => a.t - b.t)
-  const pt = posSorted.map((p) => p.t), px = posSorted.map((p) => p.x), py = posSorted.map((p) => p.y)
+export function lapTrace(rows: Sample[], lap: number, trackM: number): LapTrace {
+  const sel = rows.filter((r) => r.lap_number === lap && r.lap_dist_m >= -40 && r.lap_dist_m <= trackM + 40).sort((a, b) => a.t - b.t)
   const out: LapTrace = { dist: [], time: [], speed: [], throttle: [], brake: [], gear: [], drs: [], x: [], y: [] }
   let lastD = -Infinity
-  for (const d of rows) {
-    const c = carByT.get(key(d.t))
-    if (!c) continue
-    const dd = Math.max(d.lap_dist_m, lastD) // distance never runs backwards
-    lastD = dd
-    out.dist.push(dd)
-    out.time.push(d.t - lapStartS)
-    out.speed.push(c.speed)
-    out.throttle.push(c.throttle)
-    out.brake.push(c.brake > 0 ? 1 : 0)
-    out.gear.push(c.gear)
-    out.drs.push(c.drs)
-    out.x.push(interp(d.t, pt, px))
-    out.y.push(interp(d.t, pt, py))
+  for (const r of sel) {
+    const d = Math.max(r.lap_dist_m, lastD) // distance never runs backwards
+    lastD = d
+    out.dist.push(d)
+    out.time.push(r.t)
+    out.speed.push(r.speed)
+    out.throttle.push(r.throttle)
+    out.brake.push(r.brake > 0 ? 1 : 0)
+    out.gear.push(r.gear)
+    out.drs.push(r.drs)
+    out.x.push(r.x)
+    out.y.push(r.y)
   }
-  // Lap clock = 0 at the timing line (distance 0), not at the first sample.
-  if (trackM && out.dist.length > 1) {
+  if (out.dist.length > 1) {
     const t0 = extrap(0, out.dist, out.time)
     for (let i = 0; i < out.time.length; i++) out.time[i] -= t0
   }
