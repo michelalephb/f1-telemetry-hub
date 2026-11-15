@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getEvents, getLatestSeason, getSessions } from '@/lib/api'
 import { SESSION_LABEL } from '@/lib/format'
@@ -37,7 +38,7 @@ export default function Home() {
                 <span className="font-mono text-xs text-mute">R{String(e.round).padStart(2, '0')} · {e.event_date}</span>
                 <span className="text-xs text-mute">{e.location ?? e.country}</span>
               </div>
-              <h2 className="mt-1 font-head text-lg font-bold">{e.event_name}</h2>
+              <h2 className="mt-1 flex items-center gap-2 font-head text-lg font-bold"><Flag country={e.country} className="h-5" />{e.event_name}</h2>
               <div className="mt-3 flex flex-wrap gap-2">
                 {ss.map((s) =>
                   s.status === 'ingested' ? (
