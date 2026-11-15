@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import CompareView, { type Series } from '@/components/CompareView'
+import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getCornerMetrics, getCorners, getDrivers, getEvent, getLaps, getSession, getTrace, type Lap } from '@/lib/api'
 import { lapTime, pairColors, SESSION_LABEL, teamColor } from '@/lib/format'
@@ -56,8 +57,10 @@ function Compare() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <Link href={`/session/?id=${sid}`} className="text-xs text-mute hover:text-ink">
-          ← {data ? `${data.event?.event_name ?? ''} ${SESSION_LABEL[data.session.session_code] ?? ''}` : 'Session'}
+        <Link href={`/session/?id=${sid}`} className="flex items-center gap-2 text-xs text-mute hover:text-ink">
+          <span>←</span>
+          {data && <Flag country={data.event?.country} className="h-3.5" />}
+          <span>{data ? `${data.event?.event_name ?? ''} ${SESSION_LABEL[data.session.session_code] ?? ''}` : 'Session'}</span>
         </Link>
         <h1 className="mt-2 font-head text-2xl font-bold sm:text-3xl">Telemetry compare</h1>
       </div>

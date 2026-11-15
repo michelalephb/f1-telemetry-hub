@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
+import Flag from '@/components/Flag'
 import PaceChart from '@/components/PaceChart'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getDrivers, getEvent, getLaps, getSession, type Lap } from '@/lib/api'
@@ -58,7 +59,7 @@ function SessionView() {
           <p className="mt-2 text-xs uppercase tracking-widest text-mute">
             R{String(session.round).padStart(2, '0')} · {event?.location ?? ''}{session.track_length_m ? ` · ${(session.track_length_m / 1000).toFixed(3)} km measured line` : ''}
           </p>
-          <h1 className="mt-1 font-head text-3xl font-bold">{event?.event_name ?? sid}</h1>
+          <h1 className="mt-1 flex items-center gap-3 font-head text-3xl font-bold"><Flag country={event?.country} className="h-7" />{event?.event_name ?? sid}</h1>
           <p className="mt-1 text-lg text-mute">{SESSION_LABEL[session.session_code] ?? session.session_name}</p>
         </div>
         {compareHref && (

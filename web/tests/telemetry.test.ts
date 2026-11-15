@@ -39,3 +39,15 @@ test('lapTrace drops repeated (frozen) samples but keeps genuine constant speed 
   const tr = lapTrace(rows, 1, 1000)
   assert.equal(tr.dist.length, rows.length - 5)
 })
+
+test('every 2026 host country has a flag file', async () => {
+  const { flagIso } = await import('../lib/flags.ts')
+  const fs = await import('node:fs')
+  const hosts = ['Australia', 'China', 'Japan', 'USA', 'Canada', 'Monaco', 'Spain', 'Austria', 'UK', 'Belgium', 'Hungary',
+    'Netherlands', 'Italy', 'Azerbaijan', 'Malaysia', 'Singapore', 'Mexico', 'Brazil', 'Qatar', 'UAE']
+  for (const c of hosts) {
+    const iso = flagIso(c)
+    assert.ok(iso, `no ISO code for ${c}`)
+    assert.ok(fs.existsSync(new URL(`../public/flags/${iso}.svg`, import.meta.url)), `no flag file for ${c}`)
+  }
+})
