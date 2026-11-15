@@ -27,6 +27,11 @@ export type CornerMetric = {
   driver_number: string; lap_number: number; corner: string; brake_point_m: number | null; entry_speed_kph: number | null
   min_speed_kph: number | null; min_speed_at_m: number | null; exit_speed_kph: number | null; window_time_s: number | null
 }
+export type Result = {
+  season: number; round: number; session_code: string; driver_number: string; driver_code: string | null; constructor: string | null
+  grid: number | null; position: number | null; position_text: string | null; points: number | null; status: string | null; laps: number | null
+  q1_ms: number | null; q2_ms: number | null; q3_ms: number | null
+}
 export type TraceRow = {
   lap_number: number; t: number; lap_dist_m: number; in_lap: boolean
   speed: number; throttle: number; brake: number; gear: number; rpm: number; drs: number; x: number; y: number
@@ -56,6 +61,10 @@ export async function getSession(sid: string): Promise<Session | null> {
 export async function getEvent(season: number, round: number): Promise<Event | null> {
   return (await all<Event>(sb.from('events').select('*').eq('season', season).eq('round', round).limit(1)))[0] ?? null
 }
+
+/** Official classification for a session (R, S from race results; Q from qualifying). */
+export const getResults = (season: number, round: number, code: string) =>
+  all<Result>(sb.from('results').select('*').eq('season', season).eq('round', round).eq('session_code', code).order('position'))
 
 export async function getLaps(sid: string): Promise<Lap[]> {
   // A race has ~1500 laps and responses are capped at 1000 rows: page through.

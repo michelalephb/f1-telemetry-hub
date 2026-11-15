@@ -6,7 +6,8 @@ import { Suspense } from 'react'
 import CompareView, { type Series } from '@/components/CompareView'
 import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
-import { getCornerMetrics, getCorners, getDrivers, getEvent, getLaps, getSession, getTrace, type Lap } from '@/lib/api'
+import { getCornerMetrics, getCorners, getDrivers, getEvent, getLaps, getResults, getSession, getTrace, type Lap } from '@/lib/api'
+import { qualiSegments } from '@/lib/segments'
 import { lapTime, pairColors, SESSION_LABEL, teamColor } from '@/lib/format'
 import { deltaTime, lapTrace } from '@/lib/telemetry'
 
@@ -17,10 +18,20 @@ export default function Page() {
 async function load(sid: string, qa: string | null, qb: string | null, qla: string | null, qlb: string | null) {
   const session = await getSession(sid)
   if (!session || session.status !== 'ingested' || !session.trace_prefix) throw new Error(`telemetry for ${sid} is not available yet`)
-  const [event, drivers, laps, corners] = await Promise.all([getEvent(session.season, session.round), getDrivers(sid), getLaps(sid), getCorners(sid)])
+  const [event, drivers, laps, corners, results] = await Promise.all([
+    getEvent(session.season, session.round), getDrivers(sid), getLaps(sid), getCorners(sid), getResults(session.season, session.round, session.session_code),
+  ])
 
-  const clean = laps.filter((l) => l.is_accurate && l.lap_time_ms != null).sort((x, y) => (x.lap_time_ms ?? 0) - (y.lap_time_ms ?? 0))
-  const order = [...new Set(clean.map((l) => l.driver_number))]
+  // Qualifying: only final segment (Q3) laps can be compared, ordered by the official result.
+  const isQ = session.session_code === 'Q' || session.session_code === 'SQ'
+  const seg = qualiSegments(laps, session.session_code)
+  const finalSeg = seg.size ? Math.max(...seg.values()) : 0
+  const clean = laps
+    .filter((l) => l.is_accurate && l.lap_time_ms != null && (!isQ || finalSeg < 1 || seg.get(`${l.driver_number}/${l.lap_number}`) === finalSeg))
+    .sort((x, y) => (x.lap_time_ms ?? 0) - (y.lap_time_ms ?? 0))
+  const withLaps = new Set(clean.map((l) => l.driver_number))
+  const official = results.filter((r) => r.position != null).sort((x, y) => x.position! - y.position!).map((r) => r.driver_number).filter((d) => withLaps.has(d))
+  const order = [...new Set([...official, ...clean.map((l) => l.driver_number)])]
   const a = qa && order.includes(qa) ? qa : order[0]
   const b = qb && order.includes(qb) && qb !== a ? qb : order.find((d) => d !== a)
   if (!a || !b) throw new Error('not enough clean laps to compare')
@@ -42,7 +53,7 @@ async function load(sid: string, qa: string | null, qb: string | null, qla: stri
     laps: clean.filter((l) => l.driver_number === d).sort((x, y) => x.lap_number - y.lap_number).map((l) => ({ n: l.lap_number, t: lapTime(l.lap_time_ms) })),
   }))
   return {
-    session, event, trackM, options,
+    session, event, trackM, options, isQ,
     a: mk(a, lapA, colA, tA), b: mk(b, lapB, colB, tB), delta: deltaTime(tA, tB),
     corners: corners.map((c) => ({ corner: c.corner, apex_m: c.apex_m, x: c.x, y: c.y })),
   }
@@ -62,7 +73,7 @@ function Compare() {
           {data && <Flag country={data.event?.country} className="h-3.5" />}
           <span>{data ? `${data.event?.event_name ?? ''} ${SESSION_LABEL[data.session.session_code] ?? ''}` : 'Session'}</span>
         </Link>
-        <h1 className="mt-2 font-head text-2xl font-bold sm:text-3xl">Telemetry compare</h1>
+        <h1 className="mt-2 font-head text-2xl font-bold sm:text-3xl">{data?.isQ ? `${data.session.session_code === 'SQ' ? 'SQ3' : 'Q3'} telemetry compare` : 'Telemetry compare'}</h1>
       </div>
       {error && <Failed error={error} />}
       {loading && <Loading what="telemetry" />}

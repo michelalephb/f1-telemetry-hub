@@ -1,7 +1,8 @@
 // Real data check: loads a session exactly as the website does (publishable key + public trace
 // files) and asserts known facts. node --experimental-strip-types scripts/verify.ts 2026_20_R
 import assert from 'node:assert/strict'
-import { getCornerMetrics, getCorners, getDrivers, getLaps, getSession, getTrace, SUPABASE_URL } from '../lib/api.ts'
+import { getCornerMetrics, getCorners, getDrivers, getLaps, getResults, getSession, getTrace, SUPABASE_URL } from '../lib/api.ts'
+import { qualiSegments } from '../lib/segments.ts'
 import { deltaAt, extrap, lapTrace } from '../lib/telemetry.ts'
 
 const sid = process.argv[2] ?? '2026_20_R'
@@ -42,4 +43,21 @@ const d = deltaAt(ta, tb, L), expected = (B.lap_time_ms! - A.lap_time_ms!) / 100
 console.log(`delta at line ${d.toFixed(3)} s vs official gap ${expected.toFixed(3)} s`)
 assert.ok(Math.abs(d - expected) < 0.05, 'delta at the line within 50 ms of the official gap')
 assert.equal(metrics.length, 2 * corners.length, 'one metric row per corner per lap')
+
+// Qualifying: our Q3 laps must reproduce the official Q3 times of the top of the order
+if (s.session_code === 'Q') {
+  const res = (await getResults(s.season, s.round, 'Q')).filter((r) => r.q3_ms != null).sort((x, y) => x.position! - y.position!)
+  if (!res.length) {
+    console.log('official classification not in yet; Q3 check skipped')
+  } else {
+    const seg = qualiSegments(laps, 'Q')
+    const q3 = Math.max(...seg.values())
+    for (const r of res.slice(0, 3)) {
+      const mine = laps.filter((l) => l.driver_number === r.driver_number && l.lap_time_ms != null && seg.get(`${l.driver_number}/${l.lap_number}`) === q3)
+      const ours = Math.min(...mine.map((l) => l.lap_time_ms!))
+      console.log(`P${r.position} ${r.driver_code}: official Q3 ${r.q3_ms} ms, our best Q3 lap ${ours} ms`)
+      assert.ok(Math.abs(ours - r.q3_ms!) <= 50, `Q3 time for ${r.driver_code} within 50 ms of official`)
+    }
+  }
+}
 console.log(`OK in ${Date.now() - t0} ms`)
