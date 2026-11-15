@@ -1,0 +1,45 @@
+name: web
+
+on:
+  push:
+    paths: ["web/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["web/**"]
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx next build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_BASE_PATH: /f1-telemetry-hub
+
+  real-data:
+    # Loads São Paulo 2026 exactly as visitors' browsers do (publishable key, public trace files).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: |
+          node --experimental-strip-types scripts/verify.ts 2026_20_R
+          node --experimental-strip-types scripts/verify.ts 2026_20_Q

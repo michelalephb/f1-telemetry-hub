@@ -50,10 +50,13 @@ def delete_session_rows(sb, session_id: str) -> None:
         sb.table(table).delete().eq("session_id", session_id).execute()
 
 
-def upload_parquet(sb, path: str, df: pd.DataFrame) -> str:
+WEB_BUCKET = "web"  # public: per driver traces the website reads directly
+
+
+def upload_parquet(sb, path: str, df: pd.DataFrame, bucket: str = BUCKET) -> str:
     buf = io.BytesIO()
     df.to_parquet(buf, index=False, compression="zstd")
-    sb.storage.from_(BUCKET).upload(
+    sb.storage.from_(bucket).upload(
         path, buf.getvalue(), {"content-type": "application/vnd.apache.parquet", "upsert": "true"}
     )
     return path
