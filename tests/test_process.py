@@ -91,3 +91,18 @@ def test_fusion_and_corner_metrics():
     assert abs(m["min_speed_kph"] - 101) < 6.0, m
     assert abs(m["min_speed_at_m"]) < 10.0, m
     assert m["n_samples"] > 20
+
+
+def test_close_markers_keep_separate_apexes_and_braking():
+    from pipeline.process import refine_apexes
+    d = np.arange(0, 1000, 5.0)
+    # two slow corners 80 m apart (esses) at 400 and 480, braking only for the first
+    sp = 300 - 180 * np.exp(-((d - 400) / 25) ** 2) - 170 * np.exp(-((d - 480) / 25) ** 2)
+    lap = pd.DataFrame({"lap_dist_m": d, "speed": sp, "t": np.cumsum(5 / (sp / 3.6)), "brake": (d > 300) & (d < 390)})
+    c = refine_apexes(pd.DataFrame({"marker_m": [395.0, 470.0]}), lap)
+    a1, a2 = c["apex_m"].tolist()
+    assert abs(a1 - 400) <= 10 and abs(a2 - 480) <= 10, (a1, a2)
+    m1 = corner_metrics(lap, a1, None, a2)
+    m2 = corner_metrics(lap, a2, a1, None)
+    assert m2["brake_point_m"] is None  # the first corner's braking is not credited to the second
+    assert abs(m1["min_speed_kph"] - 120) < 8 and abs(m2["min_speed_kph"] - 130) < 8, (m1, m2)

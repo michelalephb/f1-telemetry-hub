@@ -8,8 +8,11 @@ on:
         description: Season
         default: "2026"
       rounds:
-        description: Optional JSON list of rounds, e.g. [20,21]. Empty = all finished rounds
+        description: Optional JSON list of rounds, e.g. [19,20]. Empty = all finished rounds
         default: ""
+      codes:
+        description: Session codes (add FP1,FP2,FP3 for practice)
+        default: "R,Q,S,SQ"
 
 concurrency:
   group: ingest
@@ -44,7 +47,7 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      max-parallel: 2   # be gentle with the F1 live timing servers
+      max-parallel: 1   # OpenF1 free tier: 30 requests per minute
       matrix:
         round: ${{ fromJSON(needs.calendar.outputs.rounds) }}
     steps:
@@ -59,4 +62,4 @@ jobs:
           path: .fastf1_cache
           key: fastf1-r${{ matrix.round }}-${{ github.run_id }}
           restore-keys: fastf1-r${{ matrix.round }}-
-      - run: python -m pipeline round --season "${{ inputs.season }}" --round "${{ matrix.round }}" --no-sync
+      - run: python -m pipeline round --season "${{ inputs.season }}" --round "${{ matrix.round }}" --no-sync --codes "${{ inputs.codes }}"

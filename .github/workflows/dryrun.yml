@@ -1,0 +1,27 @@
+name: dry run
+
+# Runs the real pipeline on real data without writing anything; prints a quality report.
+on:
+  workflow_dispatch:
+    inputs:
+      season: {description: Season, default: "2026"}
+      round: {description: Round, default: "20"}
+      session: {description: "Session name (Race, Qualifying, ...)", default: "Race"}
+  push:
+    branches-ignore: [main]
+    paths: ["pipeline/**", ".github/workflows/dryrun.yml"]
+
+jobs:
+  dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pipeline round --season "${{ inputs.season || '2026' }}" --round "${{ inputs.round || '20' }}" --session "${{ inputs.session || 'Race' }}" --no-sync --dry-run
+      - if: github.event_name == 'push'
+        run: python -m pipeline round --season 2026 --round 20 --session Qualifying --no-sync --dry-run
