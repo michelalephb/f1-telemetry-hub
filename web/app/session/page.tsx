@@ -8,7 +8,7 @@ import PaceChart from '@/components/PaceChart'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getDrivers, getEvent, getLaps, getResults, getSession, type Driver, type Lap, type Result } from '@/lib/api'
 import { gap, lapTime, secs, SESSION_LABEL, teamColor, TYRE } from '@/lib/format'
-import { qualiSegments, segLabel } from '@/lib/segments'
+import { finalSegmentKeys, segLabel } from '@/lib/segments'
 
 export default function Page() {
   return <Suspense fallback={<Loading what="session" />}><SessionView /></Suspense>
@@ -41,13 +41,10 @@ function SessionView() {
   const code = session.session_code
   const isQ = code === 'Q' || code === 'SQ'
   const drv = new Map(drivers.map((d) => [d.driver_number, d]))
-  const seg = qualiSegments(laps, code)
-  const nSeg = isQ && seg.size ? Math.max(...seg.values()) + 1 : 0
-  const segOf = (l: Lap) => seg.get(`${l.driver_number}/${l.lap_number}`)
+  const finalKeys = finalSegmentKeys(laps, code, results)
 
   // Qualifying: only the final segment (Q3 / SQ3) counts. Other sessions: every clean lap.
-  const finalSeg = nSeg - 1
-  const allClean = laps.filter((l) => l.is_accurate && l.lap_time_ms != null && (!isQ || nSeg < 2 || segOf(l) === finalSeg))
+  const allClean = laps.filter((l) => l.is_accurate && l.lap_time_ms != null && (!finalKeys || finalKeys.has(`${l.driver_number}/${l.lap_number}`)))
   const pool = allClean
   const best = new Map<string, Lap>()
   for (const l of pool) {
@@ -177,7 +174,7 @@ function SessionView() {
             <h2 className="font-head text-lg font-bold">{isQ ? `Best ${q3} lap per driver` : 'Fastest clean lap per driver'}</h2>
             <p className="text-xs text-mute">
               Ranked by lap time. <span className="text-purple">Purple</span> = best sector.
-              {isQ && ` ${q3} is found from the breaks in running.`}
+              {isQ && ` ${q3} starts after the last lap of the drivers knocked out in ${segLabel(code, 1)}.`}
             </p>
           </div>
         </div>
