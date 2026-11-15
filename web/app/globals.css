@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { background: #0B0E14; color-scheme: dark; }
+body { @apply bg-bg text-ink font-body antialiased; }
+.num { font-variant-numeric: tabular-nums; @apply font-mono; }

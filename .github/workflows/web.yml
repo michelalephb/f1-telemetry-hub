@@ -1,0 +1,66 @@
+name: web
+
+on:
+  push:
+    paths: ["web/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["web/**"]
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx next build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          SUPABASE_URL: http://localhost:1
+          SUPABASE_PUBLISHABLE_KEY: build-only
+          SUPABASE_SECRET_KEY: build-only
+
+  real-data:
+    # Runs the app against the real Supabase project and checks São Paulo 2026.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      # Publishable keys are safe to expose; reads are limited by RLS to public data.
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_UBWA-8XZ_tQqXvPiETYwCQ_9jW_R1v8
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Data layer checks
+        run: |
+          node --experimental-strip-types --conditions=react-server scripts/verify.ts 2026_20_R
+          node --experimental-strip-types --conditions=react-server scripts/verify.ts 2026_20_Q
+      - run: npx next build
+      - name: Page checks
+        run: |
+          npx next start -p 3000 & 
+          for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:3000/ && break; sleep 1; done
+          check() { url="$1"; shift; out=$(curl -s -w '\n%{http_code} %{time_total}s' "http://localhost:3000$url"); code=$(echo "$out" | tail -1); echo "$url -> $code"; echo "$code" | grep -q '^200' || exit 1; for w in "$@"; do echo "$out" | grep -q "$w" || { echo "missing: $w"; exit 1; }; done; }
+          check / "Brazilian Grand Prix" "Qualifying"
+          check /s/2026_20_R "Fastest laps" "Theoretical best" "Pace and tyre degradation"
+          check "/s/2026_20_R/compare" "Telemetry compare" "Full lap"
+          check "/s/2026_20_R/compare?c=4" "Brake point" "Window time"
+          check "/s/2026_20_Q/compare" "Telemetry compare"
