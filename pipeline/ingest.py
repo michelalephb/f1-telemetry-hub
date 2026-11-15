@@ -187,7 +187,9 @@ def centre_line(laps: pd.DataFrame, pos: pd.DataFrame) -> CentreLine:
             tracks.append(p[["x", "y", "z"]].to_numpy() / 10.0)
     if not tracks:
         raise NoData(f"no accurate lap to build a centre line ({len(ok)} accurate laps, {len(best)} candidates, "
-                     f"position samples per candidate: {[int(((pos['driver_number'] == r.driver_number) & (pos['t'] >= r.lap_start_s) & (pos['t'] <= r.lap_end_s)).sum()) for r in best.itertuples()][:5]})")
+                     f"position samples per candidate: {[int(((pos['driver_number'] == r.driver_number) & (pos['t'] >= r.lap_start_s) & (pos['t'] <= r.lap_end_s)).sum()) for r in best.itertuples()][:5]}; "
+                     f"pos t {pos['t'].min():.0f}..{pos['t'].max():.0f} s ({len(pos)} rows, drivers {sorted(pos['driver_number'].unique())[:5]}); "
+                     f"lap starts {ok['lap_start_s'].min():.0f}..{ok['lap_start_s'].max():.0f} s, drivers {sorted(ok['driver_number'].unique())[:5]})")
     return CentreLine(build_centre_line(tracks))
 
 
