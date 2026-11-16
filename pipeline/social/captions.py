@@ -5,7 +5,7 @@ import re
 
 import numpy as np
 
-from .story import QualiStory, RaceStory, corner_label
+from .story import QualiStory, RaceStory, corner_label, sector_text
 
 FOOTER = ("Every lap, every corner: f1telemetryhub.com (link in bio)\n"
           "Data: OpenF1. Unofficial fan analysis, not associated with Formula 1.")
@@ -20,16 +20,18 @@ def tags(event: str, *codes: str) -> str:
 
 
 def quali(st: QualiStory, meta: dict, kind: str, rewind: bool = False) -> str:
-    a, b, g = st.a.code, st.b.code, st.best_a
+    a, b, c = st.a.code, st.b.code, st.best_a
     pole = "Sprint pole" if meta["code"] == "SQ" else "pole"
     lead = f"Season rewind, round {meta['round']}. " if rewind else ""
+    secs = ", ".join(f"S{k + 1} {sector_text(g, a, b)}" for k, g in enumerate(st.sector_gaps))
     lines = [f"{lead}{a} takes {pole} at the {meta['event']} by {st.official_gap_s:.3f} s over {b}.",
              "",
-             f"Biggest gain: {corner_label(g.corner)}, worth {g.gain_s:.2f} s "
-             f"({a} {g.apex_a:.0f} vs {b} {g.apex_b:.0f} km/h at the apex)."]
+             f"Sector by sector: {secs}.",
+             f"Biggest apex speed gap: {corner_label(c.corner)}, {a} {c.min_a:.0f} vs {b} {c.min_b:.0f} km/h."]
     if st.best_b:
-        lines.append(f"{b} hit back in {corner_label(st.best_b.corner)} ({abs(st.best_b.gain_s):.2f} s).")
-    lines += ["", "Same clock, same lap. Watch where the gap opens." if kind == "reel" else "Swipe for the full lap trace and the corners that decided it.",
+        d = st.best_b
+        lines.append(f"{b} was quicker through {corner_label(d.corner)} ({d.min_b:.0f} vs {d.min_a:.0f} km/h).")
+    lines += ["", "Same clock, same lap. Watch where the gap opens." if kind == "reel" else "Swipe for the sectors, the speed trace and the corners.",
               "", FOOTER, "", tags(meta["event"], a, b)]
     return clean("\n".join(lines))
 

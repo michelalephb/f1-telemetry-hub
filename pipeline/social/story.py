@@ -16,8 +16,8 @@ GRID_STEP_M = 5.0
 LINE_TOLERANCE_S = 0.05      # computed gap at the line vs official gap (São Paulo Q: 5.5 ms)
 SECTOR_TOLERANCE_S = 0.15    # raw gap at the official sector splits (São Paulo Q: about 0.1 s off mid lap)
 LAP_MATCH_MS = 30            # OpenF1 lap duration vs official Q3 time
-MIN_GAIN_S = 0.010           # smaller corner gains are not worth a slide
-CORNER_BEFORE_M, CORNER_AFTER_M = 250.0, 150.0   # same window as the pipeline's corner metrics
+MIN_SPEED_KPH = 3.0          # smaller apex speed differences are within sampling noise
+APEX_WINDOW_M = 60.0         # minimum speed is taken within this distance of the marked apex
 
 
 class StoryError(Exception):
@@ -41,24 +41,31 @@ class Lap:
 
 
 @dataclass
-class CornerGain:
+class CornerSpeed:
     corner: str
     apex_m: float
-    gain_s: float            # time B lost to A through the window (positive = A faster)
-    apex_a: float            # minimum speed in the window, km/h
-    apex_b: float
+    min_a: float             # lowest speed within APEX_WINDOW_M of the apex, km/h
+    min_b: float
+
+    @property
+    def diff(self) -> float:  # positive = A carried more speed
+        return self.min_a - self.min_b
 
 
 @dataclass
 class QualiStory:
+    """Time claims come only from official timing (lap and sector times). Corner claims are apex
+    speeds, which do not depend on aligning the two laps: at 240 ms sampling, a few metres of
+    alignment error through a slow apex is worth 0.1 to 0.2 s, so per corner time gains are not
+    published."""
     kind: str                # "quali"
     a: Lap                   # pole
     b: Lap                   # P2
     official_gap_s: float
-    grid: np.ndarray         # common distance grid, m
-    delta: np.ndarray        # B time minus A time at each grid point, s
-    best_a: CornerGain       # where pole gained most
-    best_b: CornerGain | None  # where P2 gained most (None if P2 gained nowhere)
+    sector_gaps: list[float]  # per sector, B minus A, s (positive = A faster), official sector times
+    split_m: list[float]      # distance of the S1 and S2 splits on A's lap
+    best_a: CornerSpeed       # where pole carried the most extra apex speed
+    best_b: CornerSpeed | None  # where P2 did (None if nowhere by MIN_SPEED_KPH)
     track_m: float
     checks: dict = field(default_factory=dict)
 
@@ -140,18 +147,13 @@ def match_lap(q3: pd.DataFrame, driver: str, official_ms: int) -> pd.Series:
 
 # ---------------------------------------------------------------- qualifying
 
-def corner_gains(a: Lap, b: Lap, grid: np.ndarray, delta: np.ndarray, corners: pd.DataFrame, track_m: float) -> list[CornerGain]:
+def corner_speeds(a: Lap, b: Lap, corners: pd.DataFrame) -> list[CornerSpeed]:
     out = []
     for _, c in corners.iterrows():
-        lo, hi = c["apex_m"] - CORNER_BEFORE_M, c["apex_m"] + CORNER_AFTER_M
-        if lo < 0 or hi > track_m:
-            continue
-        g = float(np.interp(hi, grid, delta) - np.interp(lo, grid, delta))
-        win = lambda L: L.speed[(L.dist >= lo) & (L.dist <= hi)]
+        win = lambda L: L.speed[np.abs(L.dist - c["apex_m"]) <= APEX_WINDOW_M]
         sa, sb = win(a), win(b)
-        if len(sa) < 3 or len(sb) < 3:
-            continue
-        out.append(CornerGain(str(c["corner"]), float(c["apex_m"]), g, float(sa.min()), float(sb.min())))
+        if len(sa) >= 2 and len(sb) >= 2:
+            out.append(CornerSpeed(str(c["corner"]), float(c["apex_m"]), float(sa.min()), float(sb.min())))
     return out
 
 
@@ -178,6 +180,7 @@ def quali_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame
     if colors_close(a.color, b.color):
         b.color = "#FFFFFF"
 
+    # The traces must be the right laps: their gap at the line and at the splits must agree with timing.
     grid = np.arange(0.0, track_m + GRID_STEP_M / 2, GRID_STEP_M)
     grid[-1] = track_m
     delta = time_at(b, grid) - time_at(a, grid)
@@ -186,46 +189,46 @@ def quali_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame
               "line_error_ms": round(abs(float(delta[-1]) - official) * 1000, 1)}
     if abs(delta[-1] - official) > LINE_TOLERANCE_S:
         raise StoryError(f"computed gap {delta[-1]:.3f} s vs official {official:.3f} s")
-    delta = pin_to_sectors(a, b, picked[0], picked[1], grid, delta, official, track_m, checks)
-
-    gains = corner_gains(a, b, grid, delta, corners, track_m)
-    if not gains:
-        raise StoryError("no corner windows")
-    best_a = max(gains, key=lambda g: g.gain_s)
-    best_b = min(gains, key=lambda g: g.gain_s)
-    return QualiStory("quali", a, b, official, grid, delta, best_a, best_b if best_b.gain_s <= -MIN_GAIN_S else None, track_m, checks)
-
-
-def pin_to_sectors(a: Lap, b: Lap, la: pd.Series, lb: pd.Series, grid: np.ndarray, delta: np.ndarray,
-                   official: float, track_m: float, checks: dict) -> np.ndarray:
-    """Make the gap curve pass exactly through the official gaps at the sector splits and the line.
-
-    Distance alignment between two laps drifts by up to about 0.1 s mid lap even when the line
-    is exact, which is enough to invent a corner gain. The error between pins is spread linearly.
-    Refuses the story when the raw curve misses a split by more than SECTOR_TOLERANCE_S.
-    """
-    pins_x, pins_y, errs = [0.0], [0.0], []
-    ta = tb = 0.0
-    for k in ("sector1_ms", "sector2_ms"):
+    la, lb = picked
+    secs = []
+    for k in ("sector1_ms", "sector2_ms", "sector3_ms"):
         if pd.isna(la.get(k)) or pd.isna(lb.get(k)):
-            checks["sector_pins"] = "missing sector times"
-            break
+            raise StoryError(f"no official {k[:7]} time for both laps")
+        secs.append((float(lb[k]) - float(la[k])) / 1000)
+    checks["sector_gaps_s"] = [round(x, 3) for x in secs]
+    if abs(sum(secs) - official) > 0.003:
+        raise StoryError(f"sector gaps add up to {sum(secs):.3f} s, lap gap is {official:.3f} s")
+    split_m = sector_splits(a, b, la, lb, grid, delta, checks)
+
+    speeds = corner_speeds(a, b, corners)
+    if not speeds:
+        raise StoryError("no corner apex speeds")
+    best_a = max(speeds, key=lambda c: c.diff)
+    best_b = min(speeds, key=lambda c: c.diff)
+    if best_a.diff < MIN_SPEED_KPH:
+        raise StoryError(f"pole carried no apex speed advantage of {MIN_SPEED_KPH} km/h anywhere")
+    return QualiStory("quali", a, b, official, secs, split_m, best_a,
+                      best_b if -best_b.diff >= MIN_SPEED_KPH else None, track_m, checks)
+
+
+def sector_splits(a: Lap, b: Lap, la: pd.Series, lb: pd.Series, grid: np.ndarray, delta: np.ndarray, checks: dict) -> list[float]:
+    """Distances of the S1 and S2 splits on A's lap, plus a sanity check that the traces agree with
+    timing there (a wrong lap or a broken trace misses by far more than SECTOR_TOLERANCE_S)."""
+    out, errs, ta, tb = [], [], 0.0, 0.0
+    for k in ("sector1_ms", "sector2_ms"):
         ta += float(la[k]) / 1000
         tb += float(lb[k]) / 1000
-        d = (float(np.interp(ta, a.time, a.dist)) + float(np.interp(tb, b.time, b.dist))) / 2
+        d = float(np.interp(ta, a.time, a.dist))
         raw = float(np.interp(d, grid, delta))
         errs.append(round((raw - (tb - ta)) * 1000, 1))
         if abs(raw - (tb - ta)) > SECTOR_TOLERANCE_S:
-            raise StoryError(f"gap at the {k[:7]} split is {raw:.3f} s, official {tb - ta:.3f} s")
-        pins_x.append(d)
-        pins_y.append((tb - ta) - raw)
-    pins_x.append(track_m)
-    pins_y.append(official - float(delta[-1]))
-    checks["sector_error_ms"] = errs
-    checks["sector_split_m"] = [round(x) for x in pins_x[1:-1]]
-    if any(np.diff(pins_x) <= 0):
-        raise StoryError(f"sector splits out of order: {pins_x}")
-    return delta + np.interp(grid, pins_x, pins_y)
+            raise StoryError(f"trace gap at the {k[:7]} split is {raw:.3f} s, official {tb - ta:.3f} s")
+        out.append(d)
+    checks["trace_vs_split_ms"] = errs
+    checks["split_m"] = [round(x) for x in out]
+    if not 0 < out[0] < out[1] < grid[-1]:
+        raise StoryError(f"sector splits out of order: {out}")
+    return out
 
 
 # ---------------------------------------------------------------- race
@@ -310,6 +313,13 @@ def colors_close(a: str, b: str, tol: int = 60) -> bool:
     ra = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
     rb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
     return sum(abs(x - y) for x, y in zip(ra, rb)) < tol
+
+
+def sector_text(g: float, a: str, b: str, unit: str = " s") -> str:
+    """Official sector gap as text: who gained and by how much, or level."""
+    if abs(g) < 0.0005:
+        return "level"
+    return f"{a if g > 0 else b} +{abs(g):.3f}{unit}"
 
 
 def corner_label(c: str) -> str:

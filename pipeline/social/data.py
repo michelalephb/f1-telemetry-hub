@@ -11,7 +11,7 @@ from .. import store
 from .story import StoryError, quali_story, race_story
 
 log = logging.getLogger(__name__)
-LAP_COLS = "driver_number,lap_number,lap_time_ms,sector1_ms,sector2_ms,lap_start_s,lap_end_s,is_accurate,pit_in,pit_out"
+LAP_COLS = "driver_number,lap_number,lap_time_ms,sector1_ms,sector2_ms,sector3_ms,lap_start_s,lap_end_s,is_accurate,pit_in,pit_out"
 
 
 def rows(sb, table: str, cols: str, **eq) -> pd.DataFrame:

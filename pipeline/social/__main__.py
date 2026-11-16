@@ -17,7 +17,7 @@ from pathlib import Path
 from .. import store
 from . import captions, render, style
 from .data import load_story, rows
-from .publish import Instagram, IGError, now_iso, refresh_token
+from .publish import Instagram, now_iso, refresh_token
 from .story import StoryError
 
 log = logging.getLogger("social")

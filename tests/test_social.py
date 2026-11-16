@@ -56,6 +56,7 @@ def quali_fixture():
         "driver_number": ["44", "1", "63"], "lap_number": [5, 10, 11],
         "lap_time_ms": [90000, round(la * 1000), round(lb * 1000)],
         "sector1_ms": [30000, s1a, s1b], "sector2_ms": [30000, s2a, s2b],
+        "sector3_ms": [30000, round(la * 1000) - s1a - s2a, round(lb * 1000) - s1b - s2b],
         "lap_start_s": [800.0, 1000.0, 1100.0], "lap_end_s": [890.0, 1000 + la, 1100 + lb],
     })
     drivers = pd.DataFrame({"driver_number": ["1", "63"], "abbreviation": ["NOR", "RUS"], "team_color": ["F47600", "00D7B6"]})
@@ -85,8 +86,10 @@ def test_quali_story_matches_official_gap_and_finds_the_corner():
     st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
     assert st.a.code == "NOR" and st.b.code == "RUS"
     assert st.checks["line_error_ms"] < 5
-    assert st.best_a.corner == "8"
-    assert st.best_a.apex_a - st.best_a.apex_b == pytest.approx(12, abs=2)
+    assert st.best_a.corner == "8" and st.best_a.diff == pytest.approx(12, abs=2)
+    assert st.best_b is None
+    assert sum(st.sector_gaps) == pytest.approx(st.official_gap_s, abs=0.003)
+    assert abs(st.sector_gaps[0]) < 0.003 and min(st.sector_gaps[1:]) > 0   # T8 straddles the S2 split; S1 is level
 
 
 def test_quali_story_refuses_a_gap_that_disagrees_with_the_official_one():
@@ -97,20 +100,10 @@ def test_quali_story_refuses_a_gap_that_disagrees_with_the_official_one():
         story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
 
 
-def test_quali_gap_curve_passes_through_the_official_splits():
-    results, laps, drivers, traces = quali_fixture()
-    st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
-    assert all(abs(e) < 5 for e in st.checks["sector_error_ms"])
-    a, b = laps.set_index("driver_number").loc["1"], laps.set_index("driver_number").loc["63"]
-    d1 = st.checks["sector_split_m"][0]
-    assert np.interp(d1, st.grid, st.delta) == pytest.approx((b.sector1_ms - a.sector1_ms) / 1000, abs=0.003)
-    assert st.delta[-1] == pytest.approx(st.official_gap_s, abs=1e-6)
-
-
 def test_quali_story_refuses_when_a_split_disagrees():
     results, laps, drivers, traces = quali_fixture()
     laps.loc[laps.driver_number == "63", "sector1_ms"] += 400
-    laps.loc[laps.driver_number == "63", "sector2_ms"] -= 400
+    laps.loc[laps.driver_number == "63", "sector2_ms"] -= 400   # same lap time, but the splits no longer fit the trace
     with pytest.raises(story.StoryError, match="split"):
         story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
 

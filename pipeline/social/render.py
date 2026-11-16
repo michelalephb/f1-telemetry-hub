@@ -10,11 +10,10 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
-from matplotlib.collections import LineCollection
 import matplotlib.pyplot as plt
 
 from . import style as S
-from .story import Lap, QualiStory, RaceStory, corner_label
+from .story import Lap, QualiStory, RaceStory, corner_label, sector_text
 
 W, H_POST, H_REEL = 1080, 1350, 1920
 DPI = 100
@@ -71,18 +70,33 @@ def lap_xy(lap: Lap, rot: float, d: np.ndarray | None = None):
     return np.interp(d, lap.dist, x), np.interp(d, lap.dist, y)
 
 
-def gain_map(ax, st: QualiStory, rot: float, n_seg: int = 30, lw: float = 9) -> None:
-    """Track coloured by who gained time in each of n_seg equal stretches."""
-    x, y = lap_xy(st.a, rot, st.grid)
-    edges = np.linspace(0, st.track_m, n_seg + 1)
-    dd = np.diff(np.interp(edges, st.grid, st.delta))
-    pts = np.column_stack([x, y]).reshape(-1, 1, 2)
-    segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
-    idx = np.clip(np.searchsorted(edges, st.grid[:-1], side="right") - 1, 0, n_seg - 1)
-    cols = [S.MUTE if abs(dd[i]) < 0.002 else st.a.color if dd[i] > 0 else st.b.color for i in idx]
-    ax.add_collection(LineCollection(segs, colors=cols, linewidths=lw, capstyle="round"))
+def sector_map(ax, st: QualiStory, rot: float, lw: float = 10, labels: bool = True) -> None:
+    """Track coloured by who was faster in each official sector, with the sector gaps."""
+    edges = [0.0, *st.split_m, st.track_m]
+    for k in range(3):
+        d = np.linspace(edges[k], edges[k + 1], 200)
+        x, y = lap_xy(st.a, rot, d)
+        g = st.sector_gaps[k]
+        col = S.MUTE if abs(g) < 0.0005 else st.a.color if g > 0 else st.b.color
+        ax.plot(x, y, color=col, lw=lw, solid_capstyle="round")
+        if labels:
+            ax.annotate(f"S{k + 1}  {sector_text(g, st.a.code, st.b.code, '')}", (x[100], y[100]), xytext=(0, 0), textcoords="offset points",
+                        ha="center", va="center", fontsize=20, color=S.INK, family=S.MONO, weight="bold",
+                        bbox=dict(boxstyle="round,pad=0.35", fc=S.CARD, ec=col, lw=2))
     ax.autoscale()
-    ax.margins(0.06)
+    ax.margins(0.08)
+
+
+def sector_bars(ax, st: QualiStory) -> None:
+    g = st.sector_gaps
+    cols = [st.a.color if v > 0 else st.b.color for v in g]
+    ax.barh(["S1", "S2", "S3"], np.abs(g), color=cols, height=0.6)
+    for i, v in enumerate(g):
+        ax.text(abs(v), i, "  " + sector_text(v, st.a.code, st.b.code), va="center", fontsize=22, family=S.MONO)
+    ax.invert_yaxis()
+    ax.set_xlim(0, max(np.abs(g)) * 1.9 + 0.01)
+    ax.set_xlabel("Official sector time gained (s)")
+    ax.grid(axis="y", visible=False)
 
 
 def save_jpeg(fig, path: Path) -> Path:
@@ -102,46 +116,39 @@ def quali_carousel(st: QualiStory, meta: dict, rot: float, out: Path) -> list[Pa
 
     fig = new_fig(H_POST)
     chrome(fig, kick, f"{a.code} on pole by {st.official_gap_s:.3f} s")
-    ax = track_axes(fig, [0.06, 0.25, 0.88, 0.55])
-    gain_map(ax, st, rot)
+    sector_map(track_axes(fig, [0.06, 0.25, 0.88, 0.57]), st, rot)
     fig.text(0.06, 0.19, f"{a.code}  {lap_time(a.lap_ms)}", fontsize=34, color=a.color, family=S.MONO, weight="bold")
     fig.text(0.06, 0.14, f"{b.code}  {lap_time(b.lap_ms)}", fontsize=34, color=b.color, family=S.MONO, weight="bold")
-    fig.text(0.94, 0.165, "Track coloured by who\ngained time in each stretch\n(grey: level)", fontsize=18, color=S.MUTE, ha="right", va="center")
+    fig.text(0.94, 0.165, "Track coloured by who won\neach official sector", fontsize=18, color=S.MUTE, ha="right", va="center")
     paths.append(save_jpeg(fig, out / "slide_1.jpg"))
 
     fig = new_fig(H_POST)
-    chrome(fig, kick, "Where the lap was won")
-    ax1 = fig.add_axes([0.1, 0.56, 0.84, 0.25])
-    ax2 = fig.add_axes([0.1, 0.12, 0.84, 0.40], sharex=ax1)
-    ax1.axhline(0, color=S.MUTE, lw=1)
-    ax1.fill_between(st.grid, st.delta, 0, where=st.delta >= 0, color=a.color, alpha=0.35, lw=0)
-    ax1.fill_between(st.grid, st.delta, 0, where=st.delta < 0, color=b.color, alpha=0.35, lw=0)
-    ax1.plot(st.grid, st.delta, color=S.INK, lw=2)
-    ax1.set_ylabel(f"{a.code} ahead (s)")
-    ax1.tick_params(labelbottom=False)
-    ax2.plot(a.dist, a.speed, color=a.color, lw=2.6, label=a.code)
-    ax2.plot(b.dist, b.speed, color=b.color, lw=2.2, label=b.code, alpha=0.9)
-    ax2.set_ylabel("Speed (km/h)")
-    ax2.set_xlabel("Distance (m)")
-    ax2.set_xlim(0, st.track_m)
-    ax2.legend(loc="lower right", frameon=False, fontsize=20)
-    for g in (st.best_a, st.best_b):
-        if g:
-            ax2.axvspan(g.apex_m - 250, g.apex_m + 150, color=S.PURPLE, alpha=0.12, lw=0)
-            ax2.text(g.apex_m, ax2.get_ylim()[1], f"T{g.corner}", ha="center", va="bottom", color=S.PURPLE, fontsize=18)
+    chrome(fig, kick, "Sector by sector")
+    sector_bars(fig.add_axes([0.1, 0.62, 0.84, 0.19]), st)
+    ax = fig.add_axes([0.1, 0.12, 0.84, 0.40])
+    ax.plot(a.dist, a.speed, color=a.color, lw=2.6, label=a.code)
+    ax.plot(b.dist, b.speed, color=b.color, lw=2.2, label=b.code, alpha=0.9)
+    for d in st.split_m:
+        ax.axvline(d, color=S.MUTE, lw=1, ls=":")
+    ax.set_ylabel("Speed (km/h)")
+    ax.set_xlabel("Distance (m)")
+    ax.set_xlim(0, st.track_m)
+    ax.legend(loc="lower right", frameon=False, fontsize=20)
+    for c in (st.best_a, st.best_b):
+        if c:
+            ax.text(c.apex_m, ax.get_ylim()[1], f"T{c.corner}", ha="center", va="bottom", color=S.PURPLE, fontsize=18)
     paths.append(save_jpeg(fig, out / "slide_2.jpg"))
 
-    for i, (g, lead) in enumerate([(st.best_a, a), (st.best_b, b)]):
-        if g is None:
+    for i, c in enumerate((st.best_a, st.best_b)):
+        if c is None:
             continue
+        lead = a if c.diff > 0 else b
         fig = new_fig(H_POST)
-        gain = abs(g.gain_s)
-        chrome(fig, kick, f"{corner_label(g.corner)}: {lead.code} finds {gain:.2f} s")
-        corner_zoom(fig.add_axes([0.1, 0.30, 0.84, 0.50]), a, b, g)
-        da = g.apex_a - g.apex_b
-        fig.text(0.06, 0.19, f"Minimum speed  {a.code} {g.apex_a:.0f}  |  {b.code} {g.apex_b:.0f} km/h", fontsize=26, family=S.MONO)
-        fig.text(0.06, 0.14, f"{'+' if da >= 0 else ''}{da:.0f} km/h for {a.code} at the apex", fontsize=26,
-                 color=S.GAIN if da >= 0 else S.LOSS, family=S.MONO)
+        chrome(fig, kick, f"{corner_label(c.corner)}: {lead.code} +{abs(c.diff):.0f} km/h")
+        corner_zoom(fig.add_axes([0.1, 0.30, 0.84, 0.50]), a, b, c)
+        fig.text(0.06, 0.19, f"Apex speed  {a.code} {c.min_a:.0f}  |  {b.code} {c.min_b:.0f} km/h", fontsize=26, family=S.MONO)
+        fig.text(0.06, 0.14, f"{lead.code} carries {abs(c.diff):.0f} km/h more through {corner_label(c.corner)}", fontsize=26,
+                 color=lead.color, family=S.MONO)
         paths.append(save_jpeg(fig, out / f"slide_{3 + i}.jpg"))
 
     paths.append(cta_slide(kick, out / f"slide_{len(paths) + 1}.jpg"))
@@ -295,11 +302,13 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     fig.text(0.5, 0.56, a.code, ha="center", fontsize=150, color=a.color, weight="bold")
     fig.text(0.5, 0.49, "vs", ha="center", fontsize=50, color=S.MUTE)
     fig.text(0.5, 0.39, b.code, ha="center", fontsize=150, color=b.color, weight="bold")
-    fig.text(0.5, 0.30, "Who wins where?", ha="center", fontsize=40, color=S.CYAN)
+    fig.text(0.5, 0.30, "Same clock. Who wins where?", ha="center", fontsize=40, color=S.CYAN)
     r.add(fig, int(1.5 * FPS))
     cover = save_jpeg_reel(fig, out / "cover.jpg")
+    plt.close(fig)
 
-    # 2. Lap replay at speed lap_s for the whole lap
+    # 2. Both laps replayed on the same clock: each dot is a car's own position at that moment,
+    #    so the gap between the dots is real. Sector gaps (official) appear as pole crosses each split.
     fig = reel_fig(kick, f"{a.code} vs {b.code}, same clock")
     axm = track_axes(fig, [0.06, 0.50, 0.88, 0.36])
     xa, ya = lap_xy(a, rot)
@@ -308,9 +317,9 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     axm.margins(0.05)
     dot_b, = axm.plot([], [], "o", ms=26, color=b.color, mec=S.BG, mew=3)
     dot_a, = axm.plot([], [], "o", ms=26, color=a.color, mec=S.BG, mew=3)
-    lead = fig.text(0.5, 0.455, "", ha="center", fontsize=54, weight="bold", family=S.MONO)
-    clock = fig.text(0.5, 0.42, "", ha="center", fontsize=28, color=S.MUTE, family=S.MONO)
-    axs = fig.add_axes([0.12, 0.10, 0.82, 0.28])
+    sec_txt = [fig.text(0.5, 0.465 - 0.03 * k, "", ha="center", fontsize=34, weight="bold", family=S.MONO) for k in range(3)]
+    clock = fig.text(0.5, 0.375, "", ha="center", fontsize=26, color=S.MUTE, family=S.MONO)
+    axs = fig.add_axes([0.12, 0.08, 0.82, 0.26])
     la, = axs.plot([], [], color=a.color, lw=3.5, label=a.code)
     lb, = axs.plot([], [], color=b.color, lw=3, label=b.code)
     axs.set_xlim(0, st.track_m)
@@ -319,6 +328,7 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     axs.set_xlabel("Distance (m)")
     axs.legend(loc="lower right", frameon=False, fontsize=22)
     total = a.time[-1] if a.time[-1] > 0 else a.lap_ms / 1000
+    marks = [*st.split_m, st.track_m]
     n = int(lap_s * FPS)
     for i in range(n + 1):
         tau = total * i / n
@@ -328,21 +338,22 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
         ma, mb = a.dist <= da, b.dist <= db
         la.set_data(a.dist[ma], a.speed[ma])
         lb.set_data(b.dist[mb], b.speed[mb])
-        d = float(np.interp(min(da, db, st.track_m), st.grid, st.delta))
-        who = a if d >= 0 else b
-        lead.set_text(f"{who.code} +{abs(d):.3f} s")
-        lead.set_color(who.color)
+        for k, m in enumerate(marks):
+            if da >= m - 1 or i == n:
+                g = st.sector_gaps[k]
+                sec_txt[k].set_text(f"S{k + 1}  {sector_text(g, a.code, b.code)}")
+                sec_txt[k].set_color(S.MUTE if abs(g) < 0.0005 else (a if g > 0 else b).color)
         clock.set_text(f"{tau:5.1f} s   {min(da, st.track_m):4.0f} m")
         r.add(fig)
-    r.add(fig, int(0.5 * FPS))
+    r.add(fig, int(0.7 * FPS))
     plt.close(fig)
 
-    # 3. Key corner, 3.5 s
-    g = st.best_a
-    fig = reel_fig(kick, f"{corner_label(g.corner)}: {a.code} +{g.gain_s:.2f} s")
+    # 3. The corner where pole carried the most extra speed, 3.5 s
+    c = st.best_a
+    fig = reel_fig(kick, f"{corner_label(c.corner)}: {a.code} +{c.diff:.0f} km/h")
     axm = track_axes(fig, [0.30, 0.66, 0.40, 0.20])
     axm.plot(xa, ya, color=S.BORDER, lw=8)
-    cx, cy = np.interp(g.apex_m, a.dist, xa), np.interp(g.apex_m, a.dist, ya)
+    cx, cy = np.interp(c.apex_m, a.dist, xa), np.interp(c.apex_m, a.dist, ya)
     axm.plot([cx], [cy], "o", ms=30, mfc="none", mec=S.PURPLE, mew=4)
     axm.margins(0.05)
     axz = fig.add_axes([0.12, 0.24, 0.82, 0.36])
@@ -350,9 +361,9 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     steps = int(2.5 * FPS)
     for i in range(steps + 1):
         axz.cla()
-        corner_zoom(axz, a, b, g, upto=g.apex_m - 250 + 400 * i / steps)
+        corner_zoom(axz, a, b, c, upto=c.apex_m - 250 + 400 * i / steps)
         if i == steps:
-            badge.set_text(f"Apex  {a.code} {g.apex_a:.0f}  |  {b.code} {g.apex_b:.0f} km/h")
+            badge.set_text(f"Apex  {a.code} {c.min_a:.0f}  |  {b.code} {c.min_b:.0f} km/h")
         r.add(fig)
     r.add(fig, FPS)
     plt.close(fig)
@@ -376,9 +387,10 @@ def race_reel(st: RaceStory, meta: dict, out: Path) -> tuple[Path, Path]:
 
     fig = reel_fig(kick, "How it was won")
     fig.text(0.5, 0.50, w["code"], ha="center", fontsize=190, color=w["color"], weight="bold")
-    fig.text(0.5, 0.41, f"wins the {meta['event']}", ha="center", fontsize=42)
+    fig.text(0.5, 0.41, f"wins the {'Sprint' if meta['code'] == 'S' else meta['event']}", ha="center", fontsize=42)
     r.add(fig, int(1.5 * FPS))
     cover = save_jpeg_reel(fig, out / "cover.jpg")
+    plt.close(fig)
 
     fig = reel_fig(kick, "Gap to the leader")
     ax = fig.add_axes([0.13, 0.17, 0.81, 0.63])
