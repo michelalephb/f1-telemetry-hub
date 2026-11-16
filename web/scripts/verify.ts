@@ -79,8 +79,14 @@ if (s.session_code === 'R' || s.session_code === 'S') {
   const mine = await getTrace(s.trace_prefix, me)
   let found = 0
   for (const m of moves) {
-    const p = passPoint(lapClock(mine, m.lap), lapClock(await getTrace(s.trace_prefix, m.other), m.lap), m.kind)
+    const cm = lapClock(mine, m.lap), co = lapClock(await getTrace(s.trace_prefix, m.other), m.lap)
+    const p = passPoint(cm, co, m.kind)
     if (p) found++
+    else {
+      const ends = (c: typeof cm) => c.dist.length ? `${c.dist[0].toFixed(0)}..${c.dist[c.dist.length - 1].toFixed(0)} m, t ${c.t[0].toFixed(1)}..${c.t[c.t.length - 1].toFixed(1)}` : 'no samples'
+      const lap = (d: string) => laps.find((l) => l.driver_number === d && l.lap_number === m.lap)
+      console.log(`    not seen: me ${ends(cm)} (lap end ${lap(me)?.lap_end_s?.toFixed(1)}), other ${ends(co)} (lap end ${lap(m.other)?.lap_end_s?.toFixed(1)})`)
+    }
     console.log(`  ${code(me)} L${m.lap} ${m.kind === 'gain' ? 'passed' : 'lost to'} ${code(m.other)}: ${p ? `T${cornerAt(p.d, corners, L)} at ${p.d.toFixed(0)} m${p.early ? ' (already ahead where the data starts)' : ''}` : 'not seen'}`)
   }
   console.log(`race story for ${code(me)}: ${moves.length} on track moves, ${found} located`)
