@@ -11,7 +11,7 @@ import PaceChart from '@/components/PaceChart'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getDrivers, getEvent, getLaps, getResults, getSession, type Driver, type Lap, type Result } from '@/lib/api'
 import { gap, lapTime, secs, SESSION_LABEL, teamColor, TYRE } from '@/lib/format'
-import { finalSegmentKeys, segLabel } from '@/lib/segments'
+import { finalSegmentKeys, sectorsAddUp, segLabel } from '@/lib/segments'
 
 export default function Page() {
   return <Suspense fallback={<Loading what="session" />}><SessionView /></Suspense>
@@ -58,9 +58,11 @@ function SessionView() {
   const rows = [...best.values()].sort((a, b) => a.lap_time_ms! - b.lap_time_ms!)
   const top = rows[0]?.lap_time_ms ?? 0
   const sessionBest = allClean.reduce<Lap | null>((m, l) => (!m || l.lap_time_ms! < m.lap_time_ms! ? l : m), null)
-  const bestSector = (k: 'sector1_ms' | 'sector2_ms' | 'sector3_ms') => Math.min(...pool.filter((l) => l[k] != null).map((l) => l[k] as number))
+  // Sectors only from laps whose three sectors add up to the lap time (the feed has a few laps that do not)
+  const sectorPool = pool.filter(sectorsAddUp)
+  const bestSector = (k: 'sector1_ms' | 'sector2_ms' | 'sector3_ms') => Math.min(...sectorPool.map((l) => l[k] as number))
   const sb = { s1: bestSector('sector1_ms'), s2: bestSector('sector2_ms'), s3: bestSector('sector3_ms') }
-  const theoretical = sb.s1 + sb.s2 + sb.s3
+  const theoretical = sectorPool.length ? sb.s1 + sb.s2 + sb.s3 : null
 
   // The official classification drives the order and the default comparison
   const classified = results.filter((r) => r.position != null).sort((a, b) => a.position! - b.position!)
@@ -200,6 +202,7 @@ function SessionView() {
               {rows.map((r, i) => {
                 const d = drv.get(r.driver_number)
                 const t = TYRE[r.compound ?? ''] ?? null
+                const ok = sectorsAddUp(r)
                 const vs = i === 0 ? rows[1]?.driver_number : rows[0].driver_number
                 return (
                   <tr key={r.driver_number} className="border-t border-line/70">
@@ -212,9 +215,9 @@ function SessionView() {
                     <td className="px-2 py-2">
                       {t ? <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border-2 text-[11px] font-bold" style={{ borderColor: t.color, color: t.color }} title={r.compound ?? ''}>{t.label}</span> : <span className="text-mute">—</span>}
                     </td>
-                    <td className={sectorCell(r.sector1_ms, sb.s1)}>{secs(r.sector1_ms)}</td>
-                    <td className={sectorCell(r.sector2_ms, sb.s2)}>{secs(r.sector2_ms)}</td>
-                    <td className={sectorCell(r.sector3_ms, sb.s3)}>{secs(r.sector3_ms)}</td>
+                    <td className={sectorCell(ok ? r.sector1_ms : null, sb.s1)}>{ok ? secs(r.sector1_ms) : '—'}</td>
+                    <td className={sectorCell(ok ? r.sector2_ms : null, sb.s2)}>{ok ? secs(r.sector2_ms) : '—'}</td>
+                    <td className={sectorCell(ok ? r.sector3_ms : null, sb.s3)}>{ok ? secs(r.sector3_ms) : '—'}</td>
                   </tr>
                 )
               })}

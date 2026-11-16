@@ -4,8 +4,8 @@ import assert from 'node:assert/strict'
 import { getCornerMetrics, getCorners, getDrivers, getLaps, getResults, getSession, getTrace, SUPABASE_URL } from '../lib/api.ts'
 import { cornerAt, lapClock, movesOf, ordersByLap, passPoint } from '../lib/race.ts'
 import { loadReplay, runningOrder, stateAt } from '../lib/replay.ts'
-import { finalSegmentKeys } from '../lib/segments.ts'
-import { deltaAt, extrap, lapTrace } from '../lib/telemetry.ts'
+import { finalSegmentKeys, sectorsAddUp } from '../lib/segments.ts'
+import { deltaAt, extrap, lapTrace, windowTime } from '../lib/telemetry.ts'
 
 const sid = process.argv[2] ?? '2026_20_R'
 const t0 = Date.now()
@@ -45,6 +45,33 @@ const d = deltaAt(ta, tb, L), expected = (B.lap_time_ms! - A.lap_time_ms!) / 100
 console.log(`delta at line ${d.toFixed(3)} s vs official gap ${expected.toFixed(3)} s`)
 assert.ok(Math.abs(d - expected) < 0.05, 'delta at the line within 50 ms of the official gap')
 assert.equal(metrics.length, 2 * corners.length, 'one metric row per corner per lap')
+
+// Theoretical best: built only from laps whose sectors add up, never faster than the sectors allow
+const sp = clean.filter(sectorsAddUp)
+const bad = clean.length - sp.length
+const theo = Math.min(...sp.map((l) => l.sector1_ms!)) + Math.min(...sp.map((l) => l.sector2_ms!)) + Math.min(...sp.map((l) => l.sector3_ms!))
+console.log(`theoretical best (all clean laps) ${theo} ms vs fastest lap ${A.lap_time_ms} ms; ${bad} clean laps with sectors that do not add up, excluded`)
+assert.ok(sp.length > 0 && theo <= A.lap_time_ms!, 'theoretical best is not slower than the fastest lap')
+assert.ok(A.lap_time_ms! - theo < 0.02 * A.lap_time_ms!, 'theoretical best within 2 % of the fastest lap')
+
+// Corner windows: the gain quoted for a corner must equal the move of the delta curve across it
+{
+  const sa = lapTrace(ra, A.lap_number, L, A.lap_time_ms! / 1000), sb2 = lapTrace(rb, B.lap_number, L, B.lap_time_ms! / 1000)
+  let worstOld = 0, n = 0
+  for (const c of corners) {
+    const lo = c.apex_m - 250, hi = c.apex_m + 150
+    const wa = windowTime(sa, lo, hi), wb = windowTime(sb2, lo, hi)
+    if (wa == null || wb == null) continue
+    n++
+    const curve = deltaAt(sa, sb2, hi) - deltaAt(sa, sb2, lo)
+    assert.ok(Math.abs((wb - wa) - curve) < 1e-6, `T${c.corner} gain equals the delta curve change`)
+    const ma = metrics.find((m) => m.driver_number === A.driver_number && m.corner === c.corner)
+    const mb = metrics.find((m) => m.driver_number === B.driver_number && m.corner === c.corner)
+    if (ma?.window_time_s != null && mb?.window_time_s != null) worstOld = Math.max(worstOld, Math.abs((mb.window_time_s - ma.window_time_s) - curve))
+  }
+  console.log(`corner gains: ${n} corners match the delta curve; the old pipeline figures were off by up to ${worstOld.toFixed(3)} s`)
+  assert.ok(n >= corners.length - 2, 'corner windows covered')
+}
 
 // Qualifying: our Q3 laps must reproduce the official Q3 times of the top of the order
 if (s.session_code === 'Q') {
@@ -126,6 +153,17 @@ if (s.session_code === 'R' || s.session_code === 'S') {
     const st = stateAt(rp, tFlag, new Map(res.map((r) => [r.driver_number, r.grid])), new Set(res.map((r) => r.driver_number)))
     const ord = runningOrder(rp, st, tFlag, L)
     console.log(`replay: ${rp.cars.length} cars, ${rp.n} s; order at the flag ${ord.slice(0, 5).map((o) => `${code(o.num)} ${o.gap}`).join(', ')}`)
+    assert.ok(ord.every((o) => !/\d\.\d/.test(o.gap)), 'no seconds gaps in the replay tower')
+    // After the last car has finished: laps behind must match the official classification
+    const end = stateAt(rp, rp.n, new Map(res.map((r) => [r.driver_number, r.grid])), new Set(res.map((r) => r.driver_number)))
+    const fin = runningOrder(rp, end, rp.n, L)
+    const lapsOff = res.filter((r) => r.laps != null && fin.some((o) => o.num === r.driver_number)).map((r) => {
+      const want = res[0].laps! - r.laps!, row = fin.find((o) => o.num === r.driver_number)
+      const got = row?.gap.startsWith('+') ? parseInt(row.gap.slice(1), 10) : 0
+      return { code: r.driver_code, want, got }
+    }).filter((x) => x.want !== x.got)
+    console.log(`replay laps behind at the end: ${lapsOff.length ? lapsOff.map((x) => `${x.code} ours ${x.got} official ${x.want}`).join(', ') : 'all match the official classification'}`)
+    assert.ok(lapsOff.length <= 1, 'laps behind match the official classification')
     assert.deepEqual(ord.slice(0, 3).map((o) => o.num), res.slice(0, 3).map((r) => r.driver_number), 'replay podium at the flag matches the official result')
   }
 }

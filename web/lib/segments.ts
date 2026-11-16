@@ -50,3 +50,11 @@ export function finalSegmentKeys(laps: L[], code: string, results: R[] = []): Se
   const last = seg.size ? Math.max(...seg.values()) : 0
   return new Set([...seg].filter(([, v]) => v === last).map(([k]) => k))
 }
+
+type S = { lap_time_ms: number | null; sector1_ms: number | null; sector2_ms: number | null; sector3_ms: number | null }
+
+/** True when all three sectors are present and add up to the lap time (within 2 ms of rounding). */
+export function sectorsAddUp(l: S): boolean {
+  if (l.lap_time_ms == null || l.sector1_ms == null || l.sector2_ms == null || l.sector3_ms == null) return false
+  return Math.abs(l.sector1_ms + l.sector2_ms + l.sector3_ms - l.lap_time_ms) <= 2
+}

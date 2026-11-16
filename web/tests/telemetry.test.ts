@@ -81,3 +81,23 @@ test('lapTrace stretched to the official lap time: the gap at the line is the of
   const c = lapTrace(lapAt(50, 1, L), 1, L, 26)       // lap 1 from the start: 30 % off, left alone
   assert.ok(Math.abs(extrap(L, c.dist, c.time) - 20) < 1e-6)
 })
+
+test('corner window time equals the change of the delta curve across the window', async () => {
+  const { windowTime, deltaAt } = await import('../lib/telemetry.ts')
+  const mk = (v: (d: number) => number) => {
+    const dist: number[] = [], time: number[] = []
+    for (let d = -20; d <= 1020; d += 7) { dist.push(d); time.push(v(d)) }
+    return { dist, time, speed: [], throttle: [], brake: [], gear: [], drs: [], x: [], y: [] }
+  }
+  const a = mk((d) => d / 50), b = mk((d) => d / 50 + (d > 400 ? (d - 400) / 2000 : 0))
+  const ta = windowTime(a, 250, 650)!, tb = windowTime(b, 250, 650)!
+  assert.ok(Math.abs((tb - ta) - (deltaAt(a, b, 650) - deltaAt(a, b, 250))) < 1e-9)
+  assert.equal(windowTime(a, -100, 200), null)                  // window not covered
+})
+
+test('sectors must add up to the lap time', async () => {
+  const { sectorsAddUp } = await import('../lib/segments.ts')
+  assert.equal(sectorsAddUp({ lap_time_ms: 86745, sector1_ms: 22253, sector2_ms: 45447, sector3_ms: 19045 }), true)
+  assert.equal(sectorsAddUp({ lap_time_ms: 98575, sector1_ms: 39596, sector2_ms: 42242, sector3_ms: 68383 }), false) // 2026_04_Q #81 L3
+  assert.equal(sectorsAddUp({ lap_time_ms: 90000, sector1_ms: null, sector2_ms: 1, sector3_ms: 1 }), false)
+})

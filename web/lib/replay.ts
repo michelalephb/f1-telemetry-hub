@@ -104,23 +104,25 @@ export function stateAt(r: Replay, t: number, grid: Map<string, number | null>, 
   })
 }
 
-/** Running order and gap to the leader in seconds (or laps) at time t. */
+/**
+ * Running order at time t, with laps behind the leader. No gap in seconds: the replay runs on the
+ * car data clock at one sample a second, and its gaps differed from the official ones by 0.1 to 0.6 s
+ * (time penalties not included either), so they are not shown.
+ */
 export function runningOrder(r: Replay, states: CarState[], t: number, trackM: number) {
   // Cars that took the flag on the same lap are ranked by when they finished, not where they stopped.
   const lapOf = (s: CarState) => Math.floor(s.metres / trackM)
   const live = states.filter((s) => !s.out).sort((a, b) =>
     a.finished && b.finished && lapOf(a) === lapOf(b) ? (a.finT ?? 0) - (b.finT ?? 0) : b.metres - a.metres)
   const lead = live[0]
-  const leadCar = r.cars.find((c) => c.num === lead?.num)
   return live.map((s, i) => {
     let gap: string
     if (i === 0) gap = 'Leader'
     else {
       const laps = Math.floor((lead.metres - s.metres) / trackM)
-      if (s.finished && lead.finished && lapOf(s) === lapOf(lead)) gap = `+${((s.finT ?? 0) - (lead.finT ?? 0)).toFixed(1)}`
+      if (s.finished && lead.finished && lapOf(s) === lapOf(lead)) gap = ''
       else if (laps >= 1) gap = `+${laps} ${laps === 1 ? 'lap' : 'laps'}`
-      else if (!leadCar || s.metres < 0) gap = ''
-      else gap = `+${Math.max(0, t - timeAt(r, leadCar, s.metres)).toFixed(1)}`
+      else gap = ''
     }
     return { ...s, pos: i + 1, gap }
   })
