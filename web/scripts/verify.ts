@@ -78,11 +78,15 @@ if (s.session_code === 'R' || s.session_code === 'S') {
   const moves = movesOf(me, orders, laps).filter((m) => !m.pit)
   const mine = await getTrace(s.trace_prefix, me)
   let found = 0, seeable = 0
-  const spans = (c: { dist: number[] }) => c.dist.length > 0 && c.dist[c.dist.length - 1] - c.dist[0] > 0.9 * L
+  // data covers the lap: 90 % of the distance, and samples until the car crossed the line (no 40 s hole at the end)
+  const spans = (c: { dist: number[]; t: number[] }, d: string, k: number) => {
+    const end = laps.find((l) => l.driver_number === d && l.lap_number === k)?.lap_end_s
+    return c.dist.length > 0 && c.dist[c.dist.length - 1] - c.dist[0] > 0.9 * L && (end == null || c.t[c.t.length - 1] >= end - 3)
+  }
   for (const m of moves) {
     const cm = lapClock(mine, m.lap), co = lapClock(await getTrace(s.trace_prefix, m.other), m.lap)
     const p = passPoint(cm, co, m.kind)
-    const ok = spans(cm) && spans(co)
+    const ok = spans(cm, me, m.lap) && spans(co, m.other, m.lap)
     if (ok) seeable++
     if (p && ok) found++
     else {
