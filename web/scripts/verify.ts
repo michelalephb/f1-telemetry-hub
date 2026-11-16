@@ -77,11 +77,14 @@ if (s.session_code === 'R' || s.session_code === 'S') {
   const me = [...res].sort((x, y) => climb(y) - climb(x))[0].driver_number
   const moves = movesOf(me, orders, laps).filter((m) => !m.pit)
   const mine = await getTrace(s.trace_prefix, me)
-  let found = 0
+  let found = 0, seeable = 0
+  const spans = (c: { dist: number[] }) => c.dist.length > 0 && c.dist[c.dist.length - 1] - c.dist[0] > 0.9 * L
   for (const m of moves) {
     const cm = lapClock(mine, m.lap), co = lapClock(await getTrace(s.trace_prefix, m.other), m.lap)
     const p = passPoint(cm, co, m.kind)
-    if (p) found++
+    const ok = spans(cm) && spans(co)
+    if (ok) seeable++
+    if (p && ok) found++
     else {
       const ends = (c: typeof cm) => c.dist.length ? `${c.dist[0].toFixed(0)}..${c.dist[c.dist.length - 1].toFixed(0)} m, t ${c.t[0].toFixed(1)}..${c.t[c.t.length - 1].toFixed(1)}` : 'no samples'
       const lap = (d: string) => laps.find((l) => l.driver_number === d && l.lap_number === m.lap)
@@ -89,8 +92,8 @@ if (s.session_code === 'R' || s.session_code === 'S') {
     }
     console.log(`  ${code(me)} L${m.lap} ${m.kind === 'gain' ? 'passed' : 'lost to'} ${code(m.other)}: ${p ? `T${cornerAt(p.d, corners, L)} at ${p.d.toFixed(0)} m${p.early ? ' (already ahead where the data starts)' : ''}` : 'not seen'}`)
   }
-  console.log(`race story for ${code(me)}: ${moves.length} on track moves, ${found} located`)
-  assert.ok(moves.length === 0 || found / moves.length >= 0.7, 'at least 70 % of on track moves located')
+  console.log(`race story for ${code(me)}: ${moves.length} on track moves, ${seeable} with both cars' data covering the lap, ${found} of those located`)
+  assert.ok(seeable === 0 || found / seeable >= 0.8, 'at least 80 % of on track moves with full data located')
 }
 const outline = await fetch(`${SUPABASE_URL}/storage/v1/object/public/web/tracks/${s.season}/${s.round}.json`)
 console.log(`track outline: HTTP ${outline.status}${outline.ok ? '' : ' (built by the track outlines workflow)'}`)
