@@ -413,7 +413,7 @@ def test_preview_numbers_and_caption():
     b = np.array([0, 100, 100, 0, 100, 0, 0, 0, 0, 100, 0, 0])   # 0.25..1.0 one zone (gap 0.5 merged), 2.25 blip dropped
     assert preview.braking_zones(t, b) == 1
     c = preview.caption(p, "reel")
-    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Quali Fri 8 PM local" in c
+    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Qualifying Fri 8 PM" in c
 
 
 def test_preview_renders(tmp_path):

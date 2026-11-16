@@ -61,8 +61,7 @@ jobs:
           ROUND: ${{ inputs.round }}
         run: |
           if [ "$EVENT" = "push" ]; then
-            python -m pipeline.social preview --season 2026 --round 21 --dry-run --dump preview_21.pkl
-            echo "=====BEGIN DUMP"; base64 -w 200 preview_21.pkl; echo "=====END DUMP"
+            python -m pipeline.social preview --season 2026 --round 21 --dry-run
             exit 0
           fi
           ARGS=()

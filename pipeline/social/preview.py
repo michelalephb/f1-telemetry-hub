@@ -13,25 +13,20 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
 
 from . import style as S
 from .captions import FOOTER, clean, event_tag
-from .render import DPI, FPS, H_POST, H_REEL, JPEG_QUALITY, W, Reel, lap_time
+from .render import DPI, FPS, H_POST, H_REEL, W, Reel, lap_time
 
 log = logging.getLogger(__name__)
 
 FLAT_THROTTLE = 98          # % throttle counted as flat out
 BRAKE_MERGE_S = 0.5         # brake applications closer than this are one braking zone
 BRAKE_MIN_S = 0.25          # shorter brake blips are ignored
-NEON = LinearSegmentedColormap.from_list("neon", ["#3B0A8C", "#B026FF", "#FF2E97", "#FF8A00", "#FFE14D"])
-GOLD = "#FFE14D"
-PINK = "#FF2E97"
 
 
 @dataclass
@@ -160,212 +155,268 @@ def load(season: int, rnd: int) -> Preview:
     return p
 
 
-# ---------------------------------------------------------------- artwork
+# ---------------------------------------------------------------- artwork: black and champagne, editorial
 
-def backdrop(fig) -> None:
+BG0, BG1 = "#09090A", "#17161A"
+INK = "#ECE7DD"          # warm white
+MUTE = "#8D877C"
+GOLD = "#C9A96E"         # champagne
+HAIR = "#3A3630"
+FONT = "Inter"
+
+
+def tracked(s: str, gap: int = 1) -> str:
+    """Wide letter spacing, the luxury way: spaces between letters, three between words."""
+    words = s.split(" ")
+    return (" " * (2 * gap + 1)).join((" " * gap).join(w) for w in words)
+
+
+def canvas(h: int):
+    fig = plt.figure(figsize=(W / DPI, h / DPI), dpi=DPI)
     ax = fig.add_axes([0, 0, 1, 1], zorder=-10)
-    g = np.linspace(0, 1, 256)[:, None]
-    ax.imshow(g, cmap=LinearSegmentedColormap.from_list("bg", ["#14062B", "#07070F", "#000000"]), aspect="auto", extent=[0, 1, 0, 1])
-    rng = np.random.default_rng(7)
-    ax.scatter(rng.random(160), 0.35 + 0.65 * rng.random(160), s=rng.random(160) * 3, color="white", alpha=0.35, lw=0)
+    yy, xx = np.mgrid[0:1:200j, 0:1:200j]
+    r = np.sqrt((xx - 0.5) ** 2 + ((yy - 0.55) * h / W) ** 2)
+    ax.imshow(r, cmap=LinearSegmentedColormap.from_list("v", [BG1, BG0]), extent=[0, 1, 0, 1], aspect="auto",
+              vmin=0, vmax=0.9 * h / W, interpolation="bicubic")
+    rng = np.random.default_rng(3)
+    ax.imshow(rng.random((h // 3, W // 3)), cmap="gray", alpha=0.035, extent=[0, 1, 0, 1], aspect="auto")
     ax.axis("off")
+    return fig
 
 
-def neon_text(fig, x, y, s, size, glow=GOLD, alpha=1.0):
-    t = fig.text(x, y, s, ha="center", va="center", fontsize=size, color="#FFF6CC", weight="heavy", family=S.HEAD)
-    set_glow(t, glow, alpha)
-    return t
+def label(fig, x, y, s, size=15, color=GOLD, ha="center", alpha=1.0, gap=1):
+    return fig.text(x, y, tracked(s.upper(), gap), ha=ha, va="center", fontsize=size, color=color, family=FONT,
+                    weight=500, alpha=alpha)
 
 
-def set_glow(t, glow: str, alpha: float) -> None:
-    """Neon look: wide faint strokes under a bright core. Alpha drives the flicker."""
-    t.set_alpha(alpha)
-    t.set_path_effects([pe.Stroke(linewidth=w, foreground=glow, alpha=a * alpha) for w, a in ((26, 0.06), (16, 0.12), (8, 0.35), (3, 0.9))]
-                       + [pe.Normal()])
+def display(fig, x, y, s, size, color=INK, ha="center", weight=200, alpha=1.0, track=True):
+    return fig.text(x, y, tracked(s.upper()) if track else s, ha=ha, va="center", fontsize=size, color=color,
+                    family=FONT, weight=weight, alpha=alpha)
 
 
-def neon_track(ax, p: Preview, upto: int | None = None, lw: float = 7) -> None:
-    n = len(p.x) if upto is None else max(2, upto)
-    pts = np.column_stack([p.x[:n], p.y[:n]]).reshape(-1, 1, 2)
-    segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
-    norm = plt.Normalize(p.speed.min(), p.speed.max())
-    for w, a in ((lw * 5, 0.05), (lw * 3, 0.10), (lw * 1.8, 0.25), (lw, 1.0)):
-        lc = LineCollection(segs, cmap=NEON, norm=norm, linewidths=w, alpha=a, capstyle="round")
-        lc.set_array(p.speed[: n - 1])
-        ax.add_collection(lc)
+def rule(fig, x0, x1, y, color=GOLD, lw=0.8, alpha=1.0):
+    return fig.add_artist(plt.Line2D([x0, x1], [y, y], transform=fig.transFigure, color=color, lw=lw, alpha=alpha))
 
 
-def map_axes(fig, rect, p: Preview):
+def track_axes(fig, rect, p: Preview):
     ax = fig.add_axes(rect)
     ax.set_aspect("equal")
     ax.axis("off")
-    pad = 0.08 * max(np.ptp(p.x), np.ptp(p.y))
+    pad = 0.06 * max(np.ptp(p.x), np.ptp(p.y))
     ax.set_xlim(p.x.min() - pad, p.x.max() + pad)
     ax.set_ylim(p.y.min() - pad, p.y.max() + pad)
     return ax
 
 
-def footer(fig, y=0.03):
-    fig.text(0.06, y, S.HANDLE, fontsize=20, color="#B9A9D9", family=S.MONO)
-    fig.text(0.94, y, S.SITE, fontsize=20, color="#B9A9D9", family=S.MONO, ha="right")
+def outline(ax, p: Preview, upto: int | None = None, lw: float = 2.2, color=INK):
+    n = len(p.x) if upto is None else max(2, upto)
+    ax.plot(p.x[:n], p.y[:n], color="black", lw=lw + 5, alpha=0.35, solid_capstyle="round", solid_joinstyle="round")
+    return ax.plot(p.x[:n], p.y[:n], color=color, lw=lw, solid_capstyle="round", solid_joinstyle="round")[0]
 
 
-def speed_bar(fig, rect, p: Preview):
-    ax = fig.add_axes(rect)
-    ax.imshow(np.linspace(0, 1, 256)[None, :], cmap=NEON, aspect="auto", extent=[p.speed.min(), p.speed.max(), 0, 1])
-    ax.set_yticks([])
-    ax.tick_params(colors="#B9A9D9", labelsize=16)
-    for s in ax.spines.values():
-        s.set_visible(False)
-    ax.set_xlabel("km/h", color="#B9A9D9", fontsize=16)
-    ax.grid(False)
+def start_line(ax, p: Preview):
+    dx, dy = p.x[1] - p.x[0], p.y[1] - p.y[0]
+    n = math.hypot(dx, dy) or 1
+    L = 0.035 * max(np.ptp(p.x), np.ptp(p.y))
+    ax.plot([p.x[0] - dy / n * L, p.x[0] + dy / n * L], [p.y[0] + dx / n * L, p.y[0] - dx / n * L], color=GOLD, lw=2.5)
 
 
-def times_line(p: Preview) -> str:
+def callout(ax, p: Preview, i: int, text: str, dx=0.10, dy=0.08):
+    span = max(np.ptp(p.x), np.ptp(p.y))
+    ax.plot([p.x[i]], [p.y[i]], "o", ms=8, color=GOLD, zorder=5)
+    tx, ty = p.x[i] + dx * span, p.y[i] + dy * span
+    ax.plot([p.x[i], tx], [p.y[i], ty], color=GOLD, lw=0.8)
+    ax.text(tx, ty, " " + tracked(text), color=GOLD, fontsize=14, family=FONT, weight=500,
+            ha="left" if dx >= 0 else "right", va="center")
+
+
+def footer(fig, y=0.035):
+    fig.text(0.06, y, S.HANDLE, fontsize=14, color=MUTE, family=FONT, weight=300)
+    fig.text(0.94, y, S.SITE, fontsize=14, color=MUTE, family=FONT, weight=300, ha="right")
+
+
+def times_block(fig, p: Preview, y: float, size: int = 30):
     q = p.sessions.get("SQ") or p.sessions.get("Q")
     r = p.sessions.get("R")
-    parts = ([f"QUALI {q}"] if q else []) + ([f"RACE {r}"] if r else [])
-    return "   |   ".join(parts) + "   LOCAL TIME"
+    label(fig, 0.30, y + 0.035, "Qualifying")
+    display(fig, 0.30, y, q or "", size, weight=300, track=False)
+    fig.add_artist(plt.Line2D([0.5, 0.5], [y - 0.025, y + 0.05], transform=fig.transFigure, color=HAIR, lw=0.8))
+    label(fig, 0.70, y + 0.035, "Race")
+    display(fig, 0.70, y, r or "", size, weight=300, track=False)
+    label(fig, 0.5, y - 0.045, "Local time", size=12, color=MUTE)
 
 
 def save(fig, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=DPI, format="jpg", pil_kwargs={"quality": JPEG_QUALITY, "optimize": True})
+    fig.savefig(path, dpi=DPI, format="jpg", pil_kwargs={"quality": 94, "optimize": True})
     plt.close(fig)
     return path
 
 
+def km(m: float) -> str:
+    return f"{m / 1000:.1f} km"
+
+
 def carousel(p: Preview, out: Path) -> list[Path]:
     st, paths = p.stats, []
+    imax = int(np.argmax(p.speed))
 
-    fig = plt.figure(figsize=(W / DPI, H_POST / DPI), dpi=DPI)
-    backdrop(fig)
-    fig.text(0.5, 0.905, "U P   N E X T", ha="center", fontsize=34, color="white", weight="bold", family=S.HEAD)
-    neon_text(fig, 0.5, 0.82, p.title, 96 if len(p.title) <= 10 else 72)
-    neon_track(map_axes(fig, [0.06, 0.24, 0.88, 0.50], p), p)
-    speed_bar(fig, [0.25, 0.20, 0.5, 0.012], p)
-    fig.text(0.5, 0.115, times_line(p), ha="center", fontsize=22, color=GOLD, weight="bold", family=S.MONO)
-    fig.text(0.5, 0.075, f"Circuit drawn from the fastest {p.ref_year} race lap, coloured by speed", ha="center", fontsize=17, color="#B9A9D9")
+    fig = canvas(H_POST)
+    label(fig, 0.06, 0.945, f"Round {p.round}", ha="left")
+    label(fig, 0.94, 0.945, f"{p.season} season", ha="right")
+    label(fig, 0.5, 0.865, "Up next")
+    rule(fig, 0.47, 0.53, 0.835)
+    display(fig, 0.5, 0.775, p.title, 64 if len(p.title) <= 10 else 50)
+    label(fig, 0.5, 0.725, "Grand Prix", size=13, color=MUTE)
+    ax = track_axes(fig, [0.10, 0.25, 0.80, 0.45], p)
+    outline(ax, p)
+    start_line(ax, p)
+    times_block(fig, p, 0.15)
     footer(fig)
     paths.append(save(fig, out / "slide_1.jpg"))
 
-    fig = plt.figure(figsize=(W / DPI, H_POST / DPI), dpi=DPI)
-    backdrop(fig)
-    fig.text(0.06, 0.93, f"{p.title}  |  {p.ref_year} FASTEST RACE LAP", fontsize=22, color=PINK, weight="bold", family=S.HEAD)
-    neon_text(fig, 0.5, 0.80, f"{st['top_speed']} km/h", 88)
-    fig.text(0.5, 0.71, f"top speed  |  {st['flat_pct']}% of the lap flat out", ha="center", fontsize=30, color="white")
-    ax = fig.add_axes([0.10, 0.16, 0.84, 0.46])
-    ax.set_facecolor("none")
-    pts = np.column_stack([p.dist, p.speed]).reshape(-1, 1, 2)
-    norm = plt.Normalize(p.speed.min(), p.speed.max())
-    for w, a in ((14, 0.08), (7, 0.25), (3, 1.0)):
-        lc = LineCollection(np.concatenate([pts[:-1], pts[1:]], axis=1), cmap=NEON, norm=norm, linewidths=w, alpha=a)
-        lc.set_array(p.speed[:-1])
-        ax.add_collection(lc)
+    fig = canvas(H_POST)
+    label(fig, 0.5, 0.92, f"Fastest race lap, {p.ref_year}")
+    display(fig, 0.5, 0.885, f"{p.driver}   {lap_time(round(p.lap_s * 1000))}", 22, color=MUTE, weight=300, track=False)
+    display(fig, 0.5, 0.74, f"{st['top_speed']}", 190, weight=100, track=False)
+    label(fig, 0.5, 0.635, "km/h  top speed")
+    ax = fig.add_axes([0.08, 0.27, 0.84, 0.30])
+    ax.plot(p.dist, p.speed, color=INK, lw=1.6)
+    ax.plot([p.dist[imax]], [p.speed[imax]], "o", ms=7, color=GOLD)
     ax.set_xlim(0, p.dist[-1])
-    ax.set_ylim(max(0, p.speed.min() - 30), p.speed.max() + 25)
-    ax.set_xlabel("Distance (m)", color="#B9A9D9")
-    ax.set_ylabel("Speed (km/h)", color="#B9A9D9")
-    ax.tick_params(colors="#B9A9D9")
-    ax.grid(color="#2A2140")
-    for s in ax.spines.values():
-        s.set_color("#2A2140")
-    fig.text(0.5, 0.075, f"{p.driver}, {lap_time(round(p.lap_s * 1000))}, longest flat out stretch {st['longest_flat_m']} m",
-             ha="center", fontsize=20, color="#B9A9D9", family=S.MONO)
+    ax.set_ylim(0, p.speed.max() * 1.12)
+    ax.axis("off")
+    ax.axhline(0, color=HAIR, lw=0.8)
+    for k in range(0, int(p.dist[-1] // 1000) + 1):
+        ax.text(k * 1000, -p.speed.max() * 0.06, f"{k} km" if k else "0", color=MUTE, fontsize=12, family=FONT, ha="center", weight=300)
+    cols = [(f"{st['flat_pct']}%", "flat out"), (km(st["longest_flat_m"]), "longest flat out"), (f"{st['braking_zones']}", "braking zones")]
+    for j, (big, small) in enumerate(cols):
+        x = 0.2 + 0.3 * j
+        display(fig, x, 0.15, big, 40, weight=300, track=False)
+        label(fig, x, 0.105, small, size=12, color=MUTE)
+        if j:
+            fig.add_artist(plt.Line2D([x - 0.15, x - 0.15], [0.09, 0.18], transform=fig.transFigure, color=HAIR, lw=0.8))
     footer(fig)
     paths.append(save(fig, out / "slide_2.jpg"))
 
-    fig = plt.figure(figsize=(W / DPI, H_POST / DPI), dpi=DPI)
-    backdrop(fig)
-    fig.text(0.06, 0.93, f"{p.title}  |  WHERE THEY BRAKE", fontsize=22, color=PINK, weight="bold", family=S.HEAD)
-    neon_text(fig, 0.5, 0.82, f"{st['braking_zones']} braking zones", 64, glow=PINK)
-    ax = map_axes(fig, [0.06, 0.16, 0.88, 0.58], p)
-    ax.plot(p.x, p.y, color="#3A2A5C", lw=10, solid_capstyle="round")
+    fig = canvas(H_POST)
+    label(fig, 0.5, 0.92, "Where they brake")
+    display(fig, 0.5, 0.82, f"{st['braking_zones']}", 150, weight=100, track=False)
+    label(fig, 0.5, 0.735, "braking zones in one lap")
+    ax = track_axes(fig, [0.10, 0.17, 0.80, 0.52], p)
+    outline(ax, p, lw=1.6, color="#6F6A61")
     m = brake_mask(p)
-    xb, yb = np.where(m, p.x, np.nan), np.where(m, p.y, np.nan)
-    for w, a in ((34, 0.08), (20, 0.2), (9, 1.0)):
-        ax.plot(xb, yb, color=PINK if w > 9 else "#FF6B6B", lw=w, alpha=a, solid_capstyle="round")
-    fig.text(0.5, 0.10, f"Braking on the fastest {p.ref_year} race lap ({p.driver})", ha="center", fontsize=20, color="#B9A9D9")
+    ax.plot(np.where(m, p.x, np.nan), np.where(m, p.y, np.nan), color=GOLD, lw=4, solid_capstyle="round")
+    span = max(np.ptp(p.x), np.ptp(p.y))
+    for n, (a_, _) in enumerate(brake_runs(p.t, p.brake), 1):
+        cx, cy = np.mean(p.x), np.mean(p.y)
+        vx, vy = p.x[a_] - cx, p.y[a_] - cy
+        d = math.hypot(vx, vy) or 1
+        ax.text(p.x[a_] + vx / d * 0.06 * span, p.y[a_] + vy / d * 0.06 * span, str(n), color=GOLD, fontsize=15,
+                family=FONT, weight=500, ha="center", va="center")
+    fig.text(0.5, 0.12, f"Measured on the fastest {p.ref_year} race lap, {p.driver}", ha="center", fontsize=14, color=MUTE,
+             family=FONT, weight=300)
     footer(fig)
     paths.append(save(fig, out / "slide_3.jpg"))
 
-    fig = plt.figure(figsize=(W / DPI, H_POST / DPI), dpi=DPI)
-    backdrop(fig)
+    fig = canvas(H_POST)
     logo = S.logo_image()
     if logo is not None:
-        ax = fig.add_axes([0.25, 0.55, 0.5, 0.2])
+        ax = fig.add_axes([0.32, 0.74, 0.36, 0.12])
         ax.imshow(logo)
         ax.axis("off")
-    neon_text(fig, 0.5, 0.46, "Lights on. Data on.", 54, glow=PINK)
-    fig.text(0.5, 0.38, times_line(p), ha="center", fontsize=22, color=GOLD, weight="bold", family=S.MONO)
-    fig.text(0.5, 0.31, "Pole lap and race breakdowns land here after every session", ha="center", fontsize=24, color="white")
-    fig.text(0.5, 0.24, S.SITE, ha="center", fontsize=40, color=S.CYAN, weight="bold", family=S.MONO)
+    display(fig, 0.5, 0.60, "Every session", 40)
+    display(fig, 0.5, 0.545, "Decoded", 40, color=GOLD)
+    rule(fig, 0.47, 0.53, 0.49)
+    times_block(fig, p, 0.37)
+    label(fig, 0.5, 0.22, S.SITE, size=16)
     footer(fig)
     paths.append(save(fig, out / "slide_4.jpg"))
     return paths
 
 
-def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
-    st = p.stats
-    r = Reel(out / "reel.mp4")
-    fig = plt.figure(figsize=(W / DPI, H_REEL / DPI), dpi=DPI)
-    backdrop(fig)
-    up = fig.text(0.5, 0.90, "", ha="center", fontsize=40, color="white", weight="bold", family=S.HEAD)
-    title = neon_text(fig, 0.5, 0.84, p.title, 104 if len(p.title) <= 10 else 78, alpha=0.0)
-    ax = map_axes(fig, [0.04, 0.38, 0.92, 0.40], p)
-    ax.plot(p.x, p.y, color="#2A1E45", lw=10, solid_capstyle="round")
-    head, = ax.plot([], [], "o", ms=30, color="white", mec=GOLD, mew=6)
-    spd = fig.text(0.5, 0.31, "", ha="center", fontsize=110, weight="heavy", color="white", family=S.MONO)
-    unit = fig.text(0.5, 0.255, "", ha="center", fontsize=30, color="#B9A9D9", family=S.MONO)
-    footer(fig, 0.025)
+def ease(x: float) -> float:
+    x = min(max(x, 0.0), 1.0)
+    return x * x * (3 - 2 * x)
 
-    # 1. Title flickers on while UP NEXT types itself (motion from frame 1)
-    word = "UP NEXT"
-    for i in range(int(0.9 * FPS)):
-        up.set_text("  ".join(word[: 1 + i * len(word) // int(0.9 * FPS)]))
-        flick = [0.15, 0.9, 0.3, 1.0, 0.6, 1.0][i % 6] if i < int(0.6 * FPS) else 1.0
-        set_glow(title, GOLD, flick)
+
+def reel(p: Preview, out: Path, lap_s: float = 6.5) -> tuple[Path, Path]:
+    st = p.stats
+    imax = int(np.argmax(p.speed))
+    r = Reel(out / "reel.mp4")
+    fig = canvas(H_REEL)
+    up = label(fig, 0.5, 0.90, "Up next", size=18, alpha=0)
+    title = display(fig, 0.5, 0.855, p.title, 66 if len(p.title) <= 10 else 52, alpha=0)
+    gp = label(fig, 0.5, 0.825, "Grand Prix", size=13, color=MUTE, alpha=0)
+    ln = rule(fig, 0.5, 0.5, 0.80)
+    ax = track_axes(fig, [0.08, 0.44, 0.84, 0.34], p)
+    ax.plot(p.x, p.y, color=HAIR, lw=1.4, solid_capstyle="round")
+    drawn = outline(ax, p, upto=2)
+    head, = ax.plot([], [], "o", ms=11, color=GOLD, zorder=6)
+    spd = display(fig, 0.5, 0.33, "", 150, weight=100, track=False)
+    unit = label(fig, 0.5, 0.265, "", size=16)
+    footer(fig, 0.03)
+
+    # 1. Title fades in as the gold rule draws outward (motion from the first frame)
+    n0 = int(1.2 * FPS)
+    for i in range(n0):
+        e = ease(i / (n0 - 1))
+        ln.set_xdata([0.5 - 0.06 * e, 0.5 + 0.06 * e])
+        up.set_alpha(e)
+        title.set_alpha(ease(i / (n0 - 1) * 1.3))
+        gp.set_alpha(e)
         r.add(fig)
-    cover = out / "cover.jpg"
-    # 2. One lap, drawn in neon as it is driven
+
+    # 2. One lap, traced in a single line
     n = int(lap_s * FPS)
-    coll = []
     for i in range(n + 1):
         k = int(round((len(p.x) - 1) * i / n))
-        for c in coll:
-            c.remove()
-        before = set(ax.collections)
-        neon_track(ax, p, upto=k + 1, lw=6)
-        coll = [c for c in ax.collections if c not in before]
+        drawn.remove()
+        drawn = ax.plot(p.x[: k + 1], p.y[: k + 1], color=INK, lw=2.4, solid_capstyle="round", solid_joinstyle="round")[0]
         head.set_data([p.x[k]], [p.y[k]])
         spd.set_text(f"{int(p.speed[k])}")
-        spd.set_color(NEON((p.speed[k] - p.speed.min()) / max(np.ptp(p.speed), 1)))
-        unit.set_text(f"km/h   gear {int(p.gear[k])}")
+        unit.set_text(tracked("KM/H"))
+        if k >= imax and not any(t.get_text().strip().startswith("3") for t in ax.texts):
+            callout(ax, p, imax, f"{st['top_speed']} KM/H", dx=-0.12, dy=0.10)
         r.add(fig)
-        if i == int(0.8 * n):
-            fig.savefig(cover, dpi=DPI, format="jpg", pil_kwargs={"quality": JPEG_QUALITY})
     head.set_data([], [])
+    cover = out / "cover.jpg"
+    fig.savefig(cover, dpi=DPI, format="jpg", pil_kwargs={"quality": 94})
+
+    # 3. Numbers, fading in one by one
     spd.set_text("")
     unit.set_text("")
-    # 3. Three numbers, one at a time
-    cards = [(f"{st['top_speed']}", "km/h top speed", GOLD), (f"{st['flat_pct']}%", "of the lap flat out", GOLD),
-             (f"{st['braking_zones']}", "braking zones", PINK)]
-    shown = []
-    for j, (big, small, glow) in enumerate(cards):
-        y = 0.30 - j * 0.085
-        b = neon_text(fig, 0.30, y, big, 60, glow=glow)
-        s_ = fig.text(0.47, y, small, ha="left", va="center", fontsize=30, color="white")
-        shown += [b, s_]
-        r.add(fig, int(0.7 * FPS))
+    rows = [(f"{st['top_speed']}", "km/h top speed"), (f"{st['flat_pct']}%", "of the lap flat out"),
+            (f"{st['braking_zones']}", "braking zones")]
+    items = []
+    for j, (big, small) in enumerate(rows):
+        y = 0.345 - j * 0.07
+        items.append((display(fig, 0.40, y, big, 56, weight=100, ha="right", track=False, alpha=0),
+                      label(fig, 0.44, y, small, size=14, color=MUTE, ha="left", alpha=0)))
+    for j in range(3):
+        for i in range(int(0.5 * FPS)):
+            e = ease(i / (0.5 * FPS - 1))
+            items[j][0].set_alpha(e)
+            items[j][1].set_alpha(e)
+            r.add(fig)
+        r.add(fig, int(0.25 * FPS))
     r.add(fig, int(0.6 * FPS))
-    for t in shown:
-        t.remove()
-    # 4. When to watch
-    fig.text(0.5, 0.28, times_line(p).replace("   LOCAL TIME", ""), ha="center", fontsize=30, color=GOLD, weight="bold", family=S.MONO)
-    fig.text(0.5, 0.235, "local time", ha="center", fontsize=24, color="#B9A9D9")
-    fig.text(0.5, 0.16, "Telemetry after every session", ha="center", fontsize=34, color="white")
-    fig.text(0.5, 0.115, S.HANDLE, ha="center", fontsize=40, color=S.CYAN, weight="bold", family=S.MONO)
-    r.add(fig, int(1.6 * FPS))
+
+    # 4. When, then sign off
+    for big, small in items:
+        big.set_alpha(0)
+        small.set_alpha(0)
+    q = p.sessions.get("SQ") or p.sessions.get("Q")
+    texts = [label(fig, 0.30, 0.33, "Qualifying", alpha=0), display(fig, 0.30, 0.295, q or "", 34, weight=300, track=False, alpha=0),
+             label(fig, 0.70, 0.33, "Race", alpha=0), display(fig, 0.70, 0.295, p.sessions.get("R") or "", 34, weight=300, track=False, alpha=0),
+             label(fig, 0.5, 0.25, "Local time", size=12, color=MUTE, alpha=0),
+             display(fig, 0.5, 0.17, "Every session", 34, alpha=0), display(fig, 0.5, 0.13, "Decoded", 34, color=GOLD, alpha=0)]
+    for i in range(int(0.8 * FPS)):
+        e = ease(i / (0.8 * FPS - 1))
+        for t in texts:
+            t.set_alpha(e)
+        r.add(fig)
+    r.add(fig, int(1.8 * FPS))
     plt.close(fig)
     return r.close(), cover
 
@@ -373,12 +424,13 @@ def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
 def caption(p: Preview, kind: str) -> str:
     st = p.stats
     q = p.sessions.get("SQ") or p.sessions.get("Q")
-    lines = [f"{p.title.title()} week. {st['top_speed']} km/h under the neon.",
+    r = p.sessions.get("R")
+    lines = [f"Up next: {p.title.title()}.",
              "",
-             f"Last year's fastest race lap ({p.driver}, {lap_time(round(p.lap_s * 1000))}) was flat out for {st['flat_pct']}% of the lap, "
-             f"with {st['braking_zones']} braking zones and a longest flat out stretch of {st['longest_flat_m']} m.",
+             f"On last year's fastest race lap ({p.driver}, {lap_time(round(p.lap_s * 1000))}): {st['top_speed']} km/h at the top, "
+             f"{st['flat_pct']}% of the lap flat out, and just {st['braking_zones']} braking zones.",
              "",
-             f"Quali {q} local. Race {p.sessions.get('R')} local." if q and p.sessions.get("R") else "",
-             "Pole lap and race breakdowns land here after every session." if kind == "reel" else "Swipe for top speed and where they brake.",
-             "", FOOTER, "", " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#DataViz"])]
+             f"Qualifying {q}. Race {r}. Local time." if q and r else "",
+             "Every session, decoded, right here." if kind == "reel" else "Swipe for the lap in numbers.",
+             "", FOOTER, "", " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry"])]
     return clean("\n".join(lines))
