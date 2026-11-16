@@ -119,10 +119,10 @@ export function runningOrder(r: Replay, states: CarState[], t: number, trackM: n
     let gap: string
     if (i === 0) gap = 'Leader'
     else {
-      const laps = Math.floor((lead.metres - s.metres) / trackM)
-      if (s.finished && lead.finished && lapOf(s) === lapOf(lead)) gap = ''
-      else if (laps >= 1) gap = `+${laps} ${laps === 1 ? 'lap' : 'laps'}`
-      else gap = ''
+      // Once both have stopped, laps behind is the difference in completed laps (a car classified
+      // after stopping on its last lap is a lap down); while running, a full lap of distance.
+      const laps = s.finished && lead.finished ? lapOf(lead) - lapOf(s) : Math.floor((lead.metres - s.metres) / trackM)
+      gap = laps >= 1 ? `+${laps} ${laps === 1 ? 'lap' : 'laps'}` : ''
     }
     return { ...s, pos: i + 1, gap }
   })

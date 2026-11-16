@@ -155,9 +155,11 @@ if (s.session_code === 'R' || s.session_code === 'S') {
     console.log(`replay: ${rp.cars.length} cars, ${rp.n} s; order at the flag ${ord.slice(0, 5).map((o) => `${code(o.num)} ${o.gap}`).join(', ')}`)
     assert.ok(ord.every((o) => !/\d\.\d/.test(o.gap)), 'no seconds gaps in the replay tower')
     // After the last car has finished: laps behind must match the official classification
-    const end = stateAt(rp, rp.n, new Map(res.map((r) => [r.driver_number, r.grid])), new Set(res.map((r) => r.driver_number)))
+    // classified as on the race page: at least 90 % of the winner's laps
+    const cls = new Set(res.filter((r) => r.laps != null && r.laps >= 0.9 * res[0].laps!).map((r) => r.driver_number))
+    const end = stateAt(rp, rp.n, new Map(res.map((r) => [r.driver_number, r.grid])), cls)
     const fin = runningOrder(rp, end, rp.n, L)
-    const lapsOff = res.filter((r) => r.laps != null && fin.some((o) => o.num === r.driver_number)).map((r) => {
+    const lapsOff = res.filter((r) => cls.has(r.driver_number)).map((r) => {
       const want = res[0].laps! - r.laps!, row = fin.find((o) => o.num === r.driver_number)
       const got = row?.gap.startsWith('+') ? parseInt(row.gap.slice(1), 10) : 0
       return { code: r.driver_code, want, got }
