@@ -280,6 +280,43 @@ def cmd_rewind(a) -> int:
     return finish(report, a.out, failed)
 
 
+def cmd_preview(a) -> int:
+    """Race week "up next" post for one round: a Reel and a carousel (original artwork, own data)."""
+    from . import preview
+    sb = store.client()
+    ig = connect(sb, a.dry_run)
+    if ig is not None and not getattr(ig, "sends_files", False):
+        log.error("preview posts need the Upload-Post publisher")
+        return 1
+    p = preview.load(a.season, a.round)
+    sid = f"{a.season}_{a.round:02d}_PREVIEW"
+    report, failed = [], 0
+    for kind in ([a.kind] if a.kind else list(KINDS)):
+        out = Path(a.out) / sid / f"preview_{kind}"
+        if kind == "reel":
+            v, c = preview.reel(p, out)
+            built = {"video": v, "cover": c, "files": [], "caption": preview.caption(p, kind)}
+        else:
+            built = {"video": None, "cover": None, "files": preview.carousel(p, out), "caption": preview.caption(p, kind)}
+        entry = {"session_id": sid, "kind": kind, "story": "session", "checks": p.stats | {"driver": p.driver, "lap_s": p.lap_s,
+                 "ref_year": p.ref_year, "sessions": p.sessions}, "caption": built["caption"]}
+        if ig is None:
+            report.append(entry | {"status": "rendered (dry run)"})
+            continue
+        row = post_row(sb, sid, kind, "session")
+        if row and row["status"] == "published":
+            report.append(entry | {"status": "already published", "permalink": row.get("permalink")})
+            continue
+        try:
+            if row and row["status"] == "queued" and (row.get("container_id") or "").startswith("up:"):
+                resume(sb, ig, row, report, entry)
+            else:
+                send_files(sb, ig, sid, kind, "session", built, (row or {}).get("attempts", 0) + 1, entry, report)
+        except Exception:
+            failed += 1
+    return finish(report, a.out, failed)
+
+
 def cmd_refresh(a) -> int:
     sb = store.client()
     cfg = settings(sb)
@@ -306,7 +343,9 @@ def finish(report: list, out: str, failed: int) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.social")
-    ap.add_argument("cmd", choices=["run", "rewind", "refresh"])
+    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview"])
+    ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
+    ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
     ap.add_argument("--kind", choices=KINDS)
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
@@ -316,7 +355,7 @@ def main(argv=None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)   # request URLs can carry the token
     style.load_fonts()
-    return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh}[a.cmd](a)
+    return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh, "preview": cmd_preview}[a.cmd](a)
 
 
 if __name__ == "__main__":

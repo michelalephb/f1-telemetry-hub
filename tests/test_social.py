@@ -390,3 +390,36 @@ def test_uploadpost_rejection_marks_failed(tmp_path, monkeypatch):
     with pytest.raises(Exception, match="bad media"):
         m.handle(sb, up, "2026_01_Q", "reel", "session", tmp_path, {"2026_01_Q": (meta, st, 0.0)}, [])
     assert sb.db["ig_posts"][0]["status"] == "failed"
+
+
+def preview_fixture():
+    from pipeline.social.preview import Preview, lap_stats
+    tr, lap = lap_rows(1)
+    tr = tr[(tr.lap_dist_m >= 0) & (tr.lap_dist_m <= TRACK_M)]
+    p = Preview("LAS VEGAS", "Las Vegas Grand Prix", 2026, 21, 2025, "NOR", lap, tr.t.to_numpy() - tr.t.iloc[0],
+                tr.lap_dist_m.to_numpy(), tr.speed.to_numpy(float), tr.throttle.to_numpy(float),
+                tr.brake.to_numpy(float) * 100, tr.gear.to_numpy(float), tr.x.to_numpy(float), tr.y.to_numpy(float),
+                {"Q": "Fri 8 PM", "R": "Sat 8 PM"})
+    p.stats = lap_stats(p)
+    return p
+
+
+def test_preview_numbers_and_caption():
+    from pipeline.social import preview
+    p = preview_fixture()
+    assert p.stats["top_speed"] == 300 and p.stats["braking_zones"] == 4
+    assert 0 < p.stats["flat_pct"] < 100 and p.stats["longest_flat_m"] > 0
+    t = np.arange(0, 3, 0.25)
+    b = np.array([0, 100, 100, 0, 100, 0, 0, 0, 0, 100, 0, 0])   # 0.25..1.0 one zone (gap 0.5 merged), 2.25 blip dropped
+    assert preview.braking_zones(t, b) == 1
+    c = preview.caption(p, "reel")
+    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Quali Fri 8 PM local" in c
+
+
+def test_preview_renders(tmp_path):
+    from pipeline.social import preview
+    p = preview_fixture()
+    assert len(preview.carousel(p, tmp_path)) == 4
+    if shutil.which("ffmpeg"):
+        v, c = preview.reel(p, tmp_path, lap_s=1.0)
+        assert v.stat().st_size > 0 and c.exists()

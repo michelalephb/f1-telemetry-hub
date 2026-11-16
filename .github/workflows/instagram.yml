@@ -15,7 +15,8 @@ on:
     paths: ["pipeline/social/**", ".github/workflows/instagram.yml"]
   workflow_dispatch:
     inputs:
-      mode: {description: "run or rewind", default: "run"}
+      mode: {description: "run, rewind or preview", default: "run"}
+      round: {description: "preview: round of the coming Grand Prix", default: ""}
       session: {description: "Session id, e.g. 2026_20_Q (empty = sessions from the last 72 h)", default: ""}
       kind: {description: "reel or carousel (empty = both)", default: ""}
       dry_run: {description: "Render only, post nothing", type: boolean, default: true}
@@ -57,21 +58,34 @@ jobs:
           SESSION: ${{ inputs.session }}
           KIND: ${{ inputs.kind }}
           DRY: ${{ inputs.dry_run }}
+          ROUND: ${{ inputs.round }}
         run: |
           if [ "$EVENT" = "push" ]; then
-            python -m pipeline.social run --session 2026_20_Q --dry-run
-            python -m pipeline.social run --session 2026_20_R --dry-run
+            python -m pipeline.social preview --season 2026 --round 21 --dry-run
             exit 0
           fi
           ARGS=()
           [ "$DRY" = "true" ] && ARGS+=(--dry-run)
-          if [ "$EVENT" = "schedule" ] || [ "$MODE" = "rewind" ]; then
+          if [ "$MODE" = "preview" ]; then
+            python -m pipeline.social preview --round "$ROUND" "${ARGS[@]}"
+          elif [ "$EVENT" = "schedule" ] || [ "$MODE" = "rewind" ]; then
             python -m pipeline.social rewind "${ARGS[@]}"
           else
             [ -n "$SESSION" ] && ARGS+=(--session "$SESSION")
             [ -n "$KIND" ] && ARGS+=(--kind "$KIND")
             python -m pipeline.social run "${ARGS[@]}"
           fi
+      - name: TEMP preview in the log (review only, removed before merge)
+        if: github.event_name == 'push'
+        run: |
+          python - <<'PY'
+          import base64, glob
+          for f in sorted(glob.glob("ig_out/**/*.jpg", recursive=True)) + sorted(glob.glob("ig_out/**/*.mp4", recursive=True)):
+              t = base64.b64encode(open(f, "rb").read()).decode()
+              print(f"=====BEGIN {f.replace('/', '__')}")
+              for j in range(0, len(t), 200): print(t[j:j+200])
+              print("=====END")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
