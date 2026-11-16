@@ -84,7 +84,9 @@ Schema: `supabase/migrations/`.
 * Storage: videos are uploaded to the public `web` bucket only while Instagram fetches them, then deleted (posted or failed). Covers and slides stay (`web/ig/...`).
 * Kill switch: `social_settings.enabled` (off by default). Set it to false to stop posting at once.
 
-Extra secrets: `IG_ACCESS_TOKEN` (long lived Instagram user token), `IG_USER_ID` (optional, looked up from the token otherwise). After the first refresh the live token is kept in `social_settings` (service role only).
+Publisher: **Upload-Post** (upload-post.com) when the `UPLOADPOST_API_KEY` secret is set. It runs its own approved Meta app, so no Facebook account or Meta developer app is needed; the Instagram account is connected once on upload-post.com with Instagram login. Files are sent directly (nothing is stored in our bucket), async with our own request id saved before sending, so a run that dies mid upload checks that id next run instead of posting twice. Profile name: repository variable `UPLOADPOST_USER` (default `f1telemetryhub`). Free plan: 10 uploads a month; in season we post about 20 to 25.
+
+Fallback publisher (Meta API directly), secrets `IG_ACCESS_TOKEN` (long lived Instagram user token), `IG_USER_ID` (optional, looked up from the token otherwise). After the first refresh the live token is kept in `social_settings` (service role only).
 
 ## Notice
 

@@ -17,7 +17,9 @@ from pathlib import Path
 from .. import store
 from . import captions, render, style
 from .data import load_story, rows
-from .publish import Instagram, now_iso, refresh_token
+import uuid
+
+from .publish import Instagram, UploadPost, now_iso, refresh_token
 from .story import StoryError
 
 log = logging.getLogger("social")
@@ -102,6 +104,8 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
     row = post_row(sb, sid, kind, story) if live else None
     if row and (row["status"] in ("published", "skipped") or (row["status"] == "failed" and row["attempts"] >= MAX_ATTEMPTS)):
         return False
+    if row and row["status"] == "queued" and (row.get("container_id") or "").startswith("up:"):
+        return resume(sb, ig, row, report)   # an earlier run sent it: never send twice
     entry = {"session_id": sid, "kind": kind, "story": story}
     try:
         if sid not in cache:
@@ -131,6 +135,8 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
     attempts = ((row or {}).get("attempts", 0) + 1) if (row or {}).get("status") == "failed" else 1
     save_row(sb, {"session_id": sid, "kind": kind, "story": story, "status": "queued", "caption": built["caption"],
                         "attempts": attempts, "error": None})
+    if getattr(ig, "sends_files", False):
+        return send_files(sb, ig, sid, kind, story, built, attempts, entry, report)
     video_paths = []
     try:
         if kind == "reel":
@@ -160,9 +166,55 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
         remove(sb, video_paths)   # posted or failed, the video is not kept (a retry renders it again)
 
 
+def send_files(sb, ig: UploadPost, sid: str, kind: str, story: str, built: dict, attempts: int, entry: dict, report: list) -> bool:
+    """Upload-Post: send the local files. The request id is saved first, so a crash or timeout is
+    picked up by resume() on the next run instead of being sent again."""
+    rid = f"{sid}-{story}-{kind}-a{attempts}-{uuid.uuid4().hex[:8]}"
+    key = {"session_id": sid, "kind": kind, "story": story}
+    save_row(sb, key | {"status": "queued", "container_id": f"up:{rid}", "attempts": attempts, "error": None})
+    try:
+        if kind == "reel":
+            ig.send_reel(str(built["video"]), str(built["cover"]) if built["cover"] else None, built["caption"], rid)
+        else:
+            ig.send_carousel([str(p) for p in built["files"]], built["caption"], rid)
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"[:1000]
+        log.error("%s %s not sent (attempt %d): %s", sid, kind, attempts, msg)
+        save_row(sb, key | {"status": "failed", "error": msg, "attempts": attempts})
+        report.append(entry | {"status": "failed", "reason": msg})
+        raise
+    return resume(sb, ig, key | {"container_id": f"up:{rid}", "attempts": attempts}, report, entry)
+
+
+def resume(sb, ig: UploadPost, row: dict, report: list, entry: dict | None = None) -> bool:
+    """Check a sent Upload-Post request: published, failed, or still processing (left queued)."""
+    rid = row["container_id"][3:]
+    key = {k: row[k] for k in ("session_id", "kind", "story")}
+    entry = entry or dict(key)
+    try:
+        res = ig.wait(rid)
+    except TimeoutError as e:
+        log.warning("%s: still processing, will check again next run (%s)", rid, e)
+        report.append(entry | {"status": "processing", "reason": str(e)})
+        return False
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"[:1000]
+        save_row(sb, key | {"status": "failed", "error": msg, "attempts": row.get("attempts", 1)})
+        report.append(entry | {"status": "failed", "reason": msg})
+        raise
+    link = res.get("url") or res.get("post_url")
+    media = res.get("post_id") or res.get("media_id") or res.get("container_id")
+    save_row(sb, key | {"status": "published", "media_id": str(media) if media else None, "permalink": link,
+                        "published_at": now_iso(), "media_paths": None, "attempts": row.get("attempts", 1), "error": None})
+    report.append(entry | {"status": "published", "permalink": link})
+    log.info("published %s %s: %s", key["session_id"], key["kind"], link)
+    return True
+
+
 # ---------------------------------------------------------------- commands
 
-def connect(sb, dry_run: bool) -> Instagram | None:
+def connect(sb, dry_run: bool) -> Instagram | UploadPost | None:
+    """Upload-Post when UPLOADPOST_API_KEY is set (no Facebook account needed), else Meta's API."""
     if dry_run:
         return None
     cfg = settings(sb)
@@ -170,6 +222,8 @@ def connect(sb, dry_run: bool) -> Instagram | None:
     if not cfg.get("enabled"):
         log.info("posting disabled (social_settings.enabled is not true): dry run")
         return None
+    if os.environ.get("UPLOADPOST_API_KEY"):
+        return UploadPost(os.environ["UPLOADPOST_API_KEY"], os.environ.get("UPLOADPOST_USER") or "f1telemetryhub")
     if not tok:
         log.info("no Instagram token: dry run")
         return None

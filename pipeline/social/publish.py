@@ -116,3 +116,88 @@ def refresh_token(token: str, session: requests.Session | None = None) -> tuple[
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------- Upload-Post (no Facebook account needed)
+
+UP_HOST = "https://api.upload-post.com/api"
+
+
+class UploadPost:
+    """Publishes through Upload-Post, which runs its own approved Meta app: the Instagram account is
+    connected once on upload-post.com with Instagram login. Files are sent directly (no public URLs,
+    so nothing is stored in our bucket). Uploads run async with our own request_id; the id is saved
+    before the call so a run that dies mid upload checks that id next time instead of posting twice.
+    """
+
+    sends_files = True
+
+    def __init__(self, api_key: str, user: str, session: requests.Session | None = None):
+        self.key = api_key
+        self.user = user
+        self.http = session or requests.Session()
+
+    def _headers(self, request_id: str | None = None) -> dict:
+        h = {"Authorization": f"Apikey {self.key}"}
+        if request_id:
+            h["Idempotency-Key"] = request_id
+        return h
+
+    def _post(self, path: str, data: list, files: list, request_id: str) -> dict:
+        r = self.http.post(f"{UP_HOST}/{path}", headers=self._headers(request_id), data=data, files=files, timeout=300)
+        try:
+            body = r.json()
+        except ValueError:
+            body = {"message": r.text[:300]}
+        if r.status_code >= 400 or body.get("success") is False:
+            raise IGError(f"upload-post {path}: HTTP {r.status_code}: {body.get('message') or body.get('error')}")
+        return body
+
+    def status(self, request_id: str) -> tuple[str, dict | None]:
+        """('pending' | 'in_progress' | 'completed', the Instagram result once there is one)."""
+        r = self.http.get(f"{UP_HOST}/uploadposts/status", headers=self._headers(), params={"request_id": request_id}, timeout=60)
+        if r.status_code >= 400:
+            raise IGError(f"upload-post status: HTTP {r.status_code}: {r.text[:200]}")
+        body = r.json()
+        ig = next((x for x in body.get("results") or [] if x.get("platform") == "instagram"), None)
+        return body.get("status", "pending"), ig
+
+    def wait(self, request_id: str, max_s: float | None = None) -> dict:
+        t0 = time.monotonic()
+        while True:
+            st, ig = self.status(request_id)
+            if ig is not None and ig.get("success") is False:
+                raise IGError(f"instagram rejected the post: {ig.get('error') or ig.get('message')}")
+            if st == "completed" and ig is not None:
+                return ig
+            if time.monotonic() - t0 > (POLL_MAX_S if max_s is None else max_s):
+                raise TimeoutError(f"upload-post {request_id}: still {st} after {POLL_MAX_S} s")
+            time.sleep(POLL_S)
+
+    def _common(self, caption: str, request_id: str) -> list:
+        return [("user", self.user), ("platform[]", "instagram"), ("title", caption), ("instagram_title", caption),
+                ("async_upload", "true"), ("request_id", request_id)]
+
+    def send_reel(self, video: str, cover: str | None, caption: str, request_id: str) -> None:
+        data = self._common(caption, request_id) + [("media_type", "REELS"), ("share_to_feed", "true")]
+        with open(video, "rb") as v:
+            files = [("video", ("reel.mp4", v, "video/mp4"))]
+            if cover:
+                c = open(cover, "rb")
+                files.append(("cover_image", ("cover.jpg", c, "image/jpeg")))
+            try:
+                self._post("upload", data, files, request_id)
+            finally:
+                if cover:
+                    c.close()
+
+    def send_carousel(self, images: list[str], caption: str, request_id: str) -> None:
+        if not 2 <= len(images) <= 10:
+            raise IGError(f"a carousel needs 2 to 10 items, got {len(images)}")
+        handles = [open(p, "rb") for p in images]
+        try:
+            files = [("photos[]", (f"slide_{i + 1}.jpg", h, "image/jpeg")) for i, h in enumerate(handles)]
+            self._post("upload_photos", self._common(caption, request_id), files, request_id)
+        finally:
+            for h in handles:
+                h.close()

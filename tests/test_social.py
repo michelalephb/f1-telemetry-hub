@@ -314,3 +314,79 @@ def _touch(p):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"x")
     return p
+
+
+class FakeUpHTTP:
+    """Upload-Post: records multipart posts; status goes pending, in_progress, completed."""
+    def __init__(self, fail=False):
+        self.posts, self.polls, self.fail = [], 0, fail
+
+    def post(self, url, headers=None, data=None, files=None, timeout=None):
+        self.posts.append((url.rsplit("/", 1)[-1], dict(data), [f[0] for f in files], headers))
+        return Resp({"success": True, "request_id": dict(data)["request_id"]})
+
+    def get(self, url, headers=None, params=None, timeout=None):
+        self.polls += 1
+        if self.polls == 1:
+            return Resp({"status": "pending", "results": []})
+        if self.fail:
+            return Resp({"status": "completed", "results": [{"platform": "instagram", "success": False, "error": "bad media"}]})
+        if self.polls == 2:
+            return Resp({"status": "in_progress", "results": [{"platform": "instagram", "success": True, "message": "Queued"}]})
+        return Resp({"status": "completed", "results": [{"platform": "instagram", "success": True, "url": "https://www.instagram.com/reel/abc/"}]})
+
+
+def test_uploadpost_reel_sends_the_file_and_records_the_link(tmp_path, monkeypatch):
+    from pipeline.social import __main__ as m
+    from pipeline.social.publish import UploadPost
+    monkeypatch.setattr("pipeline.social.publish.POLL_S", 0)
+    results, laps, drivers, traces = quali_fixture()
+    st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
+    meta = {"event": "Test Grand Prix", "code": "Q", "round": 1, "season": 2026}
+    monkeypatch.setattr(render, "quali_reel", lambda st, meta, rot, out: (_touch(out / "reel.mp4"), _touch(out / "cover.jpg")))
+    sb, http = FakeSB(), FakeUpHTTP()
+    up = UploadPost("KEY", "f1telemetryhub", session=http)
+    assert m.handle(sb, up, "2026_01_Q", "reel", "session", tmp_path, {"2026_01_Q": (meta, st, 0.0)}, [])
+    path, data, files, headers = http.posts[0]
+    assert path == "upload" and files == ["video", "cover_image"]
+    assert data["platform[]"] == "instagram" and data["media_type"] == "REELS" and data["async_upload"] == "true"
+    assert data["user"] == "f1telemetryhub" and headers["Idempotency-Key"] == data["request_id"]
+    row = sb.db["ig_posts"][0]
+    assert row["status"] == "published" and row["permalink"] == "https://www.instagram.com/reel/abc/"
+    assert sb.files == {}   # nothing stored in the bucket
+    assert not m.handle(sb, up, "2026_01_Q", "reel", "session", tmp_path, {"2026_01_Q": (meta, st, 0.0)}, [])
+    assert len(http.posts) == 1   # never sent twice
+
+
+def test_uploadpost_timeout_resumes_instead_of_resending(tmp_path, monkeypatch):
+    from pipeline.social import __main__ as m
+    from pipeline.social.publish import UploadPost
+    monkeypatch.setattr("pipeline.social.publish.POLL_S", 0)
+    monkeypatch.setattr("pipeline.social.publish.POLL_MAX_S", -1)   # first check times out
+    results, laps, drivers, traces = quali_fixture()
+    st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
+    meta = {"event": "Test Grand Prix", "code": "Q", "round": 1, "season": 2026}
+    monkeypatch.setattr(render, "quali_carousel", lambda st, meta, rot, out: [_touch(out / "s1.jpg"), _touch(out / "s2.jpg")])
+    sb, http = FakeSB(), FakeUpHTTP()
+    up = UploadPost("KEY", "f1telemetryhub", session=http)
+    cache = {"2026_01_Q": (meta, st, 0.0)}
+    assert not m.handle(sb, up, "2026_01_Q", "carousel", "session", tmp_path, cache, [])
+    assert sb.db["ig_posts"][0]["status"] == "queued" and http.posts[0][2] == ["photos[]", "photos[]"]
+    monkeypatch.setattr("pipeline.social.publish.POLL_MAX_S", 60)
+    assert m.handle(sb, up, "2026_01_Q", "carousel", "session", tmp_path, cache, [])
+    assert len(http.posts) == 1 and sb.db["ig_posts"][0]["status"] == "published"
+
+
+def test_uploadpost_rejection_marks_failed(tmp_path, monkeypatch):
+    from pipeline.social import __main__ as m
+    from pipeline.social.publish import UploadPost
+    monkeypatch.setattr("pipeline.social.publish.POLL_S", 0)
+    results, laps, drivers, traces = quali_fixture()
+    st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
+    meta = {"event": "Test Grand Prix", "code": "Q", "round": 1, "season": 2026}
+    monkeypatch.setattr(render, "quali_reel", lambda st, meta, rot, out: (_touch(out / "reel.mp4"), _touch(out / "cover.jpg")))
+    sb = FakeSB()
+    up = UploadPost("KEY", "f1telemetryhub", session=FakeUpHTTP(fail=True))
+    with pytest.raises(Exception, match="bad media"):
+        m.handle(sb, up, "2026_01_Q", "reel", "session", tmp_path, {"2026_01_Q": (meta, st, 0.0)}, [])
+    assert sb.db["ig_posts"][0]["status"] == "failed"
