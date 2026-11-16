@@ -26,11 +26,12 @@ async function load(sid: string) {
   return { session, event, drivers, laps, results }
 }
 
-function DriverCell({ d, num, href }: { d: Driver | undefined; num: string; href: string }) {
+/** num is always the race number (badge); the label is the three letter code. */
+function DriverCell({ d, num, code, href }: { d: Driver | undefined; num: string; code?: string | null; href: string }) {
   return (
     <Link href={href} className="flex min-h-11 items-center gap-2 font-semibold hover:text-cyan">
       <DriverBadge num={num} color={teamColor(d?.team_color)} size={22} />
-      {d?.abbreviation ?? num}
+      {d?.abbreviation ?? code ?? num}
     </Link>
   )
 }
@@ -148,7 +149,7 @@ function SessionView() {
                   return (
                     <tr key={r.driver_number} className="border-t border-line/70">
                       <td className="num px-2 py-2 text-mute">{r.position_text ?? r.position}</td>
-                      <td className="px-2 py-2">{isQ && r.q3_ms == null ? <span className="flex min-h-11 items-center gap-2 font-semibold text-ink/70"><span className="h-4 w-1 rounded" style={{ background: teamColor(d?.team_color) }} />{d?.abbreviation ?? r.driver_code}</span> : <DriverCell d={d} num={r.driver_code ?? r.driver_number} href={vs ? cmp(r.driver_number, vs) : '#'} />}</td>
+                      <td className="px-2 py-2">{isQ && r.q3_ms == null ? <span className="flex min-h-11 items-center gap-2 font-semibold text-ink/70"><DriverBadge num={r.driver_number} color={teamColor(d?.team_color)} size={22} />{d?.abbreviation ?? r.driver_code}</span> : <DriverCell d={d} num={r.driver_number} code={r.driver_code} href={vs ? cmp(r.driver_number, vs) : '#'} />}</td>
                       <td className="px-2 py-2 text-mute">{d?.team_name ?? r.constructor ?? ''}</td>
                       {isQ ? (
                         <>

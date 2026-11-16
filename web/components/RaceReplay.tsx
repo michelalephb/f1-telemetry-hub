@@ -11,7 +11,7 @@ import { pointAt, project, trackPath, type Outline } from '@/lib/track'
 import { recordReplay, videoFormat, type VideoFrame } from '@/lib/video'
 
 const ACCENT = '#00E5FF'
-const SPEEDS = [10, 30, 60, 120, 300, 600]
+const SPEEDS = [10, 30, 60, 120]
 const LENGTHS = [15, 30, 60]
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
 
@@ -175,20 +175,17 @@ export default function RaceReplay({ sid, prefix, trackM, raceLaps, title, drive
       {meRow && <p className="num text-sm text-ink/80">{code(me)}: P{grid.get(me) ?? '?'} on the grid, P{meRow.pos} now{meRow.gap && meRow.pos > 1 ? `, ${meRow.gap} to the leader` : ''}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-        <ShareButton title={`${title}: ${code(me)} replay`} url={() => {
-          const u = new URL(window.location.href); u.searchParams.set('d', me); u.searchParams.set('rt', String(Math.round(now))); return u.toString()
-        }} />
         {canRecord ? (
           <>
-            <label className="ml-2 text-xs text-mute" htmlFor="vlen">Video length</label>
-            <select id="vlen" value={len} onChange={(e) => setLen(Number(e.target.value))} disabled={!!rec}
-              className="min-h-11 rounded-lg border border-line bg-bg px-2 text-sm">
-              {LENGTHS.map((v) => <option key={v} value={v}>{v} s</option>)}
-            </select>
             <button type="button" onClick={video} disabled={!!rec}
               className="min-h-11 rounded-lg border border-line px-4 text-sm hover:border-cyan/60 disabled:opacity-50">
               {rec ? `Recording ${Math.round(rec.p * 100)} %` : 'Make video'}
             </button>
+            <label className="sr-only" htmlFor="vlen">Video length</label>
+            <select id="vlen" value={len} onChange={(e) => setLen(Number(e.target.value))} disabled={!!rec} title="Video length"
+              className="min-h-11 rounded-lg border border-line bg-bg px-2 text-sm">
+              {LENGTHS.map((v) => <option key={v} value={v}>{v} s video</option>)}
+            </select>
             {file && <>
               <a href={file.url} download={file.name} className="flex min-h-11 items-center rounded-lg bg-cyan px-4 text-sm font-semibold text-bg">Download video</a>
               <button type="button" onClick={shareVideo} className="min-h-11 rounded-lg border border-line px-4 text-sm">Share video</button>
@@ -196,6 +193,9 @@ export default function RaceReplay({ sid, prefix, trackM, raceLaps, title, drive
             {rec && <span className="text-xs text-mute">Keep this tab open while it records.</span>}
           </>
         ) : <span className="text-xs text-mute">This browser cannot record video.</span>}
+        <ShareButton title={`${title}: ${code(me)} replay`} url={() => {
+          const u = new URL(window.location.href); u.searchParams.set('d', me); u.searchParams.set('rt', String(Math.round(now))); return u.toString()
+        }} />
         {err && <span role="alert" className="text-xs text-loss">{err}</span>}
       </div>
     </section>
