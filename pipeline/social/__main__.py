@@ -245,6 +245,8 @@ def finish(report: list, out: str, failed: int) -> int:
     (Path(out) / "report.json").write_text(json.dumps(report, indent=2, default=str))
     for r in report:
         print(f"{r['status']:>20}  {r['session_id']}  {r['kind']:<8}  {r.get('permalink') or r.get('reason') or ''}")
+        if r.get("checks"):
+            print(f"{'checks':>20}  {json.dumps(r['checks'], default=str)}")
     return 1 if failed else 0
 
 
