@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import CompareView, { type Series } from '@/components/CompareView'
 import EventNav from '@/components/EventNav'
+import ShareButton from '@/components/ShareButton'
 import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getCornerMetrics, getCorners, getDrivers, getEvent, getLaps, getResults, getSession, getTrace, type Lap } from '@/lib/api'
@@ -74,7 +75,10 @@ function Compare() {
           {data && <Flag country={data.event?.country} className="h-3.5" />}
           <span>{data ? `${data.event?.event_name ?? ''} ${SESSION_LABEL[data.session.session_code] ?? ''}` : 'Session'}</span>
         </Link>
-        <h1 className="mt-2 font-head text-2xl font-bold sm:text-3xl">{data?.isQ ? `${data.session.session_code === 'SQ' ? 'SQ3' : 'Q3'} corner compare` : 'Corner compare'}</h1>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-head text-2xl font-bold sm:text-3xl">{data?.isQ ? `${data.session.session_code === 'SQ' ? 'SQ3' : 'Q3'} corner compare` : 'Corner compare'}</h1>
+          {data && <ShareButton title={`${data.event?.event_name ?? ''}: ${data.a.code} vs ${data.b.code}`} />}
+        </div>
       </div>
       {data && <EventNav season={data.session.season} round={data.session.round} sid={sid} tab="corners" />}
       {error && <Failed error={error} />}

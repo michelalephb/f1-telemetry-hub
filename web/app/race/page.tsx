@@ -3,7 +3,10 @@
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useMemo, useState } from 'react'
+import DriverBadge from '@/components/DriverBadge'
 import EventNav from '@/components/EventNav'
+import RaceReplay from '@/components/RaceReplay'
+import ShareButton from '@/components/ShareButton'
 import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getCorners, getDrivers, getEvent, getLaps, getResults, getSession, getTrace, type Corner, type Driver } from '@/lib/api'
@@ -53,13 +56,19 @@ function RaceView() {
         <Link href="/" className="text-xs text-mute hover:text-ink">← Season</Link>
         <p className="mt-2 text-xs uppercase tracking-widest text-mute">R{String(session.round).padStart(2, '0')} · {event?.location ?? ''}</p>
         <h1 className="mt-1 flex items-center gap-3 font-head text-3xl font-bold"><Flag country={event?.country} className="h-7" />{event?.event_name ?? sid}</h1>
-        <p className="mt-1 text-lg text-mute">{SESSION_LABEL[session.session_code]} story</p>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-lg text-mute">{SESSION_LABEL[session.session_code]} story</p>
+          <ShareButton title={`${event?.event_name ?? ''} ${SESSION_LABEL[session.session_code]} story`} />
+        </div>
       </div>
       <EventNav season={session.season} round={session.round} sid={sid} tab="race" />
       {me ? (
         <Story key={`${sid}/${me}`} sid={sid} prefix={session.trace_prefix} trackM={session.track_length_m ?? 5000} me={me} follow={follow}
           drv={drv} order={[...classified.map((r) => r.driver_number), ...drivers.map((d) => d.driver_number).filter((d) => !classified.some((r) => r.driver_number === d))]}
-          laps={laps} grid={grid} result={results.find((r) => r.driver_number === me)} corners={corners} outline={outline} />
+          laps={laps} grid={grid} result={results.find((r) => r.driver_number === me)} corners={corners} outline={outline}
+          title={`${event?.event_name ?? sid} · ${SESSION_LABEL[session.session_code]}`}
+          classified={new Set(results.filter((r) => r.laps != null && results[0]?.laps != null && r.laps >= 0.9 * (results.find((x) => x.position === 1)?.laps ?? 0)).map((r) => r.driver_number))}
+          initialT={q.get('rt') ? Number(q.get('rt')) : null} />
       ) : <p className="text-sm text-mute">No lap data for this session.</p>}
     </div>
   )
@@ -67,10 +76,10 @@ function RaceView() {
 
 type Loc = { d: number; u: number; v: number; corner: string | null; start: boolean } | null
 
-function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result, corners, outline }: {
+function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result, corners, outline, title, classified, initialT }: {
   sid: string; prefix: string | null; trackM: number; me: string; follow: (d: string) => void; drv: Map<string, Driver>; order: string[]
   laps: Awaited<ReturnType<typeof load>>['laps']; grid: Map<string, number | null>; result: Awaited<ReturnType<typeof load>>['results'][number] | undefined
-  corners: Corner[]; outline: Outline | null
+  corners: Corner[]; outline: Outline | null; title: string; classified: Set<string>; initialT: number | null
 }) {
   const orders = useMemo(() => ordersByLap(laps, grid), [laps, grid])
   const pos = useMemo(() => positions(me, orders), [me, orders])
@@ -114,7 +123,7 @@ function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result
         <div>
           <label htmlFor="follow" className="text-xs uppercase tracking-widest text-mute">Follow driver</label>
           <div className="mt-1 flex flex-wrap items-center gap-3">
-            <span className="h-8 w-1.5 rounded" style={{ background: teamColor(drv.get(me)?.team_color) }} />
+            <DriverBadge num={me} color={teamColor(drv.get(me)?.team_color)} size={40} />
             <select id="follow" value={me} onChange={(e) => follow(e.target.value)}
               className="min-h-11 rounded-lg border border-line bg-card px-3 font-head text-2xl font-bold">
               {order.map((d) => <option key={d} value={d}>{code(d)}</option>)}
@@ -125,6 +134,11 @@ function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result
           </div>
         </div>
       </div>
+
+      {prefix && (
+        <RaceReplay sid={sid} prefix={prefix} trackM={trackM} raceLaps={Math.max(1, ...laps.map((l) => l.lap_number))} title={title}
+          drivers={drv} grid={grid} classified={classified} outline={outline} corners={corners} me={me} initialT={initialT} />
+      )}
 
       <div className="flex flex-wrap gap-4">
         <section className="min-w-0 flex-[999_1_560px] rounded-xl border border-line bg-card p-4">
@@ -154,7 +168,8 @@ function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result
                         className={`border-t border-line font-mono ${hi === k ? 'bg-line/50' : ''} ${m.pit ? 'text-mute' : ''}`}>
                         <td className="px-2 py-2 text-mute">L{m.lap}</td>
                         <td className="px-2 py-2">{where}</td>
-                        <td className="px-2 py-2"><span style={{ color: m.pit ? undefined : m.kind === 'gain' ? GAIN : LOSS }}>{m.kind === 'gain' ? 'passed' : 'lost to'}</span> <b>{code(m.other)}</b></td>
+                        <td className="px-2 py-2"><span style={{ color: m.pit ? undefined : m.kind === 'gain' ? GAIN : LOSS }}>{m.kind === 'gain' ? 'passed' : 'lost to'}</span>{' '}
+                          <span className="inline-flex items-center gap-1 align-middle"><DriverBadge num={m.other} color={teamColor(drv.get(m.other)?.team_color)} size={18} /><b>{code(m.other)}</b></span></td>
                         <td className="px-2 py-2 text-ink/80">P{m.posAfter}</td>
                       </tr>
                     )

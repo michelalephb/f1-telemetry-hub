@@ -1,6 +1,6 @@
 // Track outlines written by the pipeline (pipeline/tracks.py): tracks/<season>/<round>.json in the
 // public web bucket. One per round, rotated the way F1 graphics show the layout.
-import { SUPABASE_URL } from './api'
+import { SUPABASE_URL } from './api.ts'
 
 export type Outline = { w: number; h: number; pts: string; rot: number; x0: number; y0: number; k: number }
 
@@ -41,4 +41,24 @@ export function outlineFrom(xs: number[], ys: number[], width = 100, pad = 3): O
   const o: Outline = { w: width, h: (y1 - y0) * k + 2 * pad, pts: '', rot: 0, x0: x0 - pad / k, y0: y1 + pad / k, k }
   o.pts = q.map(([x, y]) => project(o, x, y).map((v) => v.toFixed(1)).join(',')).join(' ')
   return o
+}
+
+export type TrackPath = { p: [number, number][]; cum: number[]; len: number }
+
+/** The outline as a closed polyline with arc length, for placing cars by distance. */
+export function trackPath(o: Outline): TrackPath {
+  const p = o.pts.split(' ').map((s) => s.split(',').map(Number) as [number, number])
+  p.push(p[0])
+  const cum = [0]
+  for (let i = 1; i < p.length; i++) cum.push(cum[i - 1] + Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]))
+  return { p, cum, len: cum[cum.length - 1] }
+}
+
+/** Point on the outline at a fraction of the lap (0 = timing line), wrapping. */
+export function pointAt(tp: TrackPath, frac: number): [number, number] {
+  const s = (((frac % 1) + 1) % 1) * tp.len
+  let lo = 0, hi = tp.cum.length - 1
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (tp.cum[m] <= s) lo = m; else hi = m }
+  const f = (s - tp.cum[lo]) / ((tp.cum[hi] - tp.cum[lo]) || 1)
+  return [tp.p[lo][0] + f * (tp.p[hi][0] - tp.p[lo][0]), tp.p[lo][1] + f * (tp.p[hi][1] - tp.p[lo][1])]
 }

@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import { getCornerMetrics, getCorners, getDrivers, getLaps, getResults, getSession, getTrace, SUPABASE_URL } from '../lib/api.ts'
 import { cornerAt, lapClock, movesOf, ordersByLap, passPoint } from '../lib/race.ts'
+import { loadReplay, runningOrder, stateAt } from '../lib/replay.ts'
 import { finalSegmentKeys } from '../lib/segments.ts'
 import { deltaAt, extrap, lapTrace } from '../lib/telemetry.ts'
 
@@ -98,6 +99,20 @@ if (s.session_code === 'R' || s.session_code === 'S') {
   }
   console.log(`race story for ${code(me)}: ${moves.length} on track moves, ${seeable} with both cars' data covering the lap, ${found} of those located`)
   assert.ok(seeable === 0 || found / seeable >= 0.8, 'at least 80 % of on track moves with full data located')
+}
+// Replay: at the moment the winner takes the flag, the replay's top 3 must be the official podium.
+if (s.session_code === 'R' || s.session_code === 'S') {
+  const rp = await loadReplay(s.trace_prefix)
+  if (!rp) console.log('replay: not built yet (track outlines and replays workflow)')
+  else {
+    const res = (await getResults(s.season, s.round, s.session_code)).filter((r) => r.position != null).sort((x, y) => x.position! - y.position!)
+    const win = laps.filter((l) => l.driver_number === res[0].driver_number && l.lap_end_s != null).sort((x, y) => y.lap_number - x.lap_number)[0]
+    const tFlag = win.lap_end_s! + 0.5
+    const st = stateAt(rp, tFlag, new Map(res.map((r) => [r.driver_number, r.grid])), new Set(res.map((r) => r.driver_number)))
+    const ord = runningOrder(rp, st, tFlag, L)
+    console.log(`replay: ${rp.cars.length} cars, ${rp.n} s; order at the flag ${ord.slice(0, 5).map((o) => `${code(o.num)} ${o.gap}`).join(', ')}`)
+    assert.deepEqual(ord.slice(0, 3).map((o) => o.num), res.slice(0, 3).map((r) => r.driver_number), 'replay podium at the flag matches the official result')
+  }
 }
 const outline = await fetch(`${SUPABASE_URL}/storage/v1/object/public/web/tracks/${s.season}/${s.round}.json`)
 console.log(`track outline: HTTP ${outline.status}${outline.ok ? '' : ' (built by the track outlines workflow)'}`)
