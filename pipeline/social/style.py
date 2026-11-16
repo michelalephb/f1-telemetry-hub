@@ -32,16 +32,25 @@ BONE = "#EDE8DF"
 STONE = "#8D877C"
 CHAMPAGNE = "#C9A96E"
 HAIRLINE = "#3A3630"
-ACCENT = "#FF3D8B"          # Hot Pink (Michel, 15 Nov 2026, after Track Lime and Purple Sector)
+# "Paddock Cyan" (locked 15 Nov 2026, Michel): brand cyan accent, a dash of luxury (thin type,
+# champagne hairlines), obsidian base. Each GP may carry its own track line colour (EVENT_LINE);
+# Las Vegas is hot pink, every other GP defaults to cyan.
+INK_BG_TOP = "#0E121A"
+INK_BG_BOTTOM = "#05070B"
+TEXT = "#F2F4F7"
+MUTED = "#8A93A3"
+ACCENT = CYAN = "#00E5FF"
+GOLD_HAIR = CHAMPAGNE        # the dash of luxury: thin rules and the round label only
+TRACK_BASE = "#2A3242"
+EVENT_LINE = {"Las Vegas": "#FF3D8B"}
 
-# "Pink Night" (locked 15 Nov 2026): plum night background, Hot Pink hero, Sunbeam for structure.
-NIGHT_TOP = "#1C0B33"
-NIGHT_BOTTOM = "#07040D"
-PINK = ACCENT
-SUN = "#FFC94A"             # replaces champagne: labels, kickers, secondary highlights
-SNOW = "#FFF4F8"            # text
-LILAC = "#A99BC0"           # secondary text
-LINE = "#3A2955"            # track base line, dividers
+
+def event_line(location: str | None) -> str:
+    for k, v in EVENT_LINE.items():
+        if location and k.lower() in location.lower():
+            return v
+    return CYAN
+
 
 # Host country (as Jolpica / OpenF1 name it) to ISO code for the flag PNGs in ./flags
 # (rendered from country-flag-icons, MIT, the same set the website uses).

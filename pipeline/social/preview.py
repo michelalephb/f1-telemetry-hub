@@ -193,13 +193,22 @@ def load(season: int, rnd: int) -> Preview:
     return p
 
 
-# ---------------------------------------------------------------- artwork: "Pink Night" fact cards
-# One fact per card. Every number is huge, in Hot Pink, with its unit right beside it.
+# ---------------------------------------------------------------- artwork: "Paddock Cyan" fact cards
+# Luxury base (obsidian, thin display type, champagne hairlines), cyan brand accent, and the GP's own
+# track line colour. One fact per card; every number is large, with its unit right beside it.
 # Carousel cards are 1080x1350; story cards are 1080x1920 with Instagram's top and bottom UI kept clear.
 
 FONT = "Inter"
-PINK, SUN, SNOW, LILAC, LINE = S.PINK, S.SUN, S.SNOW, S.LILAC, S.LINE
-SPEED_CMAP = LinearSegmentedColormap.from_list("pinksun", [S.PINK, "#FF7A6B", S.SUN])
+TEXT, MUTED, CYAN, GOLD, BASE = S.TEXT, S.MUTED, S.CYAN, S.GOLD_HAIR, S.TRACK_BASE
+EV = CYAN                       # set per GP by set_event()
+SPEED_CMAP = LinearSegmentedColormap.from_list("ev", [S.TRACK_BASE, CYAN])
+
+
+def set_event(p: "Preview") -> None:
+    """The GP's own line colour (hot pink for Las Vegas, cyan elsewhere)."""
+    global EV, SPEED_CMAP
+    EV = S.event_line(p.title)
+    SPEED_CMAP = LinearSegmentedColormap.from_list("ev", ["#3A4458", EV])
 
 
 def tracked(s: str, gap: int = 1) -> str:
@@ -208,52 +217,52 @@ def tracked(s: str, gap: int = 1) -> str:
 
 
 class Card:
-    """A 1080 wide canvas with layout helpers in figure coordinates."""
-
     def __init__(self, h: int, story: bool = False):
         self.h, self.story = h, story
         self.fig = plt.figure(figsize=(W / DPI, h / DPI), dpi=DPI)
         ax = self.fig.add_axes([0, 0, 1, 1], zorder=-10)
-        yy, xx = np.mgrid[0:1:240j, 0:1:240j]
-        base = np.dstack([np.interp(yy, [0, 1], [c0, c1]) for c0, c1 in zip(_rgb(S.NIGHT_BOTTOM), _rgb(S.NIGHT_TOP))])
-        img = np.clip(base, 0, 1)   # plain plum night gradient, no pink tint (Michel, 15 Nov 2026)
-        ax.imshow(img, extent=[0, 1, 0, 1], aspect="auto", origin="lower", interpolation="bicubic")
+        yy = np.linspace(0, 1, 240)[:, None, None]
+        img = (1 - yy) * np.array(_rgb(S.INK_BG_BOTTOM)) + yy * np.array(_rgb(S.INK_BG_TOP))
+        ax.imshow(np.repeat(img, 4, axis=1), extent=[0, 1, 0, 1], aspect="auto", origin="lower", interpolation="bicubic")
         rng = np.random.default_rng(5)
         ax.imshow(rng.random((h // 4, W // 4)), cmap="gray", alpha=0.03, extent=[0, 1, 0, 1], aspect="auto")
         ax.axis("off")
-        # vertical positions: stories keep clear of the profile bar (top) and reply bar (bottom)
         self.top = 0.875 if story else 0.948
         self.bottom = 0.14 if story else 0.035
 
-    def text(self, x, y, s, size, color=SNOW, weight=500, ha="center", track=False, **kw):
+    def text(self, x, y, s, size, color=TEXT, weight=400, ha="center", track=False, **kw):
         return self.fig.text(x, y, tracked(s) if track else s, ha=ha, va="center", fontsize=size, color=color,
                              family=FONT, weight=weight, **kw)
+
+    def rule(self, x0, x1, y, color=GOLD, lw=0.8):
+        self.fig.add_artist(plt.Line2D([x0, x1], [y, y], transform=self.fig.transFigure, color=color, lw=lw))
 
     def header(self, p: "Preview"):
         flag = S.flag_image(p.country)
         y, x = self.top, 0.06
-        hh = 0.026 * H_POST / self.h
+        hh = 0.022 * H_POST / self.h
         if flag is not None:
             w = hh * 1.5 * self.h / W
             ax = self.fig.add_axes([x, y - hh / 2, w, hh])
             ax.imshow(flag, aspect="auto")
             ax.axis("off")
             x += w + 0.018
-        self.text(x, y, f"{gp_name(p).upper()} {p.season}", 19, weight=700, ha="left", track=True)
-        self.text(0.94, y, f"ROUND {p.round}", 14, color=PINK, weight=700, ha="right", track=True,
-                  bbox=dict(boxstyle="round,pad=0.45,rounding_size=0.8", fc="none", ec=PINK, lw=1.4))
+        self.text(x, y, f"{gp_name(p).upper()} {p.season}", 16, weight=500, ha="left", track=True)
+        self.text(0.94, y, f"ROUND {p.round}", 13, color=GOLD, weight=500, ha="right", track=True)
+        self.rule(0.06, 0.94, y - 0.028 * H_POST / self.h, lw=0.6)
 
     def kicker(self, y, s, n=None, total=None):
-        self.text(0.5, y, s.upper(), 18, color=SUN, weight=700, track=True)
+        self.text(0.5, y, s.upper(), 16, color=CYAN, weight=600, track=True)
         if n:
-            self.text(0.94, y, f"{n}/{total}", 15, color=LILAC, weight=600, ha="right")
+            self.text(0.94, y, f"{n:02d} / {total:02d}", 13, color=MUTED, weight=400, ha="right")
 
-    def number(self, y, value: str, unit: str, size=170, color=PINK):
-        """Hero number with its unit on the same baseline, centred as one block."""
+    def number(self, y, value: str, unit: str, size=170, color=TEXT):
+        """Thin hero number with its unit in cyan caps on the same baseline, centred as one block."""
         fig = self.fig
         r = fig.canvas.get_renderer()
-        t1 = fig.text(0, y, value, fontsize=size, color=color, family=FONT, weight=900, va="baseline")
-        t2 = fig.text(0, y, " " + unit, fontsize=size * 0.32, color=SNOW, family=FONT, weight=700, va="baseline")
+        t1 = fig.text(0, y, value, fontsize=size, color=color, family=FONT, weight=200, va="baseline")
+        t2 = fig.text(0, y, "  " + tracked(unit.upper()), fontsize=max(22, size * 0.17), color=CYAN, family=FONT,
+                      weight=600, va="baseline")
         w1 = t1.get_window_extent(r).width / fig.bbox.width
         w2 = t2.get_window_extent(r).width / fig.bbox.width
         x0 = 0.5 - (w1 + w2) / 2
@@ -262,9 +271,9 @@ class Card:
         return t1, t2
 
     def footer(self, right: str | None = None):
-        self.text(0.06, self.bottom, S.HANDLE, 15, color=LILAC, weight=500, ha="left")
+        self.text(0.06, self.bottom, S.HANDLE, 14, color=MUTED, weight=400, ha="left")
         if right:
-            self.text(0.94, self.bottom, right, 15, color=SUN, weight=800, ha="right", track=True)
+            self.text(0.94, self.bottom, right, 14, color=CYAN, weight=600, ha="right", track=True)
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -291,15 +300,15 @@ def track_ax(card: Card, rect, p: "Preview"):
     return ax
 
 
-def base_line(ax, p: "Preview", lw=7):
-    ax.plot(p.x, p.y, color=LINE, lw=lw, solid_capstyle="round", solid_joinstyle="round")
+def base_line(ax, p: "Preview", lw=3.2):
+    ax.plot(p.x, p.y, color=BASE, lw=lw, solid_capstyle="round", solid_joinstyle="round")
 
 
-def highlight(ax, p: "Preview", mask: np.ndarray, color=PINK, lw=9):
-    ax.plot(np.where(mask, p.x, np.nan), np.where(mask, p.y, np.nan), color=color, lw=lw, solid_capstyle="round")
+def highlight(ax, p: "Preview", mask: np.ndarray, color=None, lw=5):
+    ax.plot(np.where(mask, p.x, np.nan), np.where(mask, p.y, np.nan), color=color or EV, lw=lw, solid_capstyle="round")
 
 
-def speed_line(ax, p: "Preview", upto: int | None = None, lw=7):
+def speed_line(ax, p: "Preview", upto: int | None = None, lw=3.2):
     from matplotlib.collections import LineCollection
     n = len(p.x) if upto is None else max(2, upto)
     pts = np.column_stack([p.x[:n], p.y[:n]]).reshape(-1, 1, 2)
@@ -310,12 +319,13 @@ def speed_line(ax, p: "Preview", upto: int | None = None, lw=7):
     return lc
 
 
-def dot(ax, x, y, color=PINK, ms=16, label=None, dx=0.0, dy=0.0, p=None):
-    ax.plot([x], [y], "o", ms=ms, color=color, mec=S.NIGHT_BOTTOM, mew=3, zorder=8)
+def dot(ax, x, y, color=None, ms=12, label=None, dx=0.0, dy=0.0, p=None):
+    ax.plot([x], [y], "o", ms=ms, color=color or EV, mec=TEXT, mew=1.5, zorder=8)
     if label and p is not None:
         span = max(np.ptp(p.x), np.ptp(p.y))
-        ax.text(x + dx * span, y + dy * span, label, color=SNOW, fontsize=16, family=FONT, weight=800, zorder=9,
-                ha="center", va="center", bbox=dict(boxstyle="round,pad=0.4,rounding_size=0.7", fc=color, ec="none"))
+        ax.plot([x, x + dx * span], [y, y + dy * span], color=GOLD, lw=0.8, zorder=7)
+        ax.text(x + dx * span, y + dy * span, "  " + tracked(label.upper()), color=TEXT, fontsize=13, family=FONT,
+                weight=600, zorder=9, ha="left", va="center")
 
 
 def times_text(p: "Preview") -> tuple[str, str]:
@@ -344,14 +354,14 @@ def facts(p: "Preview") -> list[dict]:
         {"kicker": "Top speed", "number": f"{st['top_speed']}", "unit": "km/h",
          "line": "The fastest point of the lap", "source": f"Measured on the {lap}",
          "draw": lambda ax: (base_line(ax, p), highlight(ax, p, p.speed >= st["top_speed"] - 12),
-                             dot(ax, p.x[imax], p.y[imax], label=f"{st['top_speed']} km/h", dy=0.11, p=p))},
+                             dot(ax, p.x[imax], p.y[imax], label=f"{st['top_speed']} km/h", dx=0.08, dy=0.12, p=p))},
         {"kicker": "Flat out", "number": f"{st['flat_pct']}", "unit": "% of the lap",
-         "line": "Throttle pinned, pink on the map", "source": f"Measured on the {lap}",
+         "line": "Throttle pinned, highlighted on the map", "source": f"Measured on the {lap}",
          "draw": lambda ax: (base_line(ax, p), highlight(ax, p, flat))},
         {"kicker": "Longest flat out run", "number": km(st["longest_flat_m"]), "unit": "km",
          "line": "Without lifting once", "source": f"Measured on the {lap}",
          "draw": lambda ax: (base_line(ax, p), highlight(ax, p, longest),
-                             dot(ax, p.x[i0], p.y[i0], color=SUN, ms=13), dot(ax, p.x[i1], p.y[i1], color=SUN, ms=13))},
+                             dot(ax, p.x[i0], p.y[i0], color=CYAN, ms=11), dot(ax, p.x[i1], p.y[i1], color=CYAN, ms=11))},
         {"kicker": "Braking zones", "number": f"{st['braking_zones']}", "unit": "per lap",
          "line": "Everything else is flat out or close to it", "source": f"Measured on the {lap}",
          "draw": lambda ax: brake_map(ax, p)},
@@ -382,26 +392,28 @@ def brake_map(ax, p: "Preview"):
     for n, (a_, _) in enumerate(runs, 1):
         vx, vy = p.x[a_] - cx, p.y[a_] - cy
         d = math.hypot(vx, vy) or 1
-        ax.text(p.x[a_] + vx / d * 0.08 * span, p.y[a_] + vy / d * 0.08 * span, str(n), color=S.NIGHT_BOTTOM,
-                fontsize=17, family=FONT, weight=900, ha="center", va="center", zorder=9,
-                bbox=dict(boxstyle="circle,pad=0.35", fc=SUN, ec="none"))
+        ax.text(p.x[a_] + vx / d * 0.08 * span, p.y[a_] + vy / d * 0.08 * span, str(n), color=TEXT,
+                fontsize=15, family=FONT, weight=500, ha="center", va="center", zorder=9,
+                bbox=dict(boxstyle="circle,pad=0.4", fc="none", ec=CYAN, lw=1.2))
 
 
 def cover(p: "Preview", h: int, story: bool, n_facts: int) -> Card:
     c = Card(h, story)
     c.header(p)
     t = c.top
-    c.text(0.5, t - 0.09, "HOW FAST IS", 54 if not story else 60, weight=900)
-    c.text(0.5, t - 0.16, p.title + "?", 92 if len(p.title) <= 10 else 70, color=PINK, weight=900)
-    rect = [0.08, 0.27, 0.84, 0.40] if not story else [0.06, 0.33, 0.88, 0.36]
+    c.text(0.5, t - 0.075, "UP NEXT", 16, color=CYAN, weight=600, track=True)
+    c.text(0.5, t - 0.135, p.title, 76 if len(p.title) <= 10 else 58, weight=200, track=True)
+    c.text(0.5, t - (0.205 if not story else 0.19), "How fast is it, really?", 26, color=MUTED, weight=300, style="italic")
+    rect = [0.10, 0.27, 0.80, 0.42] if not story else [0.08, 0.33, 0.84, 0.36]
     ax = track_ax(c, rect, p)
-    base_line(ax, p, lw=9)
-    speed_line(ax, p, lw=7)
+    base_line(ax, p, lw=5)
+    speed_line(ax, p, lw=3.6)
     q, r = times_text(p)
     y = 0.215 if not story else 0.27
-    c.text(0.5, y, f"{n_facts} FACTS BEFORE LIGHTS OUT", 22, color=SUN, weight=800, track=True)
-    c.text(0.5, y - 0.055, f"QUALI {q.upper()}   |   RACE {r.upper()}   |   LOCAL", 17, color=LILAC, weight=600)
-    c.footer("SWIPE  >" if not story else "TAP FOR FACTS  >")
+    c.rule(0.44, 0.56, y + 0.035)
+    c.text(0.5, y, f"{n_facts} FACTS BEFORE LIGHTS OUT", 18, color=CYAN, weight=600, track=True)
+    c.text(0.5, y - 0.05, f"Quali {q}   |   Race {r}   |   local time", 17, color=MUTED, weight=400)
+    c.footer("SWIPE  →" if not story else "TAP  →")
     return c
 
 
@@ -409,13 +421,13 @@ def fact_card(p: "Preview", f: dict, n: int, total: int, h: int, story: bool) ->
     c = Card(h, story)
     c.header(p)
     t = c.top
-    c.kicker(t - 0.065, f["kicker"], n, total)
-    c.number(t - (0.245 if not story else 0.20), f["number"], f["unit"], size=160 if not story else 175)
-    c.text(0.5, t - (0.295 if not story else 0.24), f["line"], 25, weight=600)
-    rect = [0.08, 0.15, 0.84, 0.44] if not story else [0.08, 0.28, 0.84, 0.32]
+    c.kicker(t - 0.07, f["kicker"], n, total)
+    c.number(t - (0.235 if not story else 0.195), f["number"], f["unit"], size=170 if not story else 180)
+    c.text(0.5, t - (0.285 if not story else 0.235), f["line"], 24, weight=300)
+    rect = [0.10, 0.16, 0.80, 0.42] if not story else [0.08, 0.29, 0.84, 0.32]
     f["draw"](track_ax(c, rect, p))
-    c.text(0.5, (0.115 if not story else 0.235), f["source"], 15, color=LILAC, weight=500)
-    c.footer("SWIPE  >" if not story else None)
+    c.text(0.5, (0.115 if not story else 0.235), f["source"], 14, color=MUTED, weight=300)
+    c.footer("SWIPE  →" if not story else None)
     return c
 
 
@@ -424,22 +436,25 @@ def closing(p: "Preview", h: int, story: bool) -> Card:
     c.header(p)
     logo = S.logo_image()
     if logo is not None:
-        ax = c.fig.add_axes([0.30, 0.66 if not story else 0.62, 0.40, 0.12])
+        ax = c.fig.add_axes([0.32, 0.67 if not story else 0.62, 0.36, 0.11])
         ax.imshow(logo)
         ax.axis("off")
     q, r = times_text(p)
     for x, k, v in ((0.30, "QUALIFYING", q), (0.70, "RACE", r)):
-        c.text(x, 0.53, k, 16, color=SUN, weight=800, track=True)
-        c.text(x, 0.48, v, 40, weight=900)
-    c.text(0.5, 0.425, "LOCAL TIME", 13, color=LILAC, weight=600, track=True)
-    c.text(0.5, 0.33, "Every session, decoded.", 34, weight=800)
-    c.text(0.5, 0.28, "Follow so you don't miss quali.", 24, color=PINK, weight=700)
-    c.text(0.5, 0.20, "SAVE THIS FOR RACE WEEK", 16, color=SUN, weight=800, track=True)
+        c.text(x, 0.53, k, 14, color=CYAN, weight=600, track=True)
+        c.text(x, 0.485, v, 38, weight=200)
+    c.fig.add_artist(plt.Line2D([0.5, 0.5], [0.46, 0.55], transform=c.fig.transFigure, color=GOLD, lw=0.6))
+    c.text(0.5, 0.425, "LOCAL TIME", 12, color=MUTED, weight=500, track=True)
+    c.text(0.5, 0.33, "EVERY SESSION", 34, weight=200, track=True)
+    c.text(0.5, 0.285, "DECODED", 34, color=CYAN, weight=300, track=True)
+    c.rule(0.45, 0.55, 0.245)
+    c.text(0.5, 0.20, "Follow so you don't miss quali", 22, weight=400)
     c.footer(S.SITE.upper() if not story else None)
     return c
 
 
 def carousel(p: Preview, out: Path) -> list[Path]:
+    set_event(p)
     fs = facts(p)
     paths = [cover(p, H_POST, False, len(fs)).save(out / "slide_01.jpg")]
     for i, f in enumerate(fs, 1):
@@ -449,6 +464,7 @@ def carousel(p: Preview, out: Path) -> list[Path]:
 
 
 def stories(p: Preview, out: Path) -> list[Path]:
+    set_event(p)
     fs = facts(p)
     paths = [cover(p, H_REEL, True, len(fs)).save(out / "story_01.jpg")]
     for i, f in enumerate(fs, 1):
@@ -463,53 +479,57 @@ def ease(x: float) -> float:
 
 
 def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
-    """Hook in frame 1, one lap traced in pink to yellow by speed with a live km/h readout, then the facts."""
+    """Title fades in over a moving lap: the GP's line draws itself with a live km/h readout, then the facts."""
+    set_event(p)
     st = p.stats
     r = Reel(out / "reel.mp4")
     c = Card(H_REEL, story=True)
     c.header(p)
-    hook = c.text(0.5, 0.80, "HOW FAST IS", 58, weight=900)
-    name = c.text(0.5, 0.745, p.title + "?", 88 if len(p.title) <= 10 else 66, color=PINK, weight=900)
-    ax = track_ax(c, [0.06, 0.36, 0.88, 0.34], p)
-    base_line(ax, p, lw=9)
-    head, = ax.plot([], [], "o", ms=20, color=SNOW, mec=PINK, mew=5, zorder=9)
-    num = c.fig.text(0.5, 0.29, "", fontsize=150, color=PINK, family=FONT, weight=900, ha="center", va="center")
-    unit = c.text(0.5, 0.225, "", 30, weight=800, track=True)
+    up = c.text(0.5, 0.80, "UP NEXT", 18, color=CYAN, weight=600, track=True, alpha=0)
+    name = c.text(0.5, 0.755, p.title, 70 if len(p.title) <= 10 else 54, weight=200, track=True, alpha=0)
+    ax = track_ax(c, [0.06, 0.36, 0.88, 0.33], p)
+    base_line(ax, p, lw=5)
+    head, = ax.plot([], [], "o", ms=16, color=TEXT, mec=EV, mew=4, zorder=9)
+    num = c.fig.text(0.5, 0.285, "", fontsize=150, color=TEXT, family=FONT, weight=200, ha="center", va="center")
+    unit = c.text(0.5, 0.225, "", 20, color=CYAN, weight=600, track=True)
     c.footer()
 
     n = int(lap_s * FPS)
     line = None
     for i in range(n + 1):
         k = int(round((len(p.x) - 1) * i / n))
+        e_ = ease(i / (0.9 * FPS))
+        up.set_alpha(e_)
+        name.set_alpha(e_)
         if line is not None:
             line.remove()
-        line = speed_line(ax, p, upto=k + 1, lw=8)
+        line = speed_line(ax, p, upto=k + 1, lw=4)
         head.set_data([p.x[k]], [p.y[k]])
         num.set_text(f"{int(p.speed[k])}")
-        num.set_color(SPEED_CMAP((p.speed[k] - p.speed.min()) / max(np.ptp(p.speed), 1)))
-        unit.set_text(tracked("KM/H"))
+        unit.set_text("KM/H")
         r.add(c.fig)
         if i == int(0.55 * n):
             c.fig.savefig(out / "cover.jpg", dpi=DPI, format="jpg", pil_kwargs={"quality": 94})
     head.set_data([], [])
     num.set_text("")
     unit.set_text("")
-    hook.set_text("")
-    name.set_text("")
 
     q, rr = times_text(p)
-    flashes = [(f"{st['top_speed']}", "km/h", "TOP SPEED"), (f"{st['flat_pct']}", "%", "OF THE LAP FLAT OUT"),
-               (f"{st['braking_zones']}", "zones", "BRAKING PER LAP"), ("0", "DRS zones", "NEW FOR 2026")]
+    flashes = [(f"{st['top_speed']}", "km/h", "Top speed"), (f"{st['flat_pct']}", "% flat out", "Of the lap"),
+               (f"{st['braking_zones']}", "zones", "Braking per lap"), ("0", "DRS zones", "New for 2026")]
     for big, u, lbl in flashes:
-        t1, t2 = c.number(0.255, big, u, size=150)
-        t3 = c.text(0.5, 0.215, lbl, 24, color=SUN, weight=800, track=True)
-        r.add(c.fig, int(0.9 * FPS))
+        t1, t2 = c.number(0.25, big, u, size=150)
+        t3 = c.text(0.5, 0.20, lbl.upper(), 18, color=MUTED, weight=500, track=True)
+        for i in range(int(0.9 * FPS)):
+            a_ = ease(i / (0.25 * FPS))
+            for t in (t1, t2, t3):
+                t.set_alpha(a_)
+            r.add(c.fig)
         for t in (t1, t2, t3):
             t.remove()
-    c.text(0.5, 0.80, f"QUALI {q.upper()}", 44, weight=900)
-    c.text(0.5, 0.75, f"RACE {rr.upper()}", 44, color=PINK, weight=900)
-    c.text(0.5, 0.71, "LOCAL TIME", 16, color=LILAC, weight=600, track=True)
-    c.text(0.5, 0.29, "Follow so you don't miss quali", 30, weight=800)
+    c.text(0.5, 0.27, f"QUALI  {q.upper()}", 30, weight=300, track=False)
+    c.text(0.5, 0.23, f"RACE  {rr.upper()}", 30, color=CYAN, weight=400)
+    c.text(0.5, 0.195, "LOCAL TIME", 13, color=MUTED, weight=500, track=True)
     r.add(c.fig, int(1.8 * FPS))
     plt.close(c.fig)
     return r.close(), out / "cover.jpg"
