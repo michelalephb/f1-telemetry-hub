@@ -75,17 +75,6 @@ jobs:
             [ -n "$KIND" ] && ARGS+=(--kind "$KIND")
             python -m pipeline.social run "${ARGS[@]}"
           fi
-      - name: TEMP preview in the log (review only, removed before merge)
-        if: github.event_name == 'push'
-        run: |
-          python - <<'PY'
-          import base64, glob
-          for f in sorted(glob.glob("ig_out/**/*.jpg", recursive=True)) + sorted(glob.glob("ig_out/**/*.mp4", recursive=True)):
-              t = base64.b64encode(open(f, "rb").read()).decode()
-              print(f"=====BEGIN {f.replace('/', '__')}")
-              for j in range(0, len(t), 200): print(t[j:j+200])
-              print("=====END")
-          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
