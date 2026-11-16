@@ -112,10 +112,18 @@ if (s.session_code === 'R' || s.session_code === 'S') {
   const flag = orders[orders.length - 1]
   const leadLap = res.filter((r) => r.laps === res[0].laps).map((r) => r.driver_number)
   const ours = flag.filter((d) => leadLap.includes(d))
-  const off = leadLap.filter((d, i) => ours[i] !== d)
+  // Drivers out of place: those not in the longest common subsequence (one penalised car moving
+  // back two places counts once, not three times)
+  const lcs = (x: string[], y: string[]) => {
+    const t = Array.from({ length: x.length + 1 }, () => new Array<number>(y.length + 1).fill(0))
+    for (let i = 1; i <= x.length; i++) for (let j = 1; j <= y.length; j++)
+      t[i][j] = x[i - 1] === y[j - 1] ? t[i - 1][j - 1] + 1 : Math.max(t[i - 1][j], t[i][j - 1])
+    return t[x.length][y.length]
+  }
+  const off = { length: leadLap.length - lcs(ours, leadLap) }
   console.log(`order at the flag (lead lap): ours ${ours.map(code).join(' ')} | official ${leadLap.map(code).join(' ')}`)
   assert.deepEqual(ours.slice(0, 3), leadLap.slice(0, 3), 'podium order from lap times matches the official result')
-  assert.ok(off.length <= 2, `at most 2 lead lap places differ (time penalties), got ${off.length}`)
+  assert.ok(off.length <= 2, `at most 2 lead lap drivers out of place (time penalties), got ${off.length}`)
   const climb = (r: (typeof res)[number]) => (r.grid && r.grid > 0 ? r.grid : res.length) - r.position!
   const me = [...res].sort((x, y) => climb(y) - climb(x))[0].driver_number
   const moves = movesOf(me, orders, laps).filter((m) => !m.pit)
