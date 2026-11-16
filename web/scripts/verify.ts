@@ -108,7 +108,7 @@ if (s.session_code === 'R' || s.session_code === 'S') {
 // on track moves must be found on the map.
 if (s.session_code === 'R' || s.session_code === 'S') {
   const res = (await getResults(s.season, s.round, s.session_code)).filter((r) => r.position != null).sort((x, y) => x.position! - y.position!)
-  const orders = ordersByLap(laps, new Map(res.map((r) => [r.driver_number, r.grid])))
+  const orders = ordersByLap(laps, new Map(res.map((r) => [r.driver_number, r.grid])), res.map((r) => r.driver_number))
   const flag = orders[orders.length - 1]
   const leadLap = res.filter((r) => r.laps === res[0].laps).map((r) => r.driver_number)
   const ours = flag.filter((d) => leadLap.includes(d))
@@ -151,14 +151,14 @@ if (s.session_code === 'R' || s.session_code === 'S') {
     const win = laps.filter((l) => l.driver_number === res[0].driver_number && l.lap_end_s != null).sort((x, y) => y.lap_number - x.lap_number)[0]
     const tFlag = win.lap_end_s! + 0.5
     const st = stateAt(rp, tFlag, new Map(res.map((r) => [r.driver_number, r.grid])), new Set(res.map((r) => r.driver_number)))
-    const ord = runningOrder(rp, st, tFlag, L)
+    const ord = runningOrder(rp, st, tFlag, L, res.map((r) => r.driver_number))
     console.log(`replay: ${rp.cars.length} cars, ${rp.n} s; order at the flag ${ord.slice(0, 5).map((o) => `${code(o.num)} ${o.gap}`).join(', ')}`)
     assert.ok(ord.every((o) => !/\d\.\d/.test(o.gap)), 'no seconds gaps in the replay tower')
     // After the last car has finished: laps behind must match the official classification
     // classified as on the race page: at least 90 % of the winner's laps
     const cls = new Set(res.filter((r) => r.laps != null && r.laps >= 0.9 * res[0].laps!).map((r) => r.driver_number))
     const end = stateAt(rp, rp.n, new Map(res.map((r) => [r.driver_number, r.grid])), cls)
-    const fin = runningOrder(rp, end, rp.n, L)
+    const fin = runningOrder(rp, end, rp.n, L, res.map((r) => r.driver_number))
     const lapsOff = res.filter((r) => cls.has(r.driver_number)).map((r) => {
       const want = res[0].laps! - r.laps!, row = fin.find((o) => o.num === r.driver_number)
       const got = row?.gap.startsWith('+') ? parseInt(row.gap.slice(1), 10) : 0

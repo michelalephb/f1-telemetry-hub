@@ -3,6 +3,7 @@
 import { parquetReadObjects } from 'hyparquet'
 import { compressors } from 'hyparquet-compressors'
 import { SUPABASE_URL } from './api.ts'
+import { TIMING_RES_S } from './race.ts'
 
 export type ReplayCar = { num: string; first: number; last: number; m: Float64Array }  // m in metres covered, NaN where absent
 export type Replay = { t0: number; step: number; n: number; cars: ReplayCar[] }
@@ -109,11 +110,17 @@ export function stateAt(r: Replay, t: number, grid: Map<string, number | null>, 
  * car data clock at one sample a second, and its gaps differed from the official ones by 0.1 to 0.6 s
  * (time penalties not included either), so they are not shown.
  */
-export function runningOrder(r: Replay, states: CarState[], t: number, trackM: number) {
+export function runningOrder(r: Replay, states: CarState[], t: number, trackM: number, finish: string[] = []) {
   // Cars that took the flag on the same lap are ranked by when they finished, not where they stopped.
+  // Finish times closer than the timing resolution follow the official classification (finish).
   const lapOf = (s: CarState) => Math.floor(s.metres / trackM)
+  const idx = (n: string) => { const i = finish.indexOf(n); return i < 0 ? Infinity : i }
+  const byFinish = (a: CarState, b: CarState) => {
+    const d = (a.finT ?? 0) - (b.finT ?? 0)
+    return Math.abs(d) < TIMING_RES_S && idx(a.num) !== idx(b.num) ? idx(a.num) - idx(b.num) : d
+  }
   const live = states.filter((s) => !s.out).sort((a, b) =>
-    a.finished && b.finished && lapOf(a) === lapOf(b) ? (a.finT ?? 0) - (b.finT ?? 0) : b.metres - a.metres)
+    a.finished && b.finished && lapOf(a) === lapOf(b) ? byFinish(a, b) : b.metres - a.metres)
   const lead = live[0]
   return live.map((s, i) => {
     let gap: string

@@ -81,7 +81,7 @@ function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result
   laps: Awaited<ReturnType<typeof load>>['laps']; grid: Map<string, number | null>; result: Awaited<ReturnType<typeof load>>['results'][number] | undefined
   corners: Corner[]; outline: Outline | null; title: string; classified: Set<string>; initialT: number | null
 }) {
-  const orders = useMemo(() => ordersByLap(laps, grid), [laps, grid])
+  const orders = useMemo(() => ordersByLap(laps, grid, order), [laps, grid, order])
   const pos = useMemo(() => positions(me, orders), [me, orders])
   const moves = useMemo(() => movesOf(me, orders, laps), [me, orders, laps])
   const onTrack = moves.filter((m) => !m.pit)
@@ -137,7 +137,7 @@ function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result
 
       {prefix && (
         <RaceReplay sid={sid} prefix={prefix} trackM={trackM} raceLaps={Math.max(1, ...laps.map((l) => l.lap_number))} title={title}
-          drivers={drv} grid={grid} classified={classified} outline={outline} corners={corners} me={me} initialT={initialT} />
+          drivers={drv} grid={grid} classified={classified} finish={order} outline={outline} corners={corners} me={me} initialT={initialT} />
       )}
 
       <div className="flex flex-wrap gap-4">
