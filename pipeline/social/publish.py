@@ -191,6 +191,13 @@ class UploadPost:
                 if cover:
                     c.close()
 
+    def send_story(self, image: str, request_id: str) -> None:
+        """One image as one Instagram story (Upload-Post media_type=STORIES)."""
+        data = [("user", self.user), ("platform[]", "instagram"), ("title", "story"), ("media_type", "STORIES"),
+                ("async_upload", "true"), ("request_id", request_id)]
+        with open(image, "rb") as h:
+            self._post("upload_photos", data, [("photos[]", ("story.jpg", h, "image/jpeg"))], request_id)
+
     def send_carousel(self, images: list[str], caption: str, request_id: str) -> None:
         if not 2 <= len(images) <= 10:
             raise IGError(f"a carousel needs 2 to 10 items, got {len(images)}")

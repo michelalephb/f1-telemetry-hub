@@ -50,6 +50,7 @@ class Preview:
     stats: dict = field(default_factory=dict)
     country: str = ""             # host country, for the flag
     gp: str = ""                  # "Las Vegas GP"
+    last_year: dict = field(default_factory=dict)   # official results of last year's race here (Jolpica)
 
 
 # ---------------------------------------------------------------- numbers from the lap
@@ -58,11 +59,18 @@ def lap_stats(p: Preview) -> dict:
     d = p.dist
     seg = np.diff(d, prepend=d[0])
     flat = p.throttle >= FLAT_THROTTLE
-    longest, run = 0.0, 0.0
-    for f, s in zip(flat, seg):
-        run = run + s if f else 0.0
-        longest = max(longest, run)
+    longest, run, start, best = 0.0, 0.0, 0, (0, 0)
+    for i, (f, s) in enumerate(zip(flat, seg)):
+        if f:
+            if run == 0.0:
+                start = i
+            run += s
+            if run > longest:
+                longest, best = run, (start, i)
+        else:
+            run = 0.0
     return {
+        "longest_flat_idx": best,
         "top_speed": int(round(float(p.speed.max()))),
         "flat_pct": int(round(100 * float(seg[flat].sum()) / max(float(d[-1] - d[0]), 1))),
         "braking_zones": braking_zones(p.t, p.brake),
@@ -101,6 +109,28 @@ def brake_mask(p: Preview) -> np.ndarray:
 
 
 # ---------------------------------------------------------------- data (needs network: GitHub Actions)
+
+def last_year_results(season: int, rnd: int) -> dict:
+    """Winner, pole and disqualifications of last year's race at the same circuit (Jolpica, official)."""
+    from .. import jolpica
+
+    cid = next(e["circuit_id"] for e in jolpica.events(season) if e["round"] == rnd)
+    prev = next((e for e in jolpica.events(season - 1) if e["circuit_id"] == cid), None)
+    if prev is None:
+        return {}
+    res = jolpica.results(season - 1, prev["round"])
+    race = sorted([r for r in res if r["session_code"] == "R" and r["position"]], key=lambda r: r["position"])
+    quali = sorted([r for r in res if r["session_code"] == "Q" and r["position"]], key=lambda r: r["position"])
+    pole = quali[0] if quali else None
+    pole_ms = (pole.get("q3_ms") or pole.get("q2_ms") or pole.get("q1_ms")) if pole else None
+    return {
+        "winner": race[0]["driver_code"] if race else None,
+        "podium": [r["driver_code"] for r in race[:3]],
+        "pole": pole["driver_code"] if pole else None,
+        "pole_ms": pole_ms,
+        "dsq": [r["driver_code"] for r in res if r["session_code"] == "R" and "isqualif" in (r.get("status") or "")],
+    }
+
 
 def load(season: int, rnd: int) -> Preview:
     from ..__main__ import schedule
@@ -155,254 +185,277 @@ def load(season: int, rnd: int) -> Preview:
     p.stats = lap_stats(p)
     p.country = sess[0].get("country") or ""
     p.gp = event.replace("Grand Prix", "GP")
+    try:
+        p.last_year = last_year_results(season, rnd)
+    except Exception as e:  # the fact cards still work without it
+        log.warning("last year's results unavailable: %s", e)
     log.info("preview %s: %s %s lap %.3f s, stats %s, sessions %s", p.title, p.ref_year, p.driver, p.lap_s, p.stats, p.sessions)
     return p
 
 
-# ---------------------------------------------------------------- artwork: black and champagne, editorial
+# ---------------------------------------------------------------- artwork: "Pink Night" fact cards
+# One fact per card. Every number is huge, in Hot Pink, with its unit right beside it.
+# Carousel cards are 1080x1350; story cards are 1080x1920 with Instagram's top and bottom UI kept clear.
 
-BG0, BG1 = S.OBSIDIAN, S.OBSIDIAN_LIFT
-INK = S.BONE
-MUTE = S.STONE
-GOLD = S.CHAMPAGNE
-HAIR = S.HAIRLINE
 FONT = "Inter"
-
-
-def accent() -> str:
-    return S.ACCENT
-
-
-def sticker(fig, x, y, text, angle=-6, size=15, color=None):
-    """The fun twist: a tilted accent pill, like a sticker slapped on a luxury box. One per slide, max."""
-    return fig.text(x, y, tracked(text.upper()), ha="center", va="center", fontsize=size, family=FONT, weight=800,
-                    color=S.OBSIDIAN, rotation=angle,
-                    bbox=dict(boxstyle="round,pad=0.55,rounding_size=0.9", fc=color or accent(), ec="none"))
-
-
-def wink(fig, y, text, size=17):
-    """One line of dry humour per slide, in light italic."""
-    return fig.text(0.5, y, text, ha="center", va="center", fontsize=size, family=FONT, weight=300, style="italic", color=MUTE)
+PINK, SUN, SNOW, LILAC, LINE = S.PINK, S.SUN, S.SNOW, S.LILAC, S.LINE
+SPEED_CMAP = LinearSegmentedColormap.from_list("pinksun", [S.PINK, "#FF7A6B", S.SUN])
 
 
 def tracked(s: str, gap: int = 1) -> str:
-    """Wide letter spacing, the luxury way: spaces between letters, three between words."""
     words = s.split(" ")
     return (" " * (2 * gap + 1)).join((" " * gap).join(w) for w in words)
 
 
-def canvas(h: int):
-    fig = plt.figure(figsize=(W / DPI, h / DPI), dpi=DPI)
-    ax = fig.add_axes([0, 0, 1, 1], zorder=-10)
-    yy, xx = np.mgrid[0:1:200j, 0:1:200j]
-    r = np.sqrt((xx - 0.5) ** 2 + ((yy - 0.55) * h / W) ** 2)
-    ax.imshow(r, cmap=LinearSegmentedColormap.from_list("v", [BG1, BG0]), extent=[0, 1, 0, 1], aspect="auto",
-              vmin=0, vmax=0.9 * h / W, interpolation="bicubic")
-    rng = np.random.default_rng(3)
-    ax.imshow(rng.random((h // 3, W // 3)), cmap="gray", alpha=0.035, extent=[0, 1, 0, 1], aspect="auto")
-    ax.axis("off")
-    return fig
+class Card:
+    """A 1080 wide canvas with layout helpers in figure coordinates."""
+
+    def __init__(self, h: int, story: bool = False):
+        self.h, self.story = h, story
+        self.fig = plt.figure(figsize=(W / DPI, h / DPI), dpi=DPI)
+        ax = self.fig.add_axes([0, 0, 1, 1], zorder=-10)
+        yy, xx = np.mgrid[0:1:240j, 0:1:240j]
+        base = np.dstack([np.interp(yy, [0, 1], [c0, c1]) for c0, c1 in zip(_rgb(S.NIGHT_BOTTOM), _rgb(S.NIGHT_TOP))])
+        glow = np.exp(-(((xx - 0.5) / 0.55) ** 2 + ((yy - 0.55) * h / W / 0.5) ** 2))[..., None]
+        img = np.clip(base + glow * (np.array(_rgb(PINK)) * 0.16), 0, 1)
+        ax.imshow(img, extent=[0, 1, 0, 1], aspect="auto", origin="lower", interpolation="bicubic")
+        rng = np.random.default_rng(5)
+        ax.imshow(rng.random((h // 4, W // 4)), cmap="gray", alpha=0.03, extent=[0, 1, 0, 1], aspect="auto")
+        ax.axis("off")
+        # vertical positions: stories keep clear of the profile bar (top) and reply bar (bottom)
+        self.top = 0.875 if story else 0.948
+        self.bottom = 0.14 if story else 0.035
+
+    def text(self, x, y, s, size, color=SNOW, weight=500, ha="center", track=False, **kw):
+        return self.fig.text(x, y, tracked(s) if track else s, ha=ha, va="center", fontsize=size, color=color,
+                             family=FONT, weight=weight, **kw)
+
+    def header(self, p: "Preview"):
+        flag = S.flag_image(p.country)
+        y, x = self.top, 0.06
+        hh = 0.026 * H_POST / self.h
+        if flag is not None:
+            w = hh * 1.5 * self.h / W
+            ax = self.fig.add_axes([x, y - hh / 2, w, hh])
+            ax.imshow(flag, aspect="auto")
+            ax.axis("off")
+            x += w + 0.018
+        self.text(x, y, f"{gp_name(p).upper()} {p.season}", 19, weight=700, ha="left", track=True)
+        self.text(0.94, y, f"ROUND {p.round}", 14, color=PINK, weight=700, ha="right", track=True,
+                  bbox=dict(boxstyle="round,pad=0.45,rounding_size=0.8", fc="none", ec=PINK, lw=1.4))
+
+    def kicker(self, y, s, n=None, total=None):
+        self.text(0.5, y, s.upper(), 18, color=SUN, weight=700, track=True)
+        if n:
+            self.text(0.94, y, f"{n}/{total}", 15, color=LILAC, weight=600, ha="right")
+
+    def number(self, y, value: str, unit: str, size=170, color=PINK):
+        """Hero number with its unit on the same baseline, centred as one block."""
+        fig = self.fig
+        r = fig.canvas.get_renderer()
+        t1 = fig.text(0, y, value, fontsize=size, color=color, family=FONT, weight=900, va="baseline")
+        t2 = fig.text(0, y, " " + unit, fontsize=size * 0.32, color=SNOW, family=FONT, weight=700, va="baseline")
+        w1 = t1.get_window_extent(r).width / fig.bbox.width
+        w2 = t2.get_window_extent(r).width / fig.bbox.width
+        x0 = 0.5 - (w1 + w2) / 2
+        t1.set_x(x0)
+        t2.set_x(x0 + w1)
+        return t1, t2
+
+    def footer(self, right: str | None = None):
+        self.text(0.06, self.bottom, S.HANDLE, 15, color=LILAC, weight=500, ha="left")
+        if right:
+            self.text(0.94, self.bottom, right, 15, color=SUN, weight=800, ha="right", track=True)
+
+    def save(self, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.fig.savefig(path, dpi=DPI, format="jpg", pil_kwargs={"quality": 94, "optimize": True})
+        plt.close(self.fig)
+        return path
 
 
-def label(fig, x, y, s, size=15, color=GOLD, ha="center", alpha=1.0, gap=1):
-    return fig.text(x, y, tracked(s.upper(), gap), ha=ha, va="center", fontsize=size, color=color, family=FONT,
-                    weight=500, alpha=alpha)
+def _rgb(hexs: str):
+    return [int(hexs[i:i + 2], 16) / 255 for i in (1, 3, 5)]
 
 
-def display(fig, x, y, s, size, color=INK, ha="center", weight=200, alpha=1.0, track=True):
-    return fig.text(x, y, tracked(s.upper()) if track else s, ha=ha, va="center", fontsize=size, color=color,
-                    family=FONT, weight=weight, alpha=alpha)
+def gp_name(p: "Preview") -> str:
+    return p.gp or p.event.replace("Grand Prix", "GP") or p.title.title()
 
 
-def rule(fig, x0, x1, y, color=GOLD, lw=0.8, alpha=1.0):
-    return fig.add_artist(plt.Line2D([x0, x1], [y, y], transform=fig.transFigure, color=color, lw=lw, alpha=alpha))
-
-
-def track_axes(fig, rect, p: Preview):
-    ax = fig.add_axes(rect)
+def track_ax(card: Card, rect, p: "Preview"):
+    ax = card.fig.add_axes(rect)
     ax.set_aspect("equal")
     ax.axis("off")
-    pad = 0.06 * max(np.ptp(p.x), np.ptp(p.y))
+    pad = 0.07 * max(np.ptp(p.x), np.ptp(p.y))
     ax.set_xlim(p.x.min() - pad, p.x.max() + pad)
     ax.set_ylim(p.y.min() - pad, p.y.max() + pad)
     return ax
 
 
-def outline(ax, p: Preview, upto: int | None = None, lw: float = 2.2, color=INK):
+def base_line(ax, p: "Preview", lw=7):
+    ax.plot(p.x, p.y, color=LINE, lw=lw, solid_capstyle="round", solid_joinstyle="round")
+
+
+def highlight(ax, p: "Preview", mask: np.ndarray, color=PINK, lw=9):
+    ax.plot(np.where(mask, p.x, np.nan), np.where(mask, p.y, np.nan), color=color, lw=lw, solid_capstyle="round")
+
+
+def speed_line(ax, p: "Preview", upto: int | None = None, lw=7):
+    from matplotlib.collections import LineCollection
     n = len(p.x) if upto is None else max(2, upto)
-    ax.plot(p.x[:n], p.y[:n], color="black", lw=lw + 5, alpha=0.35, solid_capstyle="round", solid_joinstyle="round")
-    return ax.plot(p.x[:n], p.y[:n], color=color, lw=lw, solid_capstyle="round", solid_joinstyle="round")[0]
+    pts = np.column_stack([p.x[:n], p.y[:n]]).reshape(-1, 1, 2)
+    lc = LineCollection(np.concatenate([pts[:-1], pts[1:]], axis=1), cmap=SPEED_CMAP,
+                        norm=plt.Normalize(p.speed.min(), p.speed.max()), linewidths=lw, capstyle="round")
+    lc.set_array(p.speed[: n - 1])
+    ax.add_collection(lc)
+    return lc
 
 
-def start_line(ax, p: Preview):
-    dx, dy = p.x[1] - p.x[0], p.y[1] - p.y[0]
-    n = math.hypot(dx, dy) or 1
-    L = 0.035 * max(np.ptp(p.x), np.ptp(p.y))
-    ax.plot([p.x[0] - dy / n * L, p.x[0] + dy / n * L], [p.y[0] + dx / n * L, p.y[0] - dx / n * L], color=GOLD, lw=2.5)
+def dot(ax, x, y, color=PINK, ms=16, label=None, dx=0.0, dy=0.0, p=None):
+    ax.plot([x], [y], "o", ms=ms, color=color, mec=S.NIGHT_BOTTOM, mew=3, zorder=8)
+    if label and p is not None:
+        span = max(np.ptp(p.x), np.ptp(p.y))
+        ax.text(x + dx * span, y + dy * span, label, color=SNOW, fontsize=16, family=FONT, weight=800, zorder=9,
+                ha="center", va="center", bbox=dict(boxstyle="round,pad=0.4,rounding_size=0.7", fc=color, ec="none"))
 
 
-def callout(ax, p: Preview, i: int, text: str, dx=0.10, dy=0.08):
-    span = max(np.ptp(p.x), np.ptp(p.y))
-    ax.plot([p.x[i]], [p.y[i]], "o", ms=8, color=GOLD, zorder=5)
-    tx, ty = p.x[i] + dx * span, p.y[i] + dy * span
-    ax.plot([p.x[i], tx], [p.y[i], ty], color=GOLD, lw=0.8)
-    ax.text(tx, ty, " " + tracked(text), color=GOLD, fontsize=14, family=FONT, weight=500,
-            ha="left" if dx >= 0 else "right", va="center")
-
-
-def footer(fig, y=0.035):
-    fig.text(0.06, y, S.HANDLE, fontsize=14, color=MUTE, family=FONT, weight=300)
-    fig.text(0.94, y, S.SITE, fontsize=14, color=MUTE, family=FONT, weight=300, ha="right")
-
-
-def gp_name(p: Preview) -> str:
-    return p.gp or p.event.replace("Grand Prix", "GP") or p.title.title()
-
-
-def header(fig, p: Preview, y: float = 0.948, reel: bool = False):
-    """Flag, event and season on the left, round on the right: every slide says where it is."""
-    flag = S.flag_image(p.country)
-    h = 0.022 if not reel else 0.016
-    x = 0.06
-    if flag is not None:
-        w = h * 1.5 * (H_REEL if reel else H_POST) / W
-        ax = fig.add_axes([x, y - h / 2, w, h])
-        ax.imshow(flag, aspect="auto")
-        ax.axis("off")
-        x += w + 0.015
-    label(fig, x, y, f"{gp_name(p)} {p.season}", ha="left", size=15 if not reel else 17)
-    label(fig, 0.94, y, f"Round {p.round}", ha="right", color=MUTE, size=13 if not reel else 15)
-
-
-def flat_ribbon(fig, p: Preview, y: float, x0=0.08, x1=0.92, h=0.012):
-    """The lap as one strip: accent where the throttle is pinned, hairline where it is not."""
-    ax = fig.add_axes([x0, y - h / 2, x1 - x0, h])
-    flat = (p.throttle >= FLAT_THROTTLE).astype(float)
-    ax.imshow(flat[None, :], cmap=LinearSegmentedColormap.from_list("f", [HAIR, accent()]), aspect="auto",
-              extent=[p.dist[0], p.dist[-1], 0, 1], interpolation="nearest", vmin=0, vmax=1)
-    ax.axis("off")
-    label(fig, x0, y + 0.032, "Flat out, across the lap", ha="left", size=13)
-    fig.text(x1, y + 0.032, f"{p.stats['flat_pct']}%", ha="right", va="center", fontsize=30, family=FONT, weight=300, color=accent())
-    label(fig, x0, y - 0.022, "Start", ha="left", size=10, color=MUTE)
-    label(fig, x1, y - 0.022, "Finish", ha="right", size=10, color=MUTE)
-
-
-def times_block(fig, p: Preview, y: float, size: int = 30):
-    q = p.sessions.get("SQ") or p.sessions.get("Q")
-    r = p.sessions.get("R")
-    label(fig, 0.30, y + 0.035, "Qualifying")
-    display(fig, 0.30, y, q or "", size, weight=300, track=False)
-    fig.add_artist(plt.Line2D([0.5, 0.5], [y - 0.025, y + 0.05], transform=fig.transFigure, color=HAIR, lw=0.8))
-    label(fig, 0.70, y + 0.035, "Race")
-    display(fig, 0.70, y, r or "", size, weight=300, track=False)
-    label(fig, 0.5, y - 0.045, "Local time", size=12, color=MUTE)
-
-
-def save(fig, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=DPI, format="jpg", pil_kwargs={"quality": 94, "optimize": True})
-    plt.close(fig)
-    return path
+def times_text(p: "Preview") -> tuple[str, str]:
+    q = p.sessions.get("SQ") or p.sessions.get("Q") or ""
+    r = p.sessions.get("R") or ""
+    return q, r
 
 
 def km(m: float) -> str:
-    return f"{m / 1000:.1f} km"
-
-
-def carousel(p: Preview, out: Path) -> list[Path]:
-    st, paths = p.stats, []
-    imax = int(np.argmax(p.speed))
-
-    fig = canvas(H_POST)
-    header(fig, p)
-    label(fig, 0.5, 0.865, "Up next")
-    rule(fig, 0.47, 0.53, 0.835)
-    display(fig, 0.5, 0.775, p.title, 64 if len(p.title) <= 10 else 50)
-    label(fig, 0.5, 0.725, "Grand Prix", size=13, color=MUTE)
-    ax = track_axes(fig, [0.10, 0.27, 0.80, 0.43], p)
-    outline(ax, p)
-    start_line(ax, p)
-    ax.plot([p.x[imax]], [p.y[imax]], "o", ms=10, color=accent(), zorder=6)
-    sticker(fig, 0.80, 0.66, "Night race", angle=-7)
-    times_block(fig, p, 0.165)
-    wink(fig, 0.085, "Dress code: flat out.")
-    footer(fig)
-    paths.append(save(fig, out / "slide_1.jpg"))
-
-    fig = canvas(H_POST)
-    header(fig, p)
-    label(fig, 0.5, 0.895, f"Fastest race lap, {p.ref_year}")
-    display(fig, 0.5, 0.865, f"{p.driver}   {lap_time(round(p.lap_s * 1000))}", 22, color=MUTE, weight=300, track=False)
-    display(fig, 0.5, 0.74, f"{st['top_speed']}", 180, weight=100, track=False)
-    label(fig, 0.5, 0.64, "km/h  top speed")
-    ax = fig.add_axes([0.08, 0.36, 0.84, 0.24])
-    ax.plot(p.dist, p.speed, color=INK, lw=1.6)
-    ax.plot([p.dist[imax]], [p.speed[imax]], "o", ms=11, color=accent(), zorder=5)
-    ax.set_xlim(0, p.dist[-1])
-    ax.set_ylim(0, p.speed.max() * 1.12)
-    ax.axis("off")
-    ax.axhline(0, color=HAIR, lw=0.8)
-    for k in range(0, int(p.dist[-1] // 1000) + 1):
-        ax.text(k * 1000, -p.speed.max() * 0.08, f"{k} km" if k else "0", color=MUTE, fontsize=12, family=FONT, ha="center", weight=300)
-    flat_ribbon(fig, p, 0.265)
-    wink(fig, 0.205, f"The other {100 - st['flat_pct']}% is spent braking.")
-    cols = [(km(st["longest_flat_m"]), "longest flat out"), (f"{st['braking_zones']}", "braking zones")]
-    for j, (big, small) in enumerate(cols):
-        x = 0.33 + 0.34 * j
-        display(fig, x, 0.125, big, 40, weight=300, track=False)
-        label(fig, x, 0.085, small, size=12, color=MUTE)
-    fig.add_artist(plt.Line2D([0.5, 0.5], [0.07, 0.15], transform=fig.transFigure, color=HAIR, lw=0.8))
-    footer(fig)
-    paths.append(save(fig, out / "slide_2.jpg"))
-
-    fig = canvas(H_POST)
-    header(fig, p)
-    label(fig, 0.5, 0.905, "Where they brake")
-    display(fig, 0.5, 0.82, f"{st['braking_zones']}", 150, weight=100, track=False)
-    label(fig, 0.5, 0.735, "braking zones in one lap")
-    ax = track_axes(fig, [0.10, 0.17, 0.80, 0.52], p)
-    outline(ax, p, lw=1.6, color="#6F6A61")
-    m = brake_mask(p)
-    ax.plot(np.where(m, p.x, np.nan), np.where(m, p.y, np.nan), color=GOLD, lw=4, solid_capstyle="round")
-    span = max(np.ptp(p.x), np.ptp(p.y))
-    for n, (a_, _) in enumerate(brake_runs(p.t, p.brake), 1):
-        cx, cy = np.mean(p.x), np.mean(p.y)
-        vx, vy = p.x[a_] - cx, p.y[a_] - cy
-        d = math.hypot(vx, vy) or 1
-        ax.text(p.x[a_] + vx / d * 0.07 * span, p.y[a_] + vy / d * 0.07 * span, str(n), color=S.OBSIDIAN, fontsize=14,
-                family=FONT, weight=800, ha="center", va="center",
-                bbox=dict(boxstyle="circle,pad=0.35", fc=accent(), ec="none"))
-    wink(fig, 0.135, "The brakes mostly get the night off.")
-    fig.text(0.5, 0.095, f"Measured on the fastest {p.ref_year} race lap, {p.driver}", ha="center", fontsize=13, color=MUTE,
-             family=FONT, weight=300)
-    footer(fig)
-    paths.append(save(fig, out / "slide_3.jpg"))
-
-    fig = canvas(H_POST)
-    header(fig, p)
-    logo = S.logo_image()
-    if logo is not None:
-        ax = fig.add_axes([0.32, 0.74, 0.36, 0.12])
-        ax.imshow(logo)
-        ax.axis("off")
-    display(fig, 0.5, 0.60, "Every session", 40)
-    display(fig, 0.5, 0.545, "Decoded", 40, color=GOLD)
-    rule(fig, 0.47, 0.53, 0.49)
-    times_block(fig, p, 0.37)
-    sticker(fig, 0.5, 0.245, see_you(p), angle=-4, size=17)
-    wink(fig, 0.17, "Bring snacks. We bring the data.")
-    label(fig, 0.5, 0.11, S.SITE, size=14)
-    footer(fig)
-    paths.append(save(fig, out / "slide_4.jpg"))
-    return paths
+    return f"{m / 1000:.1f}"
 
 
 DAYS = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"}
 
 
-def see_you(p: Preview) -> str:
-    q = p.sessions.get("SQ") or p.sessions.get("Q") or ""
-    return f"See you {DAYS.get(q[:3], 'soon')}"
+def facts(p: "Preview") -> list[dict]:
+    """The fact cards for a circuit, in order. Each: kicker, number, unit, line, source, draw(ax)."""
+    st = p.stats
+    imax = int(np.argmax(p.speed))
+    lap = f"fastest {p.ref_year} race lap, {p.driver} {lap_time(round(p.lap_s * 1000))}"
+    flat = p.throttle >= FLAT_THROTTLE
+    i0, i1 = st["longest_flat_idx"]
+    longest = np.zeros(len(p.x), bool)
+    longest[i0:i1 + 1] = True
+    out = [
+        {"kicker": "Top speed", "number": f"{st['top_speed']}", "unit": "km/h",
+         "line": "The fastest point of the lap", "source": f"Measured on the {lap}",
+         "draw": lambda ax: (base_line(ax, p), highlight(ax, p, p.speed >= st["top_speed"] - 12),
+                             dot(ax, p.x[imax], p.y[imax], label=f"{st['top_speed']} km/h", dy=0.11, p=p))},
+        {"kicker": "Flat out", "number": f"{st['flat_pct']}", "unit": "% of the lap",
+         "line": "Throttle pinned, pink on the map", "source": f"Measured on the {lap}",
+         "draw": lambda ax: (base_line(ax, p), highlight(ax, p, flat))},
+        {"kicker": "Longest flat out run", "number": km(st["longest_flat_m"]), "unit": "km",
+         "line": "Without lifting once", "source": f"Measured on the {lap}",
+         "draw": lambda ax: (base_line(ax, p), highlight(ax, p, longest),
+                             dot(ax, p.x[i0], p.y[i0], color=SUN, ms=13), dot(ax, p.x[i1], p.y[i1], color=SUN, ms=13))},
+        {"kicker": "Braking zones", "number": f"{st['braking_zones']}", "unit": "per lap",
+         "line": "Everything else is flat out or close to it", "source": f"Measured on the {lap}",
+         "draw": lambda ax: brake_map(ax, p)},
+    ]
+    ly = p.last_year or {}
+    if ly.get("pole_ms") and ly.get("pole"):
+        gap = ly["pole_ms"] / 1000 - p.lap_s
+        if gap > 1:
+            out.append({"kicker": f"{p.ref_year} flashback", "number": f"{gap:.1f}", "unit": "s",
+                        "line": f"Pole ({ly['pole']} {lap_time(ly['pole_ms'])}) was slower than the race's fastest lap",
+                        "source": f"Fastest race lap: {p.driver} {lap_time(round(p.lap_s * 1000))}. Official results",
+                        "draw": lambda ax: (base_line(ax, p), speed_line(ax, p, lw=6))})
+    out.append({"kicker": "New for 2026", "number": "0", "unit": "DRS zones",
+                "line": "Straight Mode wings and Overtake Mode replace it", "source": "2026 technical and sporting regulations",
+                "draw": lambda ax: (base_line(ax, p), speed_line(ax, p, lw=6))})
+    return out
+
+
+def brake_map(ax, p: "Preview"):
+    base_line(ax, p)
+    m = np.zeros(len(p.x), bool)
+    runs = brake_runs(p.t, p.brake)
+    for a_, b_ in runs:
+        m[a_:b_ + 1] = True
+    highlight(ax, p, m)
+    span = max(np.ptp(p.x), np.ptp(p.y))
+    cx, cy = np.mean(p.x), np.mean(p.y)
+    for n, (a_, _) in enumerate(runs, 1):
+        vx, vy = p.x[a_] - cx, p.y[a_] - cy
+        d = math.hypot(vx, vy) or 1
+        ax.text(p.x[a_] + vx / d * 0.08 * span, p.y[a_] + vy / d * 0.08 * span, str(n), color=S.NIGHT_BOTTOM,
+                fontsize=17, family=FONT, weight=900, ha="center", va="center", zorder=9,
+                bbox=dict(boxstyle="circle,pad=0.35", fc=SUN, ec="none"))
+
+
+def cover(p: "Preview", h: int, story: bool, n_facts: int) -> Card:
+    c = Card(h, story)
+    c.header(p)
+    t = c.top
+    c.text(0.5, t - 0.09, "HOW FAST IS", 54 if not story else 60, weight=900)
+    c.text(0.5, t - 0.16, p.title + "?", 92 if len(p.title) <= 10 else 70, color=PINK, weight=900)
+    rect = [0.08, 0.27, 0.84, 0.40] if not story else [0.06, 0.33, 0.88, 0.36]
+    ax = track_ax(c, rect, p)
+    base_line(ax, p, lw=9)
+    speed_line(ax, p, lw=7)
+    q, r = times_text(p)
+    y = 0.215 if not story else 0.27
+    c.text(0.5, y, f"{n_facts} FACTS BEFORE LIGHTS OUT", 22, color=SUN, weight=800, track=True)
+    c.text(0.5, y - 0.055, f"QUALI {q.upper()}   |   RACE {r.upper()}   |   LOCAL", 17, color=LILAC, weight=600)
+    c.footer("SWIPE  >" if not story else "TAP FOR FACTS  >")
+    return c
+
+
+def fact_card(p: "Preview", f: dict, n: int, total: int, h: int, story: bool) -> Card:
+    c = Card(h, story)
+    c.header(p)
+    t = c.top
+    c.kicker(t - 0.065, f["kicker"], n, total)
+    c.number(t - (0.245 if not story else 0.20), f["number"], f["unit"], size=160 if not story else 175)
+    c.text(0.5, t - (0.295 if not story else 0.24), f["line"], 25, weight=600)
+    rect = [0.08, 0.15, 0.84, 0.44] if not story else [0.08, 0.28, 0.84, 0.32]
+    f["draw"](track_ax(c, rect, p))
+    c.text(0.5, (0.115 if not story else 0.235), f["source"], 15, color=LILAC, weight=500)
+    c.footer("SWIPE  >" if not story else None)
+    return c
+
+
+def closing(p: "Preview", h: int, story: bool) -> Card:
+    c = Card(h, story)
+    c.header(p)
+    logo = S.logo_image()
+    if logo is not None:
+        ax = c.fig.add_axes([0.30, 0.66 if not story else 0.62, 0.40, 0.12])
+        ax.imshow(logo)
+        ax.axis("off")
+    q, r = times_text(p)
+    for x, k, v in ((0.30, "QUALIFYING", q), (0.70, "RACE", r)):
+        c.text(x, 0.53, k, 16, color=SUN, weight=800, track=True)
+        c.text(x, 0.48, v, 40, weight=900)
+    c.text(0.5, 0.425, "LOCAL TIME", 13, color=LILAC, weight=600, track=True)
+    c.text(0.5, 0.33, "Every session, decoded.", 34, weight=800)
+    c.text(0.5, 0.28, "Follow so you don't miss quali.", 24, color=PINK, weight=700)
+    c.text(0.5, 0.20, "SAVE THIS FOR RACE WEEK", 16, color=SUN, weight=800, track=True)
+    c.footer(S.SITE.upper() if not story else None)
+    return c
+
+
+def carousel(p: Preview, out: Path) -> list[Path]:
+    fs = facts(p)
+    paths = [cover(p, H_POST, False, len(fs)).save(out / "slide_01.jpg")]
+    for i, f in enumerate(fs, 1):
+        paths.append(fact_card(p, f, i, len(fs), H_POST, False).save(out / f"slide_{i + 1:02d}.jpg"))
+    paths.append(closing(p, H_POST, False).save(out / f"slide_{len(fs) + 2:02d}.jpg"))
+    return paths
+
+
+def stories(p: Preview, out: Path) -> list[Path]:
+    fs = facts(p)
+    paths = [cover(p, H_REEL, True, len(fs)).save(out / "story_01.jpg")]
+    for i, f in enumerate(fs, 1):
+        paths.append(fact_card(p, f, i, len(fs), H_REEL, True).save(out / f"story_{i + 1:02d}.jpg"))
+    paths.append(closing(p, H_REEL, True).save(out / f"story_{len(fs) + 2:02d}.jpg"))
+    return paths
 
 
 def ease(x: float) -> float:
@@ -410,109 +463,72 @@ def ease(x: float) -> float:
     return x * x * (3 - 2 * x)
 
 
-def reel(p: Preview, out: Path, lap_s: float = 6.5) -> tuple[Path, Path]:
+def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
+    """Hook in frame 1, one lap traced in pink to yellow by speed with a live km/h readout, then the facts."""
     st = p.stats
-    imax = int(np.argmax(p.speed))
     r = Reel(out / "reel.mp4")
-    fig = canvas(H_REEL)
-    header(fig, p, y=0.962, reel=True)
-    up = label(fig, 0.5, 0.90, "Up next", size=18, alpha=0)
-    title = display(fig, 0.5, 0.855, p.title, 66 if len(p.title) <= 10 else 52, alpha=0)
-    gp = label(fig, 0.5, 0.825, "Grand Prix", size=13, color=MUTE, alpha=0)
-    ln = rule(fig, 0.5, 0.5, 0.80)
-    ax = track_axes(fig, [0.08, 0.44, 0.84, 0.34], p)
-    ax.plot(p.x, p.y, color=HAIR, lw=1.4, solid_capstyle="round")
-    drawn = outline(ax, p, upto=2)
-    trail, = ax.plot([], [], color=accent(), lw=5, alpha=0.9, solid_capstyle="round", zorder=5)
-    head, = ax.plot([], [], "o", ms=14, color=accent(), zorder=6)
-    spd = display(fig, 0.5, 0.33, "", 150, weight=100, track=False)
-    unit = label(fig, 0.5, 0.265, "", size=16)
-    footer(fig, 0.03)
+    c = Card(H_REEL, story=True)
+    c.header(p)
+    hook = c.text(0.5, 0.80, "HOW FAST IS", 58, weight=900)
+    name = c.text(0.5, 0.745, p.title + "?", 88 if len(p.title) <= 10 else 66, color=PINK, weight=900)
+    ax = track_ax(c, [0.06, 0.36, 0.88, 0.34], p)
+    base_line(ax, p, lw=9)
+    head, = ax.plot([], [], "o", ms=20, color=SNOW, mec=PINK, mew=5, zorder=9)
+    num = c.fig.text(0.5, 0.29, "", fontsize=150, color=PINK, family=FONT, weight=900, ha="center", va="center")
+    unit = c.text(0.5, 0.225, "", 30, weight=800, track=True)
+    c.footer()
 
-    # 1. Title fades in as the gold rule draws outward (motion from the first frame)
-    n0 = int(1.2 * FPS)
-    for i in range(n0):
-        e = ease(i / (n0 - 1))
-        ln.set_xdata([0.5 - 0.06 * e, 0.5 + 0.06 * e])
-        up.set_alpha(e)
-        title.set_alpha(ease(i / (n0 - 1) * 1.3))
-        gp.set_alpha(e)
-        r.add(fig)
-
-    # 2. One lap, traced in a single line
     n = int(lap_s * FPS)
+    line = None
     for i in range(n + 1):
         k = int(round((len(p.x) - 1) * i / n))
-        drawn.remove()
-        drawn = ax.plot(p.x[: k + 1], p.y[: k + 1], color=INK, lw=2.4, solid_capstyle="round", solid_joinstyle="round")[0]
+        if line is not None:
+            line.remove()
+        line = speed_line(ax, p, upto=k + 1, lw=8)
         head.set_data([p.x[k]], [p.y[k]])
-        trail.set_data(p.x[max(0, k - 12): k + 1], p.y[max(0, k - 12): k + 1])
-        spd.set_text(f"{int(p.speed[k])}")
-        spd.set_color(accent() if k == imax else INK)
+        num.set_text(f"{int(p.speed[k])}")
+        num.set_color(SPEED_CMAP((p.speed[k] - p.speed.min()) / max(np.ptp(p.speed), 1)))
         unit.set_text(tracked("KM/H"))
-        if k >= imax and not any(t.get_text().strip().startswith("3") for t in ax.texts):
-            callout(ax, p, imax, f"{st['top_speed']} KM/H", dx=-0.12, dy=0.10)
-            sticker(fig, 0.78, 0.45, "Top speed", angle=-8)
-        r.add(fig)
+        r.add(c.fig)
+        if i == int(0.55 * n):
+            c.fig.savefig(out / "cover.jpg", dpi=DPI, format="jpg", pil_kwargs={"quality": 94})
     head.set_data([], [])
-    trail.set_data([], [])
-    ax.plot([p.x[imax]], [p.y[imax]], "o", ms=12, color=accent(), zorder=6)
-    cover = out / "cover.jpg"
-    fig.savefig(cover, dpi=DPI, format="jpg", pil_kwargs={"quality": 94})
-
-    # 3. Numbers, fading in one by one
-    spd.set_text("")
+    num.set_text("")
     unit.set_text("")
-    rows = [(f"{st['top_speed']}", "km/h top speed"), (f"{st['flat_pct']}%", "of the lap flat out"),
-            (f"{st['braking_zones']}", "braking zones")]
-    items = []
-    for j, (big, small) in enumerate(rows):
-        y = 0.345 - j * 0.07
-        items.append((display(fig, 0.40, y, big, 56, weight=100, ha="right", track=False, alpha=0,
-                              color=accent() if big.endswith("%") else INK),
-                      label(fig, 0.44, y, small, size=14, color=MUTE, ha="left", alpha=0)))
-    for j in range(3):
-        for i in range(int(0.5 * FPS)):
-            e = ease(i / (0.5 * FPS - 1))
-            items[j][0].set_alpha(e)
-            items[j][1].set_alpha(e)
-            r.add(fig)
-        r.add(fig, int(0.25 * FPS))
-    r.add(fig, int(0.6 * FPS))
+    hook.set_text("")
+    name.set_text("")
 
-    # 4. When, then sign off
-    for big, small in items:
-        big.set_alpha(0)
-        small.set_alpha(0)
-    q = p.sessions.get("SQ") or p.sessions.get("Q")
-    texts = [label(fig, 0.30, 0.33, "Qualifying", alpha=0), display(fig, 0.30, 0.295, q or "", 34, weight=300, track=False, alpha=0),
-             label(fig, 0.70, 0.33, "Race", alpha=0), display(fig, 0.70, 0.295, p.sessions.get("R") or "", 34, weight=300, track=False, alpha=0),
-             label(fig, 0.5, 0.25, "Local time", size=12, color=MUTE, alpha=0),
-             display(fig, 0.5, 0.17, "Every session", 34, alpha=0), display(fig, 0.5, 0.13, "Decoded", 34, color=GOLD, alpha=0)]
-    for t in [x for x in fig.texts if x.get_bbox_patch() is not None]:
-        t.set_visible(False)
-    for i in range(int(0.8 * FPS)):
-        e = ease(i / (0.8 * FPS - 1))
-        for t in texts:
-            t.set_alpha(e)
-        r.add(fig)
-    r.add(fig, int(0.5 * FPS))
-    sticker(fig, 0.5, 0.075, see_you(p), angle=-5, size=18)
-    r.add(fig, int(1.6 * FPS))
-    plt.close(fig)
-    return r.close(), cover
+    q, rr = times_text(p)
+    flashes = [(f"{st['top_speed']}", "km/h", "TOP SPEED"), (f"{st['flat_pct']}", "%", "OF THE LAP FLAT OUT"),
+               (f"{st['braking_zones']}", "zones", "BRAKING PER LAP"), ("0", "DRS zones", "NEW FOR 2026")]
+    for big, u, lbl in flashes:
+        t1, t2 = c.number(0.79, big, u, size=150)
+        t3 = c.text(0.5, 0.725, lbl, 24, color=SUN, weight=800, track=True)
+        r.add(c.fig, int(0.9 * FPS))
+        for t in (t1, t2, t3):
+            t.remove()
+    c.text(0.5, 0.80, f"QUALI {q.upper()}", 44, weight=900)
+    c.text(0.5, 0.75, f"RACE {rr.upper()}", 44, color=PINK, weight=900)
+    c.text(0.5, 0.71, "LOCAL TIME", 16, color=LILAC, weight=600, track=True)
+    c.text(0.5, 0.29, "Follow so you don't miss quali", 30, weight=800)
+    r.add(c.fig, int(1.8 * FPS))
+    plt.close(c.fig)
+    return r.close(), out / "cover.jpg"
 
 
 def caption(p: Preview, kind: str) -> str:
     st = p.stats
-    q = p.sessions.get("SQ") or p.sessions.get("Q")
-    r = p.sessions.get("R")
-    lines = [f"Up next: {p.title.title()}.",
+    q, r = times_text(p)
+    ly = p.last_year or {}
+    lines = [f"How fast is {p.title.title()}? {st['top_speed']} km/h fast.",
              "",
-             f"On last year's fastest race lap ({p.driver}, {lap_time(round(p.lap_s * 1000))}): {st['top_speed']} km/h at the top, "
-             f"{st['flat_pct']}% of the lap flat out, and just {st['braking_zones']} braking zones. The brakes mostly get the night off.",
-             "",
-             f"Qualifying {q}. Race {r}. Local time." if q and r else "",
-             "Every session, decoded, right here." if kind == "reel" else "Swipe for the lap in numbers.",
-             "", FOOTER, "", " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry"])]
+             f"On last year's fastest race lap ({p.driver}, {lap_time(round(p.lap_s * 1000))}): {st['flat_pct']}% of the lap flat out, "
+             f"one run of {km(st['longest_flat_m'])} km without lifting, and only {st['braking_zones']} braking zones.",
+             "And for 2026: zero DRS zones. Straight Mode and Overtake Mode take over.",
+             ]
+    if ly.get("winner"):
+        lines.append(f"Last year: {ly['winner']} won" + (f", {ly['pole']} took pole" if ly.get("pole") else "") + ".")
+    lines += ["", f"Quali {q}. Race {r}. Local time.",
+              "Save this for race week and follow so you don't miss quali." if kind != "reel" else "Follow so you don't miss quali.",
+              "", FOOTER, "", " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])]
     return clean("\n".join(lines))

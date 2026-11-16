@@ -32,7 +32,16 @@ BONE = "#EDE8DF"
 STONE = "#8D877C"
 CHAMPAGNE = "#C9A96E"
 HAIRLINE = "#3A3630"
-ACCENT = "#D4F53C"          # Track Lime (chosen 15 Nov 2026 over Purple Sector and Hot Pink)
+ACCENT = "#FF3D8B"          # Hot Pink (Michel, 15 Nov 2026, after Track Lime and Purple Sector)
+
+# "Pink Night" (locked 15 Nov 2026): plum night background, Hot Pink hero, Sunbeam for structure.
+NIGHT_TOP = "#1C0B33"
+NIGHT_BOTTOM = "#07040D"
+PINK = ACCENT
+SUN = "#FFC94A"             # replaces champagne: labels, kickers, secondary highlights
+SNOW = "#FFF4F8"            # text
+LILAC = "#A99BC0"           # secondary text
+LINE = "#3A2955"            # track base line, dividers
 
 # Host country (as Jolpica / OpenF1 name it) to ISO code for the flag PNGs in ./flags
 # (rendered from country-flag-icons, MIT, the same set the website uses).

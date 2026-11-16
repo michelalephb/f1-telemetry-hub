@@ -413,13 +413,29 @@ def test_preview_numbers_and_caption():
     b = np.array([0, 100, 100, 0, 100, 0, 0, 0, 0, 100, 0, 0])   # 0.25..1.0 one zone (gap 0.5 merged), 2.25 blip dropped
     assert preview.braking_zones(t, b) == 1
     c = preview.caption(p, "reel")
-    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Qualifying Fri 8 PM" in c
+    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Quali Fri 8 PM" in c and "zero DRS" in c
 
 
 def test_preview_renders(tmp_path):
     from pipeline.social import preview
     p = preview_fixture()
-    assert len(preview.carousel(p, tmp_path)) == 4
+    slides = preview.carousel(p, tmp_path)
+    assert len(slides) == 2 + len(preview.facts(p)) <= 10            # cover, facts, closing; Instagram max 10
+    assert len(preview.stories(p, tmp_path / "s")) == len(slides)
+    p.last_year = {"pole": "NOR", "pole_ms": 107934, "winner": "VER"}
+    assert any(f["unit"] == "s" for f in preview.facts(p))          # flashback card appears with last year's pole
+    from PIL import Image
+    with Image.open(preview.stories(p, tmp_path / "s2")[1]) as im:
+        assert im.size == (1080, 1920)
     if shutil.which("ffmpeg"):
         v, c = preview.reel(p, tmp_path, lap_s=1.0)
         assert v.stat().st_size > 0 and c.exists()
+
+
+def test_uploadpost_story_is_one_image_as_stories(tmp_path):
+    from pipeline.social.publish import UploadPost
+    http = FakeUpHTTP()
+    img = _touch(tmp_path / "s.jpg")
+    UploadPost("KEY", "f1telemetryhub", session=http).send_story(str(img), "rid-1")
+    path, data, files, _ = http.posts[0]
+    assert path == "upload_photos" and data["media_type"] == "STORIES" and files == ["photos[]"]

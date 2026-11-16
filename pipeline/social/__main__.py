@@ -175,6 +175,8 @@ def send_files(sb, ig: UploadPost, sid: str, kind: str, story: str, built: dict,
     try:
         if kind == "reel":
             ig.send_reel(str(built["video"]), str(built["cover"]) if built["cover"] else None, built["caption"], rid)
+        elif kind == "story":
+            ig.send_story(str(built["files"][0]), rid)
         else:
             ig.send_carousel([str(p) for p in built["files"]], built["caption"], rid)
     except Exception as e:
@@ -281,7 +283,8 @@ def cmd_rewind(a) -> int:
 
 
 def cmd_preview(a) -> int:
-    """Race week "up next" post for one round: a Reel and a carousel (original artwork, own data)."""
+    """Race week fact posts for one round: Reel, carousel and/or stories (original artwork, own data).
+    Stories go out one image per story, in order; each is recorded so none is ever posted twice."""
     from . import preview
     sb = store.client()
     ig = connect(sb, a.dry_run)
@@ -294,20 +297,27 @@ def cmd_preview(a) -> int:
         import pickle
         Path(a.dump).write_bytes(pickle.dumps(dataclasses.asdict(p)))
     sid = f"{a.season}_{a.round:02d}_PREVIEW"
-    report, failed = [], 0
-    for kind in ([a.kind] if a.kind else list(KINDS)):
+    checks = p.stats | {"driver": p.driver, "lap_s": p.lap_s, "ref_year": p.ref_year, "sessions": p.sessions, "last_year": p.last_year}
+    jobs = []
+    for kind in ([a.kind] if a.kind else ["reel", "carousel"]):
         out = Path(a.out) / sid / f"preview_{kind}"
         if kind == "reel":
             v, c = preview.reel(p, out)
-            built = {"video": v, "cover": c, "files": [], "caption": preview.caption(p, kind)}
+            jobs.append((sid, "reel", {"video": v, "cover": c, "files": [], "caption": preview.caption(p, kind)}))
+        elif kind == "carousel":
+            jobs.append((sid, "carousel", {"video": None, "cover": None, "files": preview.carousel(p, out), "caption": preview.caption(p, kind)}))
         else:
-            built = {"video": None, "cover": None, "files": preview.carousel(p, out), "caption": preview.caption(p, kind)}
-        entry = {"session_id": sid, "kind": kind, "story": "session", "checks": p.stats | {"driver": p.driver, "lap_s": p.lap_s,
-                 "ref_year": p.ref_year, "sessions": p.sessions}, "caption": built["caption"]}
+            imgs = preview.stories(p, out)
+            pick = range(len(imgs)) if a.story is None else [a.story - 1]
+            for i in pick:
+                jobs.append((f"{sid}_S{i + 1:02d}", "story", {"video": None, "cover": None, "files": [imgs[i]], "caption": ""}))
+    report, failed = [], 0
+    for jsid, kind, built in jobs:
+        entry = {"session_id": jsid, "kind": kind, "story": "session", "checks": checks, "caption": built["caption"]}
         if ig is None:
             report.append(entry | {"status": "rendered (dry run)"})
             continue
-        row = post_row(sb, sid, kind, "session")
+        row = post_row(sb, jsid, kind, "session")
         if row and row["status"] == "published":
             report.append(entry | {"status": "already published", "permalink": row.get("permalink")})
             continue
@@ -315,7 +325,7 @@ def cmd_preview(a) -> int:
             if row and row["status"] == "queued" and (row.get("container_id") or "").startswith("up:"):
                 resume(sb, ig, row, report, entry)
             else:
-                send_files(sb, ig, sid, kind, "session", built, (row or {}).get("attempts", 0) + 1, entry, report)
+                send_files(sb, ig, jsid, kind, "session", built, (row or {}).get("attempts", 0) + 1, entry, report)
         except Exception:
             failed += 1
     return finish(report, a.out, failed)
@@ -351,7 +361,8 @@ def main(argv=None) -> int:
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
-    ap.add_argument("--kind", choices=KINDS)
+    ap.add_argument("--kind", choices=KINDS + ("stories",))
+    ap.add_argument("--story", type=int, help="preview stories: post only story number N (1 = cover)")
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")
     ap.add_argument("--out", default="ig_out")
