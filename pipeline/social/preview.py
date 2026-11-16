@@ -48,6 +48,8 @@ class Preview:
     y: np.ndarray
     sessions: dict                # {"Q": "Fri 8 PM", "R": "Sat 8 PM"} local track time
     stats: dict = field(default_factory=dict)
+    country: str = ""             # host country, for the flag
+    gp: str = ""                  # "Las Vegas GP"
 
 
 # ---------------------------------------------------------------- numbers from the lap
@@ -151,18 +153,36 @@ def load(season: int, rnd: int) -> Preview:
                 ct, dist, sp, car["throttle"].to_numpy(float), car["brake"].to_numpy(float),
                 car["n_gear"].to_numpy(float), xr, yr, times)
     p.stats = lap_stats(p)
+    p.country = sess[0].get("country") or ""
+    p.gp = event.replace("Grand Prix", "GP")
     log.info("preview %s: %s %s lap %.3f s, stats %s, sessions %s", p.title, p.ref_year, p.driver, p.lap_s, p.stats, p.sessions)
     return p
 
 
 # ---------------------------------------------------------------- artwork: black and champagne, editorial
 
-BG0, BG1 = "#09090A", "#17161A"
-INK = "#ECE7DD"          # warm white
-MUTE = "#8D877C"
-GOLD = "#C9A96E"         # champagne
-HAIR = "#3A3630"
+BG0, BG1 = S.OBSIDIAN, S.OBSIDIAN_LIFT
+INK = S.BONE
+MUTE = S.STONE
+GOLD = S.CHAMPAGNE
+HAIR = S.HAIRLINE
 FONT = "Inter"
+
+
+def accent() -> str:
+    return S.ACCENT
+
+
+def sticker(fig, x, y, text, angle=-6, size=15, color=None):
+    """The fun twist: a tilted accent pill, like a sticker slapped on a luxury box. One per slide, max."""
+    return fig.text(x, y, tracked(text.upper()), ha="center", va="center", fontsize=size, family=FONT, weight=800,
+                    color=S.OBSIDIAN, rotation=angle,
+                    bbox=dict(boxstyle="round,pad=0.55,rounding_size=0.9", fc=color or accent(), ec="none"))
+
+
+def wink(fig, y, text, size=17):
+    """One line of dry humour per slide, in light italic."""
+    return fig.text(0.5, y, text, ha="center", va="center", fontsize=size, family=FONT, weight=300, style="italic", color=MUTE)
 
 
 def tracked(s: str, gap: int = 1) -> str:
@@ -235,6 +255,38 @@ def footer(fig, y=0.035):
     fig.text(0.94, y, S.SITE, fontsize=14, color=MUTE, family=FONT, weight=300, ha="right")
 
 
+def gp_name(p: Preview) -> str:
+    return p.gp or p.event.replace("Grand Prix", "GP") or p.title.title()
+
+
+def header(fig, p: Preview, y: float = 0.948, reel: bool = False):
+    """Flag, event and season on the left, round on the right: every slide says where it is."""
+    flag = S.flag_image(p.country)
+    h = 0.022 if not reel else 0.016
+    x = 0.06
+    if flag is not None:
+        w = h * 1.5 * (H_REEL if reel else H_POST) / W
+        ax = fig.add_axes([x, y - h / 2, w, h])
+        ax.imshow(flag, aspect="auto")
+        ax.axis("off")
+        x += w + 0.015
+    label(fig, x, y, f"{gp_name(p)} {p.season}", ha="left", size=15 if not reel else 17)
+    label(fig, 0.94, y, f"Round {p.round}", ha="right", color=MUTE, size=13 if not reel else 15)
+
+
+def flat_ribbon(fig, p: Preview, y: float, x0=0.08, x1=0.92, h=0.012):
+    """The lap as one strip: accent where the throttle is pinned, hairline where it is not."""
+    ax = fig.add_axes([x0, y - h / 2, x1 - x0, h])
+    flat = (p.throttle >= FLAT_THROTTLE).astype(float)
+    ax.imshow(flat[None, :], cmap=LinearSegmentedColormap.from_list("f", [HAIR, accent()]), aspect="auto",
+              extent=[p.dist[0], p.dist[-1], 0, 1], interpolation="nearest", vmin=0, vmax=1)
+    ax.axis("off")
+    label(fig, x0, y + 0.032, "Flat out, across the lap", ha="left", size=13)
+    fig.text(x1, y + 0.032, f"{p.stats['flat_pct']}%", ha="right", va="center", fontsize=30, family=FONT, weight=300, color=accent())
+    label(fig, x0, y - 0.022, "Start", ha="left", size=10, color=MUTE)
+    label(fig, x1, y - 0.022, "Finish", ha="right", size=10, color=MUTE)
+
+
 def times_block(fig, p: Preview, y: float, size: int = 30):
     q = p.sessions.get("SQ") or p.sessions.get("Q")
     r = p.sessions.get("R")
@@ -262,45 +314,50 @@ def carousel(p: Preview, out: Path) -> list[Path]:
     imax = int(np.argmax(p.speed))
 
     fig = canvas(H_POST)
-    label(fig, 0.06, 0.945, f"Round {p.round}", ha="left")
-    label(fig, 0.94, 0.945, f"{p.season} season", ha="right")
+    header(fig, p)
     label(fig, 0.5, 0.865, "Up next")
     rule(fig, 0.47, 0.53, 0.835)
     display(fig, 0.5, 0.775, p.title, 64 if len(p.title) <= 10 else 50)
     label(fig, 0.5, 0.725, "Grand Prix", size=13, color=MUTE)
-    ax = track_axes(fig, [0.10, 0.25, 0.80, 0.45], p)
+    ax = track_axes(fig, [0.10, 0.27, 0.80, 0.43], p)
     outline(ax, p)
     start_line(ax, p)
-    times_block(fig, p, 0.15)
+    ax.plot([p.x[imax]], [p.y[imax]], "o", ms=10, color=accent(), zorder=6)
+    sticker(fig, 0.80, 0.66, "Night race", angle=-7)
+    times_block(fig, p, 0.165)
+    wink(fig, 0.085, "Dress code: flat out.")
     footer(fig)
     paths.append(save(fig, out / "slide_1.jpg"))
 
     fig = canvas(H_POST)
-    label(fig, 0.5, 0.92, f"Fastest race lap, {p.ref_year}")
-    display(fig, 0.5, 0.885, f"{p.driver}   {lap_time(round(p.lap_s * 1000))}", 22, color=MUTE, weight=300, track=False)
-    display(fig, 0.5, 0.74, f"{st['top_speed']}", 190, weight=100, track=False)
-    label(fig, 0.5, 0.635, "km/h  top speed")
-    ax = fig.add_axes([0.08, 0.27, 0.84, 0.30])
+    header(fig, p)
+    label(fig, 0.5, 0.895, f"Fastest race lap, {p.ref_year}")
+    display(fig, 0.5, 0.865, f"{p.driver}   {lap_time(round(p.lap_s * 1000))}", 22, color=MUTE, weight=300, track=False)
+    display(fig, 0.5, 0.74, f"{st['top_speed']}", 180, weight=100, track=False)
+    label(fig, 0.5, 0.64, "km/h  top speed")
+    ax = fig.add_axes([0.08, 0.36, 0.84, 0.24])
     ax.plot(p.dist, p.speed, color=INK, lw=1.6)
-    ax.plot([p.dist[imax]], [p.speed[imax]], "o", ms=7, color=GOLD)
+    ax.plot([p.dist[imax]], [p.speed[imax]], "o", ms=11, color=accent(), zorder=5)
     ax.set_xlim(0, p.dist[-1])
     ax.set_ylim(0, p.speed.max() * 1.12)
     ax.axis("off")
     ax.axhline(0, color=HAIR, lw=0.8)
     for k in range(0, int(p.dist[-1] // 1000) + 1):
-        ax.text(k * 1000, -p.speed.max() * 0.06, f"{k} km" if k else "0", color=MUTE, fontsize=12, family=FONT, ha="center", weight=300)
-    cols = [(f"{st['flat_pct']}%", "flat out"), (km(st["longest_flat_m"]), "longest flat out"), (f"{st['braking_zones']}", "braking zones")]
+        ax.text(k * 1000, -p.speed.max() * 0.08, f"{k} km" if k else "0", color=MUTE, fontsize=12, family=FONT, ha="center", weight=300)
+    flat_ribbon(fig, p, 0.265)
+    wink(fig, 0.205, f"The other {100 - st['flat_pct']}% is spent braking.")
+    cols = [(km(st["longest_flat_m"]), "longest flat out"), (f"{st['braking_zones']}", "braking zones")]
     for j, (big, small) in enumerate(cols):
-        x = 0.2 + 0.3 * j
-        display(fig, x, 0.15, big, 40, weight=300, track=False)
-        label(fig, x, 0.105, small, size=12, color=MUTE)
-        if j:
-            fig.add_artist(plt.Line2D([x - 0.15, x - 0.15], [0.09, 0.18], transform=fig.transFigure, color=HAIR, lw=0.8))
+        x = 0.33 + 0.34 * j
+        display(fig, x, 0.125, big, 40, weight=300, track=False)
+        label(fig, x, 0.085, small, size=12, color=MUTE)
+    fig.add_artist(plt.Line2D([0.5, 0.5], [0.07, 0.15], transform=fig.transFigure, color=HAIR, lw=0.8))
     footer(fig)
     paths.append(save(fig, out / "slide_2.jpg"))
 
     fig = canvas(H_POST)
-    label(fig, 0.5, 0.92, "Where they brake")
+    header(fig, p)
+    label(fig, 0.5, 0.905, "Where they brake")
     display(fig, 0.5, 0.82, f"{st['braking_zones']}", 150, weight=100, track=False)
     label(fig, 0.5, 0.735, "braking zones in one lap")
     ax = track_axes(fig, [0.10, 0.17, 0.80, 0.52], p)
@@ -312,14 +369,17 @@ def carousel(p: Preview, out: Path) -> list[Path]:
         cx, cy = np.mean(p.x), np.mean(p.y)
         vx, vy = p.x[a_] - cx, p.y[a_] - cy
         d = math.hypot(vx, vy) or 1
-        ax.text(p.x[a_] + vx / d * 0.06 * span, p.y[a_] + vy / d * 0.06 * span, str(n), color=GOLD, fontsize=15,
-                family=FONT, weight=500, ha="center", va="center")
-    fig.text(0.5, 0.12, f"Measured on the fastest {p.ref_year} race lap, {p.driver}", ha="center", fontsize=14, color=MUTE,
+        ax.text(p.x[a_] + vx / d * 0.07 * span, p.y[a_] + vy / d * 0.07 * span, str(n), color=S.OBSIDIAN, fontsize=14,
+                family=FONT, weight=800, ha="center", va="center",
+                bbox=dict(boxstyle="circle,pad=0.35", fc=accent(), ec="none"))
+    wink(fig, 0.135, "The brakes mostly get the night off.")
+    fig.text(0.5, 0.095, f"Measured on the fastest {p.ref_year} race lap, {p.driver}", ha="center", fontsize=13, color=MUTE,
              family=FONT, weight=300)
     footer(fig)
     paths.append(save(fig, out / "slide_3.jpg"))
 
     fig = canvas(H_POST)
+    header(fig, p)
     logo = S.logo_image()
     if logo is not None:
         ax = fig.add_axes([0.32, 0.74, 0.36, 0.12])
@@ -329,10 +389,20 @@ def carousel(p: Preview, out: Path) -> list[Path]:
     display(fig, 0.5, 0.545, "Decoded", 40, color=GOLD)
     rule(fig, 0.47, 0.53, 0.49)
     times_block(fig, p, 0.37)
-    label(fig, 0.5, 0.22, S.SITE, size=16)
+    sticker(fig, 0.5, 0.245, see_you(p), angle=-4, size=17)
+    wink(fig, 0.17, "Bring snacks. We bring the data.")
+    label(fig, 0.5, 0.11, S.SITE, size=14)
     footer(fig)
     paths.append(save(fig, out / "slide_4.jpg"))
     return paths
+
+
+DAYS = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"}
+
+
+def see_you(p: Preview) -> str:
+    q = p.sessions.get("SQ") or p.sessions.get("Q") or ""
+    return f"See you {DAYS.get(q[:3], 'soon')}"
 
 
 def ease(x: float) -> float:
@@ -345,6 +415,7 @@ def reel(p: Preview, out: Path, lap_s: float = 6.5) -> tuple[Path, Path]:
     imax = int(np.argmax(p.speed))
     r = Reel(out / "reel.mp4")
     fig = canvas(H_REEL)
+    header(fig, p, y=0.962, reel=True)
     up = label(fig, 0.5, 0.90, "Up next", size=18, alpha=0)
     title = display(fig, 0.5, 0.855, p.title, 66 if len(p.title) <= 10 else 52, alpha=0)
     gp = label(fig, 0.5, 0.825, "Grand Prix", size=13, color=MUTE, alpha=0)
@@ -352,7 +423,8 @@ def reel(p: Preview, out: Path, lap_s: float = 6.5) -> tuple[Path, Path]:
     ax = track_axes(fig, [0.08, 0.44, 0.84, 0.34], p)
     ax.plot(p.x, p.y, color=HAIR, lw=1.4, solid_capstyle="round")
     drawn = outline(ax, p, upto=2)
-    head, = ax.plot([], [], "o", ms=11, color=GOLD, zorder=6)
+    trail, = ax.plot([], [], color=accent(), lw=5, alpha=0.9, solid_capstyle="round", zorder=5)
+    head, = ax.plot([], [], "o", ms=14, color=accent(), zorder=6)
     spd = display(fig, 0.5, 0.33, "", 150, weight=100, track=False)
     unit = label(fig, 0.5, 0.265, "", size=16)
     footer(fig, 0.03)
@@ -374,12 +446,17 @@ def reel(p: Preview, out: Path, lap_s: float = 6.5) -> tuple[Path, Path]:
         drawn.remove()
         drawn = ax.plot(p.x[: k + 1], p.y[: k + 1], color=INK, lw=2.4, solid_capstyle="round", solid_joinstyle="round")[0]
         head.set_data([p.x[k]], [p.y[k]])
+        trail.set_data(p.x[max(0, k - 12): k + 1], p.y[max(0, k - 12): k + 1])
         spd.set_text(f"{int(p.speed[k])}")
+        spd.set_color(accent() if k == imax else INK)
         unit.set_text(tracked("KM/H"))
         if k >= imax and not any(t.get_text().strip().startswith("3") for t in ax.texts):
             callout(ax, p, imax, f"{st['top_speed']} KM/H", dx=-0.12, dy=0.10)
+            sticker(fig, 0.78, 0.45, "Top speed", angle=-8)
         r.add(fig)
     head.set_data([], [])
+    trail.set_data([], [])
+    ax.plot([p.x[imax]], [p.y[imax]], "o", ms=12, color=accent(), zorder=6)
     cover = out / "cover.jpg"
     fig.savefig(cover, dpi=DPI, format="jpg", pil_kwargs={"quality": 94})
 
@@ -391,7 +468,8 @@ def reel(p: Preview, out: Path, lap_s: float = 6.5) -> tuple[Path, Path]:
     items = []
     for j, (big, small) in enumerate(rows):
         y = 0.345 - j * 0.07
-        items.append((display(fig, 0.40, y, big, 56, weight=100, ha="right", track=False, alpha=0),
+        items.append((display(fig, 0.40, y, big, 56, weight=100, ha="right", track=False, alpha=0,
+                              color=accent() if big.endswith("%") else INK),
                       label(fig, 0.44, y, small, size=14, color=MUTE, ha="left", alpha=0)))
     for j in range(3):
         for i in range(int(0.5 * FPS)):
@@ -411,12 +489,16 @@ def reel(p: Preview, out: Path, lap_s: float = 6.5) -> tuple[Path, Path]:
              label(fig, 0.70, 0.33, "Race", alpha=0), display(fig, 0.70, 0.295, p.sessions.get("R") or "", 34, weight=300, track=False, alpha=0),
              label(fig, 0.5, 0.25, "Local time", size=12, color=MUTE, alpha=0),
              display(fig, 0.5, 0.17, "Every session", 34, alpha=0), display(fig, 0.5, 0.13, "Decoded", 34, color=GOLD, alpha=0)]
+    for t in [x for x in fig.texts if x.get_bbox_patch() is not None]:
+        t.set_visible(False)
     for i in range(int(0.8 * FPS)):
         e = ease(i / (0.8 * FPS - 1))
         for t in texts:
             t.set_alpha(e)
         r.add(fig)
-    r.add(fig, int(1.8 * FPS))
+    r.add(fig, int(0.5 * FPS))
+    sticker(fig, 0.5, 0.075, see_you(p), angle=-5, size=18)
+    r.add(fig, int(1.6 * FPS))
     plt.close(fig)
     return r.close(), cover
 
@@ -428,7 +510,7 @@ def caption(p: Preview, kind: str) -> str:
     lines = [f"Up next: {p.title.title()}.",
              "",
              f"On last year's fastest race lap ({p.driver}, {lap_time(round(p.lap_s * 1000))}): {st['top_speed']} km/h at the top, "
-             f"{st['flat_pct']}% of the lap flat out, and just {st['braking_zones']} braking zones.",
+             f"{st['flat_pct']}% of the lap flat out, and just {st['braking_zones']} braking zones. The brakes mostly get the night off.",
              "",
              f"Qualifying {q}. Race {r}. Local time." if q and r else "",
              "Every session, decoded, right here." if kind == "reel" else "Swipe for the lap in numbers.",
