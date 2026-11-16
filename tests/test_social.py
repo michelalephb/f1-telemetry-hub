@@ -48,9 +48,14 @@ def quali_fixture():
     results = pd.DataFrame({"driver_number": ["1", "63", "12", "44"], "driver_code": ["NOR", "RUS", "ANT", "HAM"],
                             "position": [1, 2, 3, 11], "grid": None, "status": None,
                             "q3_ms": [round(la * 1000), round(lb * 1000), round(lb * 1000) + 300, None]})
+    def split(tr, start, d):  # official style sector time: lap clock at distance d
+        return round((np.interp(d, tr["lap_dist_m"], tr["t"]) - start) * 1000)
+    s1a, s2a = split(tr_a, 1000, 1300), split(tr_a, 1000, 2700) - split(tr_a, 1000, 1300)
+    s1b, s2b = split(tr_b, 1100, 1300), split(tr_b, 1100, 2700) - split(tr_b, 1100, 1300)
     laps = pd.DataFrame({
         "driver_number": ["44", "1", "63"], "lap_number": [5, 10, 11],
         "lap_time_ms": [90000, round(la * 1000), round(lb * 1000)],
+        "sector1_ms": [30000, s1a, s1b], "sector2_ms": [30000, s2a, s2b],
         "lap_start_s": [800.0, 1000.0, 1100.0], "lap_end_s": [890.0, 1000 + la, 1100 + lb],
     })
     drivers = pd.DataFrame({"driver_number": ["1", "63"], "abbreviation": ["NOR", "RUS"], "team_color": ["F47600", "00D7B6"]})
@@ -92,6 +97,24 @@ def test_quali_story_refuses_a_gap_that_disagrees_with_the_official_one():
         story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
 
 
+def test_quali_gap_curve_passes_through_the_official_splits():
+    results, laps, drivers, traces = quali_fixture()
+    st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
+    assert all(abs(e) < 5 for e in st.checks["sector_error_ms"])
+    a, b = laps.set_index("driver_number").loc["1"], laps.set_index("driver_number").loc["63"]
+    d1 = st.checks["sector_split_m"][0]
+    assert np.interp(d1, st.grid, st.delta) == pytest.approx((b.sector1_ms - a.sector1_ms) / 1000, abs=0.003)
+    assert st.delta[-1] == pytest.approx(st.official_gap_s, abs=1e-6)
+
+
+def test_quali_story_refuses_when_a_split_disagrees():
+    results, laps, drivers, traces = quali_fixture()
+    laps.loc[laps.driver_number == "63", "sector1_ms"] += 400
+    laps.loc[laps.driver_number == "63", "sector2_ms"] -= 400
+    with pytest.raises(story.StoryError, match="split"):
+        story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
+
+
 def test_race_story_and_biggest_climb():
     results, laps, drivers = race_fixture()
     st = story.race_story(results, laps, drivers)
@@ -99,6 +122,7 @@ def test_race_story_and_biggest_climb():
     assert st.mover["code"] == "VER" and st.mover["grid"] == 15 and st.mover["position"] == 2
     assert st.positions[0] == 15 and st.positions[-1] == 2
     assert st.colors["HAD"] != st.colors["VER"]   # teammates get distinct colours
+    assert all(np.nanmin(g) >= 0 for g in st.gaps.values())   # gap to the leader on track
 
 
 def test_race_story_refuses_a_wrong_order_at_the_flag():

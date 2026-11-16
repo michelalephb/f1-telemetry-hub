@@ -136,7 +136,7 @@ def quali_carousel(st: QualiStory, meta: dict, rot: float, out: Path) -> list[Pa
             continue
         fig = new_fig(H_POST)
         gain = abs(g.gain_s)
-        chrome(fig, kick, f"{corner_label(g.corner)}: {lead.code} finds {gain:.3f} s")
+        chrome(fig, kick, f"{corner_label(g.corner)}: {lead.code} finds {gain:.2f} s")
         corner_zoom(fig.add_axes([0.1, 0.30, 0.84, 0.50]), a, b, g)
         da = g.apex_a - g.apex_b
         fig.text(0.06, 0.19, f"Minimum speed  {a.code} {g.apex_a:.0f}  |  {b.code} {g.apex_b:.0f} km/h", fontsize=26, family=S.MONO)
@@ -198,7 +198,7 @@ def race_carousel(st: RaceStory, meta: dict, out: Path) -> list[Path]:
     paths.append(save_jpeg(fig, out / "slide_1.jpg"))
 
     fig = new_fig(H_POST)
-    chrome(fig, kick, "Gap to the winner, lap by lap")
+    chrome(fig, kick, "Gap to the leader, lap by lap")
     gap_axes(fig.add_axes([0.12, 0.18, 0.82, 0.62]), st)
     paths.append(save_jpeg(fig, out / "slide_2.jpg"))
 
@@ -214,8 +214,9 @@ def race_carousel(st: RaceStory, meta: dict, out: Path) -> list[Path]:
 
 
 def gap_limits(st: RaceStory) -> float:
-    ends = [np.nanmax(g) for g in st.gaps.values() if np.isfinite(g).any()]
-    return float(min(max(ends + [5.0]) * 1.08, 90.0))
+    """Scale to the typical spread, not to pit stop spikes (those run off the chart)."""
+    q = [np.nanpercentile(g, 90) for g in st.gaps.values() if np.isfinite(g).any()]
+    return float(min(max(q + [5.0]) * 1.15, 60.0))
 
 
 def gap_axes(ax, st: RaceStory, upto: int | None = None) -> None:
@@ -226,9 +227,9 @@ def gap_axes(ax, st: RaceStory, upto: int | None = None) -> None:
         if k and np.isfinite(g[k - 1]):
             ax.plot(laps[k - 1], g[k - 1], "o", color=st.colors[code], ms=10)
     ax.set_xlim(1, st.n_laps)
-    ax.set_ylim(gap_limits(st), -1)
+    ax.set_ylim(gap_limits(st), -0.5)
     ax.set_xlabel("Lap")
-    ax.set_ylabel("Seconds behind the winner")
+    ax.set_ylabel("Seconds behind the leader")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.09), frameon=False, fontsize=20, ncol=5)
 
 
@@ -338,7 +339,7 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
 
     # 3. Key corner, 3.5 s
     g = st.best_a
-    fig = reel_fig(kick, f"{corner_label(g.corner)}: {a.code} +{g.gain_s:.3f} s")
+    fig = reel_fig(kick, f"{corner_label(g.corner)}: {a.code} +{g.gain_s:.2f} s")
     axm = track_axes(fig, [0.30, 0.66, 0.40, 0.20])
     axm.plot(xa, ya, color=S.BORDER, lw=8)
     cx, cy = np.interp(g.apex_m, a.dist, xa), np.interp(g.apex_m, a.dist, ya)
@@ -379,7 +380,7 @@ def race_reel(st: RaceStory, meta: dict, out: Path) -> tuple[Path, Path]:
     r.add(fig, int(1.5 * FPS))
     cover = save_jpeg_reel(fig, out / "cover.jpg")
 
-    fig = reel_fig(kick, "Gap to the winner")
+    fig = reel_fig(kick, "Gap to the leader")
     ax = fig.add_axes([0.13, 0.17, 0.81, 0.63])
     lap_txt = fig.text(0.5, 0.835, "", ha="center", fontsize=40, family=S.MONO, color=S.CYAN)
     n = int(8 * FPS)

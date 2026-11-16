@@ -13,7 +13,8 @@ import numpy as np
 import pandas as pd
 
 GRID_STEP_M = 5.0
-LINE_TOLERANCE_S = 0.05      # computed gap at the line vs official gap (São Paulo Q: 11 ms)
+LINE_TOLERANCE_S = 0.05      # computed gap at the line vs official gap (São Paulo Q: 5.5 ms)
+SECTOR_TOLERANCE_S = 0.15    # raw gap at the official sector splits (São Paulo Q: about 0.1 s off mid lap)
 LAP_MATCH_MS = 30            # OpenF1 lap duration vs official Q3 time
 MIN_GAIN_S = 0.010           # smaller corner gains are not worth a slide
 CORNER_BEFORE_M, CORNER_AFTER_M = 250.0, 150.0   # same window as the pipeline's corner metrics
@@ -68,7 +69,7 @@ class RaceStory:
     winner: dict
     podium: list[dict]
     mover: dict | None       # {"code", "color", "grid", "position", "gained"}
-    gaps: dict               # code -> np.ndarray of gap to winner (s) per lap, NaN where unknown
+    gaps: dict               # code -> np.ndarray of gap to the leader on track (s) per lap, NaN where unknown
     colors: dict
     positions: np.ndarray    # position per lap of the mover (index = lap number, 0 = grid)
     n_laps: int
@@ -162,7 +163,7 @@ def quali_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame
         raise StoryError("official result has fewer than two final segment times")
     p1, p2 = res.iloc[0], res.iloc[1]
     q3 = final_segment_laps(laps, results)
-    out = []
+    out, picked = [], []
     for r in (p1, p2):
         drv = str(r["driver_number"])
         lap = match_lap(q3, drv, int(r["q3_ms"]))
@@ -172,6 +173,7 @@ def quali_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame
         tr = lap_trace(traces[drv], int(lap["lap_number"]), track_m)
         code = (info.get("abbreviation") if len(info) else None) or r.get("driver_code") or drv
         out.append(to_lap(tr, drv, code, team_color(info.get("team_color") if len(info) else None), int(lap["lap_number"]), int(lap["lap_time_ms"])))
+        picked.append(lap)
     a, b = out
     if colors_close(a.color, b.color):
         b.color = "#FFFFFF"
@@ -184,6 +186,7 @@ def quali_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame
               "line_error_ms": round(abs(float(delta[-1]) - official) * 1000, 1)}
     if abs(delta[-1] - official) > LINE_TOLERANCE_S:
         raise StoryError(f"computed gap {delta[-1]:.3f} s vs official {official:.3f} s")
+    delta = pin_to_sectors(a, b, picked[0], picked[1], grid, delta, official, track_m, checks)
 
     gains = corner_gains(a, b, grid, delta, corners, track_m)
     if not gains:
@@ -191,6 +194,38 @@ def quali_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame
     best_a = max(gains, key=lambda g: g.gain_s)
     best_b = min(gains, key=lambda g: g.gain_s)
     return QualiStory("quali", a, b, official, grid, delta, best_a, best_b if best_b.gain_s <= -MIN_GAIN_S else None, track_m, checks)
+
+
+def pin_to_sectors(a: Lap, b: Lap, la: pd.Series, lb: pd.Series, grid: np.ndarray, delta: np.ndarray,
+                   official: float, track_m: float, checks: dict) -> np.ndarray:
+    """Make the gap curve pass exactly through the official gaps at the sector splits and the line.
+
+    Distance alignment between two laps drifts by up to about 0.1 s mid lap even when the line
+    is exact, which is enough to invent a corner gain. The error between pins is spread linearly.
+    Refuses the story when the raw curve misses a split by more than SECTOR_TOLERANCE_S.
+    """
+    pins_x, pins_y, errs = [0.0], [0.0], []
+    ta = tb = 0.0
+    for k in ("sector1_ms", "sector2_ms"):
+        if pd.isna(la.get(k)) or pd.isna(lb.get(k)):
+            checks["sector_pins"] = "missing sector times"
+            break
+        ta += float(la[k]) / 1000
+        tb += float(lb[k]) / 1000
+        d = (float(np.interp(ta, a.time, a.dist)) + float(np.interp(tb, b.time, b.dist))) / 2
+        raw = float(np.interp(d, grid, delta))
+        errs.append(round((raw - (tb - ta)) * 1000, 1))
+        if abs(raw - (tb - ta)) > SECTOR_TOLERANCE_S:
+            raise StoryError(f"gap at the {k[:7]} split is {raw:.3f} s, official {tb - ta:.3f} s")
+        pins_x.append(d)
+        pins_y.append((tb - ta) - raw)
+    pins_x.append(track_m)
+    pins_y.append(official - float(delta[-1]))
+    checks["sector_error_ms"] = errs
+    checks["sector_split_m"] = [round(x) for x in pins_x[1:-1]]
+    if any(np.diff(pins_x) <= 0):
+        raise StoryError(f"sector splits out of order: {pins_x}")
+    return delta + np.interp(grid, pins_x, pins_y)
 
 
 # ---------------------------------------------------------------- race
@@ -229,10 +264,11 @@ def race_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame)
         raise StoryError(f"order at the flag {final[:3]} differs from the official top 3 {checks['official_top3']}")
 
     end = laps.pivot_table(index="lap_number", columns="driver_number", values="lap_end_s", aggfunc="first")
+    leader = end.min(axis=1)   # gap to whoever led at the end of each lap: never negative
     gaps = {}
     for t in top:
         if t["driver"] in end:
-            g = (end[t["driver"]] - end[winner["driver"]]).reindex(range(1, n + 1))
+            g = (end[t["driver"]] - leader).reindex(range(1, n + 1))
             gaps[t["code"]] = g.to_numpy(float)
 
     fin = res[res["status"].fillna("").str.contains("Finished|Lap", case=False) & res["grid"].notna()]

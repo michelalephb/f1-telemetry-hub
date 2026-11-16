@@ -25,10 +25,10 @@ def quali(st: QualiStory, meta: dict, kind: str, rewind: bool = False) -> str:
     lead = f"Season rewind, round {meta['round']}. " if rewind else ""
     lines = [f"{lead}{a} takes {pole} at the {meta['event']} by {st.official_gap_s:.3f} s over {b}.",
              "",
-             f"Biggest gain: {corner_label(g.corner)}, worth {g.gain_s:.3f} s "
+             f"Biggest gain: {corner_label(g.corner)}, worth {g.gain_s:.2f} s "
              f"({a} {g.apex_a:.0f} vs {b} {g.apex_b:.0f} km/h at the apex)."]
     if st.best_b:
-        lines.append(f"{b} hit back in {corner_label(st.best_b.corner)} ({abs(st.best_b.gain_s):.3f} s).")
+        lines.append(f"{b} hit back in {corner_label(st.best_b.corner)} ({abs(st.best_b.gain_s):.2f} s).")
     lines += ["", "Same clock, same lap. Watch where the gap opens." if kind == "reel" else "Swipe for the full lap trace and the corners that decided it.",
               "", FOOTER, "", tags(meta["event"], a, b)]
     return clean("\n".join(lines))
@@ -45,7 +45,7 @@ def race(st: RaceStory, meta: dict, kind: str) -> str:
     if st.mover:
         m = st.mover
         lines += ["", f"Biggest climb: {m['code']}, P{m['grid']} on the grid to P{m['position']} at the flag."]
-    lines += ["", "Gap to the winner, lap by lap." if kind == "reel" else "Swipe for the gaps lap by lap and the biggest climb.",
+    lines += ["", "Gap to the leader, lap by lap." if kind == "reel" else "Swipe for the gaps lap by lap and the biggest climb.",
               "", FOOTER, "", tags(meta["event"], w, st.mover["code"] if st.mover else "")]
     return clean("\n".join(lines))
 
