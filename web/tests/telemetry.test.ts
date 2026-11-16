@@ -118,3 +118,12 @@ test('finalSegmentKeys: a top ten driver with no Q3 time still marks Q3', async 
   const res = [{ driver_number: '1', q3_ms: 90000, position: 1 }, { driver_number: '6', q3_ms: null, position: 10 }, { driver_number: '9', q3_ms: null, position: 11 }]
   assert.deepEqual([...finalSegmentKeys(laps, 'Q', res)!].sort(), ['1/2', '6/1', '6/2'])
 })
+
+test('finalSegmentKeys: a driver with no official time does not mark the end of Q2', async () => {
+  const { finalSegmentKeys } = await import('../lib/segments.ts')
+  const lap = (d: string, n: number, s: number) => ({ driver_number: d, lap_number: n, lap_start_s: s, lap_end_s: s + 90, lap_time_ms: 90000 })
+  const laps = [lap('1', 1, 100), lap('9', 1, 2000), lap('6', 1, 2700), lap('1', 2, 2600)]
+  const res = [{ driver_number: '1', q1_ms: 1, q2_ms: 1, q3_ms: 90000, position: 1 }, { driver_number: '9', q1_ms: 1, q2_ms: 1, q3_ms: null, position: 11 },
+    { driver_number: '6', q1_ms: null, q2_ms: null, q3_ms: null, position: 22 }]
+  assert.deepEqual([...finalSegmentKeys(laps, 'Q', res)!].sort(), ['1/2'])
+})

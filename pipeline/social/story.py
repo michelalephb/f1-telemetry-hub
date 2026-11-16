@@ -135,7 +135,10 @@ def final_segment_laps(laps: pd.DataFrame, results: pd.DataFrame) -> pd.DataFram
     best = laps["lap_time_ms"].dropna()
     dur = laps["lap_end_s"] - laps["lap_start_s"]
     real = dur < 2 * best.min() / 1000 if len(best) else dur.notna()
-    out = laps[~laps["driver_number"].isin(inq3) & laps["lap_end_s"].notna() & real]
+    # Only drivers knocked out with an official time mark the end of Q2 (a driver with no time may have run in Q3)
+    timed = results[[c for c in ("q1_ms", "q2_ms") if c in results]].notna().any(axis=1) if {"q1_ms", "q2_ms"} & set(results) else True
+    knocked = set(results.loc[~results["driver_number"].astype(str).isin(inq3) & timed, "driver_number"].astype(str))
+    out = laps[laps["driver_number"].isin(knocked) & laps["lap_end_s"].notna() & real]
     if out.empty:
         raise StoryError("cannot place the start of the final segment")
     cut = out["lap_end_s"].max()
