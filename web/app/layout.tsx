@@ -31,7 +31,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
         <footer className="mx-auto max-w-7xl px-4 pb-10 pt-4 text-xs text-mute sm:px-6">
-          Unofficial. Not associated with Formula 1 companies. F1 and related marks are trademarks of Formula One Licensing B.V.
+          Unofficial. Not associated with Formula 1 companies. F1 and related marks are trademarks of Formula One Licensing B.V.{' '}
+          Timing and telemetry: <a className="underline hover:text-ink" href="https://openf1.org">OpenF1</a>. Results and history:{' '}
+          <a className="underline hover:text-ink" href="https://github.com/jolpica/jolpica-f1">Jolpica</a> and{' '}
+          <a className="underline hover:text-ink" href="https://github.com/f1db/f1db">F1DB</a> (CC BY 4.0).
         </footer>
       </body>
     </html>
