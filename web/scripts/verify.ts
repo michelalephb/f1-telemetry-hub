@@ -62,6 +62,21 @@ if (s.session_code === 'Q') {
     }
   }
 }
+// Same lap number, two drivers (the compare page in a race): the gap at the line must be the official gap.
+if (s.session_code === 'R' || s.session_code === 'S') {
+  const res = (await getResults(s.season, s.round, s.session_code)).filter((r) => r.position != null).sort((x, y) => x.position! - y.position!)
+  const [p1, p2] = [res[0].driver_number, res[1].driver_number]
+  const common = laps.filter((l) => l.driver_number === p1 && l.lap_time_ms != null && l.lap_number > 1 && !l.pit_in && !l.pit_out)
+    .map((l) => [l, laps.find((m) => m.driver_number === p2 && m.lap_number === l.lap_number && m.lap_time_ms != null && !m.pit_in && !m.pit_out)] as const)
+    .filter(([, m]) => m)
+  const [la, lb] = common[Math.floor(common.length * 0.7)]
+  const [r1, r2] = await Promise.all([getTrace(s.trace_prefix, p1), getTrace(s.trace_prefix, p2)])
+  const t1 = lapTrace(r1, la.lap_number, L, la.lap_time_ms! / 1000), t2 = lapTrace(r2, lb!.lap_number, L, lb!.lap_time_ms! / 1000)
+  const g = deltaAt(t1, t2, L), off = (lb!.lap_time_ms! - la.lap_time_ms!) / 1000
+  console.log(`L${la.lap_number} ${code(p1)} vs ${code(p2)}: gap at the line ${g.toFixed(3)} s, official ${off.toFixed(3)} s`)
+  assert.ok(Math.abs(g - off) < 0.005, 'race lap compare ends on the official gap')
+}
+
 // Race story: our running order at the flag must match the official classification, and most
 // on track moves must be found on the map.
 if (s.session_code === 'R' || s.session_code === 'S') {
