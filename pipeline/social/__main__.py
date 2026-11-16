@@ -289,6 +289,10 @@ def cmd_preview(a) -> int:
         log.error("preview posts need the Upload-Post publisher")
         return 1
     p = preview.load(a.season, a.round)
+    if a.dump:
+        import dataclasses
+        import pickle
+        Path(a.dump).write_bytes(pickle.dumps(dataclasses.asdict(p)))
     sid = f"{a.season}_{a.round:02d}_PREVIEW"
     report, failed = [], 0
     for kind in ([a.kind] if a.kind else list(KINDS)):
@@ -351,6 +355,7 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")
     ap.add_argument("--out", default="ig_out")
+    ap.add_argument("--dump", help="preview: also save the lap data (pickle) for design work")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)   # request URLs can carry the token
