@@ -17,7 +17,9 @@ from pathlib import Path
 from .. import store
 from . import captions, render, style
 from .data import load_story, rows
-from .publish import Instagram, now_iso, refresh_token
+import uuid
+
+from .publish import Instagram, UploadPost, now_iso, refresh_token
 from .story import StoryError
 
 log = logging.getLogger("social")
@@ -102,6 +104,8 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
     row = post_row(sb, sid, kind, story) if live else None
     if row and (row["status"] in ("published", "skipped") or (row["status"] == "failed" and row["attempts"] >= MAX_ATTEMPTS)):
         return False
+    if row and row["status"] == "queued" and (row.get("container_id") or "").startswith("up:"):
+        return resume(sb, ig, row, report)   # an earlier run sent it: never send twice
     entry = {"session_id": sid, "kind": kind, "story": story}
     try:
         if sid not in cache:
@@ -131,6 +135,8 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
     attempts = ((row or {}).get("attempts", 0) + 1) if (row or {}).get("status") == "failed" else 1
     save_row(sb, {"session_id": sid, "kind": kind, "story": story, "status": "queued", "caption": built["caption"],
                         "attempts": attempts, "error": None})
+    if getattr(ig, "sends_files", False):
+        return send_files(sb, ig, sid, kind, story, built, attempts, entry, report)
     video_paths = []
     try:
         if kind == "reel":
@@ -160,9 +166,57 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
         remove(sb, video_paths)   # posted or failed, the video is not kept (a retry renders it again)
 
 
+def send_files(sb, ig: UploadPost, sid: str, kind: str, story: str, built: dict, attempts: int, entry: dict, report: list) -> bool:
+    """Upload-Post: send the local files. The request id is saved first, so a crash or timeout is
+    picked up by resume() on the next run instead of being sent again."""
+    rid = f"{sid}-{story}-{kind}-a{attempts}-{uuid.uuid4().hex[:8]}"
+    key = {"session_id": sid, "kind": kind, "story": story}
+    save_row(sb, key | {"status": "queued", "container_id": f"up:{rid}", "attempts": attempts, "error": None})
+    try:
+        if kind == "reel":
+            ig.send_reel(str(built["video"]), str(built["cover"]) if built["cover"] else None, built["caption"], rid)
+        elif kind == "story":
+            ig.send_story(str(built["files"][0]), rid)
+        else:
+            ig.send_carousel([str(p) for p in built["files"]], built["caption"], rid)
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"[:1000]
+        log.error("%s %s not sent (attempt %d): %s", sid, kind, attempts, msg)
+        save_row(sb, key | {"status": "failed", "error": msg, "attempts": attempts})
+        report.append(entry | {"status": "failed", "reason": msg})
+        raise
+    return resume(sb, ig, key | {"container_id": f"up:{rid}", "attempts": attempts}, report, entry)
+
+
+def resume(sb, ig: UploadPost, row: dict, report: list, entry: dict | None = None) -> bool:
+    """Check a sent Upload-Post request: published, failed, or still processing (left queued)."""
+    rid = row["container_id"][3:]
+    key = {k: row[k] for k in ("session_id", "kind", "story")}
+    entry = entry or dict(key)
+    try:
+        res = ig.wait(rid)
+    except TimeoutError as e:
+        log.warning("%s: still processing, will check again next run (%s)", rid, e)
+        report.append(entry | {"status": "processing", "reason": str(e)})
+        return False
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"[:1000]
+        save_row(sb, key | {"status": "failed", "error": msg, "attempts": row.get("attempts", 1)})
+        report.append(entry | {"status": "failed", "reason": msg})
+        raise
+    link = res.get("url") or res.get("post_url")
+    media = res.get("post_id") or res.get("media_id") or res.get("container_id")
+    save_row(sb, key | {"status": "published", "media_id": str(media) if media else None, "permalink": link,
+                        "published_at": now_iso(), "media_paths": None, "attempts": row.get("attempts", 1), "error": None})
+    report.append(entry | {"status": "published", "permalink": link})
+    log.info("published %s %s: %s", key["session_id"], key["kind"], link)
+    return True
+
+
 # ---------------------------------------------------------------- commands
 
-def connect(sb, dry_run: bool) -> Instagram | None:
+def connect(sb, dry_run: bool) -> Instagram | UploadPost | None:
+    """Upload-Post when UPLOADPOST_API_KEY is set (no Facebook account needed), else Meta's API."""
     if dry_run:
         return None
     cfg = settings(sb)
@@ -170,6 +224,8 @@ def connect(sb, dry_run: bool) -> Instagram | None:
     if not cfg.get("enabled"):
         log.info("posting disabled (social_settings.enabled is not true): dry run")
         return None
+    if os.environ.get("UPLOADPOST_API_KEY"):
+        return UploadPost(os.environ["UPLOADPOST_API_KEY"], os.environ.get("UPLOADPOST_USER") or "f1telemetryhub")
     if not tok:
         log.info("no Instagram token: dry run")
         return None
@@ -226,6 +282,55 @@ def cmd_rewind(a) -> int:
     return finish(report, a.out, failed)
 
 
+def cmd_preview(a) -> int:
+    """Race week fact posts for one round: Reel, carousel and/or stories (original artwork, own data).
+    Stories go out one image per story, in order; each is recorded so none is ever posted twice."""
+    from . import preview
+    sb = store.client()
+    ig = connect(sb, a.dry_run)
+    if ig is not None and not getattr(ig, "sends_files", False):
+        log.error("preview posts need the Upload-Post publisher")
+        return 1
+    p = preview.load(a.season, a.round)
+    if a.dump:
+        import dataclasses
+        import pickle
+        Path(a.dump).write_bytes(pickle.dumps(dataclasses.asdict(p)))
+    sid = f"{a.season}_{a.round:02d}_PREVIEW"
+    checks = p.stats | {"driver": p.driver, "lap_s": p.lap_s, "ref_year": p.ref_year, "sessions": p.sessions, "last_year": p.last_year}
+    jobs = []
+    for kind in ([a.kind] if a.kind else ["reel", "carousel"]):
+        out = Path(a.out) / sid / f"preview_{kind}"
+        if kind == "reel":
+            v, c = preview.reel(p, out)
+            jobs.append((sid, "reel", {"video": v, "cover": c, "files": [], "caption": preview.caption(p, kind)}))
+        elif kind == "carousel":
+            jobs.append((sid, "carousel", {"video": None, "cover": None, "files": preview.carousel(p, out), "caption": preview.caption(p, kind)}))
+        else:
+            imgs = preview.stories(p, out)
+            pick = range(len(imgs)) if a.story is None else [a.story - 1]
+            for i in pick:
+                jobs.append((f"{sid}_S{i + 1:02d}", "story", {"video": None, "cover": None, "files": [imgs[i]], "caption": ""}))
+    report, failed = [], 0
+    for jsid, kind, built in jobs:
+        entry = {"session_id": jsid, "kind": kind, "story": "session", "checks": checks, "caption": built["caption"]}
+        if ig is None:
+            report.append(entry | {"status": "rendered (dry run)"})
+            continue
+        row = post_row(sb, jsid, kind, "session")
+        if row and row["status"] == "published":
+            report.append(entry | {"status": "already published", "permalink": row.get("permalink")})
+            continue
+        try:
+            if row and row["status"] == "queued" and (row.get("container_id") or "").startswith("up:"):
+                resume(sb, ig, row, report, entry)
+            else:
+                send_files(sb, ig, jsid, kind, "session", built, (row or {}).get("attempts", 0) + 1, entry, report)
+        except Exception:
+            failed += 1
+    return finish(report, a.out, failed)
+
+
 def cmd_refresh(a) -> int:
     sb = store.client()
     cfg = settings(sb)
@@ -252,17 +357,21 @@ def finish(report: list, out: str, failed: int) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.social")
-    ap.add_argument("cmd", choices=["run", "rewind", "refresh"])
+    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview"])
+    ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
+    ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
-    ap.add_argument("--kind", choices=KINDS)
+    ap.add_argument("--kind", choices=KINDS + ("stories",))
+    ap.add_argument("--story", type=int, help="preview stories: post only story number N (1 = cover)")
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")
     ap.add_argument("--out", default="ig_out")
+    ap.add_argument("--dump", help="preview: also save the lap data (pickle) for design work")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)   # request URLs can carry the token
     style.load_fonts()
-    return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh}[a.cmd](a)
+    return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh, "preview": cmd_preview}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -82,9 +82,12 @@ Schema: `supabase/migrations/`.
 * Time claims come only from official timing (lap and sector times). Per corner time gains are not published: at OpenF1's 240 ms sampling a few metres of alignment error through a slow apex is worth 0.1 to 0.2 s (São Paulo Q3: trace gap 90 ms off the official S2 split while exact at the line).
 * Guardrails: no post unless the trace gap at the line is within 50 ms of the official gap and within 150 ms at both sector splits (qualifying), or the order at the flag matches the official top 3 (race). Sessions wait up to 12 runs for results, then are skipped. One post per session and kind, ever (`ig_posts` unique key). Publish failures retry 3 times.
 * Storage: videos are uploaded to the public `web` bucket only while Instagram fetches them, then deleted (posted or failed). Covers and slides stay (`web/ig/...`).
+* Race week preview (`python -m pipeline.social preview --round N`, or the workflow with mode `preview`): "Up next" carousel and Reel, the circuit drawn in neon from last year's fastest race lap (OpenF1), with top speed, share of the lap flat out and braking zones measured on that lap. Original artwork only: no F1 logos, photos or broadcast imagery.
 * Kill switch: `social_settings.enabled` (off by default). Set it to false to stop posting at once.
 
-Extra secrets: `IG_ACCESS_TOKEN` (long lived Instagram user token), `IG_USER_ID` (optional, looked up from the token otherwise). After the first refresh the live token is kept in `social_settings` (service role only).
+Publisher: **Upload-Post** (upload-post.com) when the `UPLOADPOST_API_KEY` secret is set. It runs its own approved Meta app, so no Facebook account or Meta developer app is needed; the Instagram account is connected once on upload-post.com with Instagram login. Files are sent directly (nothing is stored in our bucket), async with our own request id saved before sending, so a run that dies mid upload checks that id next run instead of posting twice. Profile name: repository variable `UPLOADPOST_USER` (default `f1telemetryhub`). Free plan: 10 uploads a month; in season we post about 20 to 25.
+
+Fallback publisher (Meta API directly), secrets `IG_ACCESS_TOKEN` (long lived Instagram user token), `IG_USER_ID` (optional, looked up from the token otherwise). After the first refresh the live token is kept in `social_settings` (service role only).
 
 ## Notice
 

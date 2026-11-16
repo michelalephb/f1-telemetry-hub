@@ -22,6 +22,46 @@ LOSS = "#EF4444"
 GOLD = "#F5C542"
 COMPOUND = {"SOFT": "#FF3333", "MEDIUM": "#FFF200", "HARD": "#FFFFFF", "INTERMEDIATE": "#39B54A", "WET": "#00AEEF"}
 
+# ---- Brand palette (Instagram), one system for every post ----
+# Obsidian base, Bone ink, Champagne for structure (labels, rules), one fun ACCENT used once per
+# slide for the hero element. The accent must not collide with any team colour, because drivers
+# are drawn in team colours.
+OBSIDIAN = "#0B0B0C"
+OBSIDIAN_LIFT = "#17161A"
+BONE = "#EDE8DF"
+STONE = "#8D877C"
+CHAMPAGNE = "#C9A96E"
+HAIRLINE = "#3A3630"
+ACCENT = "#FF3D8B"          # Hot Pink (Michel, 15 Nov 2026, after Track Lime and Purple Sector)
+
+# "Pink Night" (locked 15 Nov 2026): plum night background, Hot Pink hero, Sunbeam for structure.
+NIGHT_TOP = "#1C0B33"
+NIGHT_BOTTOM = "#07040D"
+PINK = ACCENT
+SUN = "#FFC94A"             # replaces champagne: labels, kickers, secondary highlights
+SNOW = "#FFF4F8"            # text
+LILAC = "#A99BC0"           # secondary text
+LINE = "#3A2955"            # track base line, dividers
+
+# Host country (as Jolpica / OpenF1 name it) to ISO code for the flag PNGs in ./flags
+# (rendered from country-flag-icons, MIT, the same set the website uses).
+COUNTRY_ISO = {
+    "Argentina": "AR", "Australia": "AU", "Austria": "AT", "Azerbaijan": "AZ", "Bahrain": "BH", "Belgium": "BE",
+    "Brazil": "BR", "Canada": "CA", "China": "CN", "France": "FR", "Germany": "DE", "Hungary": "HU", "India": "IN",
+    "Italy": "IT", "Japan": "JP", "Korea": "KR", "South Korea": "KR", "Malaysia": "MY", "Mexico": "MX", "Monaco": "MC",
+    "Morocco": "MA", "Netherlands": "NL", "Portugal": "PT", "Qatar": "QA", "Russia": "RU", "Saudi Arabia": "SA",
+    "Singapore": "SG", "South Africa": "ZA", "Spain": "ES", "Sweden": "SE", "Switzerland": "CH", "Thailand": "TH",
+    "Turkey": "TR", "Türkiye": "TR", "UAE": "AE", "United Arab Emirates": "AE", "UK": "GB", "United Kingdom": "GB",
+    "Great Britain": "GB", "USA": "US", "United States": "US", "Vietnam": "VN", "Rwanda": "RW",
+}
+FLAGS = Path(__file__).resolve().parent / "flags"
+
+
+def flag_image(country: str | None):
+    iso = COUNTRY_ISO.get(country or "")
+    f = FLAGS / f"{iso}.png" if iso else None
+    return plt.imread(str(f)) if f and f.exists() else None
+
 HANDLE = "@f1telemetryhub"
 SITE = "f1telemetryhub.com"
 LOGO = Path(__file__).resolve().parents[2] / "web" / "public" / "logo.png"
