@@ -159,16 +159,22 @@ class UploadPost:
         if r.status_code >= 400:
             raise IGError(f"upload-post status: HTTP {r.status_code}: {r.text[:200]}")
         body = r.json()
+        self.last_status = body
         ig = next((x for x in body.get("results") or [] if x.get("platform") == "instagram"), None)
         return body.get("status", "pending"), ig
 
     def wait(self, request_id: str, max_s: float | None = None) -> dict:
+        """Waits for Upload-Post's final word. A failed Instagram result only counts once the request
+        is completed (intermediate entries can report success false while still processing)."""
         t0 = time.monotonic()
         while True:
             st, ig = self.status(request_id)
-            if ig is not None and ig.get("success") is False:
-                raise IGError(f"instagram rejected the post: {ig.get('error') or ig.get('message')}")
             if st == "completed" and ig is not None:
+                if ig.get("success") is False:
+                    import json
+                    log.error("upload-post status for %s: %s", request_id, json.dumps(self.last_status)[:2000])
+                    reason = next((ig.get(k) for k in ("error", "message", "error_message", "details", "reason") if ig.get(k)), None)
+                    raise IGError(f"instagram rejected the post: {reason or json.dumps(ig)[:500]}")
                 return ig
             if time.monotonic() - t0 > (POLL_MAX_S if max_s is None else max_s):
                 raise TimeoutError(f"upload-post {request_id}: still {st} after {POLL_MAX_S} s")
