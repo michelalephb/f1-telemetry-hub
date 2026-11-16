@@ -8,7 +8,7 @@ import { bisect, interp, type LapTrace } from '@/lib/telemetry'
 import { rotator } from '@/lib/track'
 
 export type Series = {
-  num: string; code: string; team: string; color: string; lap: number; lapTime: string; compound: string | null
+  num: string; code: string; team: string; color: string; lap: number; lapTime: string; lapMs?: number | null; compound: string | null
   trace: LapTrace; metrics: CornerMetric[]
 }
 type CornerPt = { corner: string; apex_m: number; x: number | null; y: number | null }
@@ -40,7 +40,8 @@ export default function CompareView({ sid, a, b, delta, corners, options, initia
     window.history.replaceState(null, '', `?${q.toString()}`)
   }
 
-  const final = delta.length ? delta[delta.length - 1] : 0
+  // Verdict from the official lap times (the traces are aligned to them at the line)
+  const final = a.lapMs != null && b.lapMs != null ? (b.lapMs - a.lapMs) / 1000 : delta.length ? delta[delta.length - 1] : 0
   const ahead = final > 0 ? a : b
 
   return (
@@ -71,7 +72,8 @@ export default function CompareView({ sid, a, b, delta, corners, options, initia
       {/* verdict */}
       <div className="rounded-xl border border-line bg-card px-4 py-3 text-sm">
         <span className="font-semibold" style={{ color: ahead.color }}>{ahead.code}</span> is{' '}
-        <span className="num font-semibold">{Math.abs(final).toFixed(3)} s</span> faster over the lap ({a.code} {a.lapTime} vs {b.code} {b.lapTime}).
+        <span className="num font-semibold">{Math.abs(final).toFixed(3)} s</span> faster over the lap ({a.code} {a.lapTime} vs {b.code} {b.lapTime}, official lap times).
+        {(a.lap === 1 || b.lap === 1) && <span className="text-mute"> Lap 1 is timed from the start; the charts run from the timing line.</span>}
         {sel && <CornerVerdict a={a} b={b} corner={sel.corner} />}
       </div>
 
