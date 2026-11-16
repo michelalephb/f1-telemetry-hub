@@ -80,7 +80,7 @@ def test_ingest_session_openf1(monkeypatch):
          "start_utc": T0.isoformat(), "end_utc": None, "circuit_key": 14}
     out = ing.ingest_session(sb, oc, s)
 
-    assert set(sb.files) == {"2026/20/R/car_raw.parquet", "2026/20/R/pos_raw.parquet", "2026/20/R/trace_1.parquet", "2026/20/R/trace_4.parquet", "tracks/2026/20.json"}
+    assert set(sb.files) == {"2026/20/R/car_raw.parquet", "2026/20/R/pos_raw.parquet", "2026/20/R/trace_1.parquet", "2026/20/R/trace_4.parquet", "2026/20/R/replay.parquet", "tracks/2026/20.json"}
     assert sb.db["sessions"][0]["trace_prefix"] == "2026/20/R/"
     laps = pd.DataFrame(sb.db["laps"])
     assert len(laps) == 6

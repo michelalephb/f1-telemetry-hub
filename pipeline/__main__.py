@@ -5,6 +5,7 @@ python -m pipeline latest   --season 2026 --max 6  ingest finished sessions not 
 python -m pipeline round    --season 2026 --round 20 [--session Race] [--no-sync]
 python -m pipeline rounds   --season 2026          JSON list of finished rounds (for the backfill matrix)
 python -m pipeline tracks   --season 2026          (re)build the track outlines from stored traces
+python -m pipeline replay   --season 2026          (re)build race replays from stored traces
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ import fastf1
 import pandas as pd
 
 from . import jolpica, store
-from . import tracks
+from . import replay, tracks
 from .ingest import SESSION_CODES, NoData, corner_markers, ingest_session, session_id
 from .openf1 import OpenF1
 
@@ -156,7 +157,7 @@ def run_one(sb, oc: OpenF1, s: dict, mode: str) -> bool:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline")
-    ap.add_argument("cmd", choices=["calendar", "latest", "round", "rounds", "tracks"])
+    ap.add_argument("cmd", choices=["calendar", "latest", "round", "rounds", "tracks", "replay"])
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int)
     ap.add_argument("--session", help="session name, e.g. Race, Qualifying")
@@ -177,6 +178,8 @@ def main(argv=None) -> int:
 
     if a.cmd == "tracks":
         return build_tracks(store.client(), oc, a.season)
+    if a.cmd == "replay":
+        return build_replays(store.client(), a.season)
 
     if a.dry_run:
         from .dryrun import DryClient, report
@@ -235,6 +238,27 @@ def build_tracks(sb, oc: OpenF1, season: int) -> int:
         except Exception as e:
             fails += 1
             log.error("round %s outline failed: %s", rnd, e)
+    return 1 if fails else 0
+
+
+def build_replays(sb, season: int) -> int:
+    """Replay file for every race and sprint race that has stored traces."""
+    rows = sb.table("sessions").select("session_id,session_code,trace_prefix,track_length_m").eq("season", season) \
+        .eq("status", "ingested").in_("session_code", ["R", "S"]).execute().data
+    fails = 0
+    for r in sorted(rows, key=lambda x: x["session_id"]):
+        if not r["trace_prefix"] or not r["track_length_m"]:
+            continue
+        try:
+            files = sb.storage.from_(store.WEB_BUCKET).list(r["trace_prefix"].rstrip("/"), {"limit": 100})
+            names = [f["name"] for f in files if f["name"].startswith("trace_")]
+            traces = {n[len("trace_"):-len(".parquet")]: tracks.read_trace(sb, store.WEB_BUCKET, r["trace_prefix"] + n) for n in names}
+            df = replay.build(traces, float(r["track_length_m"]))
+            path = replay.upload(sb, r["trace_prefix"] + "replay.parquet", df, store.WEB_BUCKET)
+            log.info("%s: %s (%d drivers, %d s)", r["session_id"], path, len(df.columns) - 1, len(df))
+        except Exception as e:
+            fails += 1
+            log.error("%s replay failed: %s", r["session_id"], e)
     return 1 if fails else 0
 
 

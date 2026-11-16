@@ -3,7 +3,9 @@
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
+import DriverBadge from '@/components/DriverBadge'
 import EventNav from '@/components/EventNav'
+import ShareButton from '@/components/ShareButton'
 import Flag from '@/components/Flag'
 import PaceChart from '@/components/PaceChart'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
@@ -27,7 +29,7 @@ async function load(sid: string) {
 function DriverCell({ d, num, href }: { d: Driver | undefined; num: string; href: string }) {
   return (
     <Link href={href} className="flex min-h-11 items-center gap-2 font-semibold hover:text-cyan">
-      <span className="h-4 w-1 rounded" style={{ background: teamColor(d?.team_color) }} />
+      <DriverBadge num={num} color={teamColor(d?.team_color)} size={22} />
       {d?.abbreviation ?? num}
     </Link>
   )
@@ -103,11 +105,14 @@ function SessionView() {
           <h1 className="mt-1 flex items-center gap-3 font-head text-3xl font-bold"><Flag country={event?.country} className="h-7" />{event?.event_name ?? sid}</h1>
           <p className="mt-1 text-lg text-mute">{SESSION_LABEL[code] ?? session.session_name}</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <ShareButton title={`${event?.event_name ?? ''} ${SESSION_LABEL[code] ?? ''}`} />
         {compareHref && (
           <Link href={compareHref} className="flex min-h-11 items-center rounded-lg bg-cyan px-4 font-semibold text-bg hover:bg-cyan/90">
             {isQ ? 'Compare pole lap →' : 'Compare telemetry →'}
           </Link>
         )}
+        </div>
       </div>
 
       <EventNav season={session.season} round={session.round} sid={sid} tab="overview" />
