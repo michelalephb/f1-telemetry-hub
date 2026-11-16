@@ -72,6 +72,20 @@ python -m pipeline round --season 2026 --round 20 --session Race
 
 Schema: `supabase/migrations/`.
 
+## Instagram (@f1telemetryhub)
+
+`pipeline/social` turns each new session (R, Q, S, SQ) into two posts: a Reel (1080x1920 H.264, no audio) and a carousel (1080x1350 JPEG), published through the Instagram API with Instagram Login.
+
+* **instagram** (`instagram.yml`): after every ingest run. Posts sessions ingested in the last 72 hours, one post per run (Reel first, carousel an hour later). Tuesdays in the off season: one "season rewind" qualifying Reel. Pushes to other branches dry run São Paulo (round 20) and keep the renders as a workflow artifact.
+* **instagram token** (`ig_token.yml`): weekly refresh of the long lived token.
+* Stories: qualifying = pole lap vs P2 (final segment laps, matched to the official times): official sector gaps, the same clock replay, and the braking corners with the biggest apex speed differences. Race = winner and podium gaps, running order of the top 5 lap by lap, biggest climb from the grid.
+* Time claims come only from official timing (lap and sector times). Per corner time gains are not published: at OpenF1's 240 ms sampling a few metres of alignment error through a slow apex is worth 0.1 to 0.2 s (São Paulo Q3: trace gap 90 ms off the official S2 split while exact at the line).
+* Guardrails: no post unless the trace gap at the line is within 50 ms of the official gap and within 150 ms at both sector splits (qualifying), or the order at the flag matches the official top 3 (race). Sessions wait up to 12 runs for results, then are skipped. One post per session and kind, ever (`ig_posts` unique key). Publish failures retry 3 times.
+* Storage: videos are uploaded to the public `web` bucket only while Instagram fetches them, then deleted (posted or failed). Covers and slides stay (`web/ig/...`).
+* Kill switch: `social_settings.enabled` (off by default). Set it to false to stop posting at once.
+
+Extra secrets: `IG_ACCESS_TOKEN` (long lived Instagram user token), `IG_USER_ID` (optional, looked up from the token otherwise). After the first refresh the live token is kept in `social_settings` (service role only).
+
 ## Notice
 
 Unofficial project, not associated with Formula 1 companies. F1, FORMULA ONE, FORMULA 1, FIA FORMULA ONE WORLD CHAMPIONSHIP, GRAND PRIX and related marks are trademarks of Formula One Licensing B.V.
