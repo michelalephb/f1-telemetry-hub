@@ -43,3 +43,4 @@ jobs:
       - run: |
           node --experimental-strip-types scripts/verify.ts 2026_20_R
           node --experimental-strip-types scripts/verify.ts 2026_20_Q
+          node --experimental-strip-types scripts/verify.ts 2026_17_S

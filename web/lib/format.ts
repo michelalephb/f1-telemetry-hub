@@ -33,5 +33,8 @@ export function pairColors(a: string, b: string): [string, string] {
 }
 
 export const SESSION_LABEL: Record<string, string> = {
-  FP1: 'Practice 1', FP2: 'Practice 2', FP3: 'Practice 3', SQ: 'Sprint Quali', S: 'Sprint', Q: 'Qualifying', R: 'Race',
+  FP1: 'Practice 1', FP2: 'Practice 2', FP3: 'Practice 3', SQ: 'Sprint quali', S: 'Sprint race', Q: 'Quali', R: 'Race',
 }
+
+/** Sessions the site shows, in weekend order. Practice is not shown. */
+export const SHOWN_SESSIONS = ['SQ', 'S', 'Q', 'R']

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
+import EventNav from '@/components/EventNav'
 import Flag from '@/components/Flag'
 import PaceChart from '@/components/PaceChart'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
@@ -108,6 +109,8 @@ function SessionView() {
           </Link>
         )}
       </div>
+
+      <EventNav season={session.season} round={session.round} sid={sid} tab="overview" />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {cards.map(([k, v, s]) => (

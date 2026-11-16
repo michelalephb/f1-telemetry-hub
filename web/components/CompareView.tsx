@@ -5,6 +5,7 @@ import { useId, useMemo, useRef, useState } from 'react'
 import type { CornerMetric } from '@/lib/api'
 import { TYRE } from '@/lib/format'
 import { bisect, interp, type LapTrace } from '@/lib/telemetry'
+import { rotator } from '@/lib/track'
 
 export type Series = {
   num: string; code: string; team: string; color: string; lap: number; lapTime: string; compound: string | null
@@ -16,8 +17,8 @@ type Opt = { num: string; code: string; laps: { n: number; t: string }[] }
 const W = 960, PL = 58, PR = 14
 const WIN_BEFORE = 250, WIN_AFTER = 150
 
-export default function CompareView({ sid, a, b, delta, corners, options, initialCorner, trackM }: {
-  sid: string; a: Series; b: Series; delta: number[]; corners: CornerPt[]; options: Opt[]; initialCorner: string | null; trackM: number
+export default function CompareView({ sid, a, b, delta, corners, options, initialCorner, trackM, rot = 0 }: {
+  sid: string; a: Series; b: Series; delta: number[]; corners: CornerPt[]; options: Opt[]; initialCorner: string | null; trackM: number; rot?: number
 }) {
   const router = useRouter()
   const [corner, setCorner] = useState<string | null>(initialCorner && corners.some((c) => c.corner === initialCorner) ? initialCorner : null)
@@ -83,7 +84,7 @@ export default function CompareView({ sid, a, b, delta, corners, options, initia
       <div className="flex flex-wrap gap-4">
         {/* map */}
         <section className="min-w-0 flex-[1_1_320px] rounded-xl border border-line bg-card p-3">
-          <TrackMap a={a} b={b} corners={corners} range={range} hoverD={hoverD} selected={sel?.corner ?? null} />
+          <TrackMap a={a} b={b} corners={corners} range={range} hoverD={hoverD} selected={sel?.corner ?? null} rot={rot} />
           {sel && <CornerCards a={a} b={b} corner={sel.corner} />}
         </section>
 
@@ -160,10 +161,16 @@ function CornerCards({ a, b, corner }: { a: Series; b: Series; corner: string })
 
 // ---------------------------------------------------------------- track map
 
-function TrackMap({ a, b, corners, range, hoverD, selected }: {
-  a: Series; b: Series; corners: CornerPt[]; range: [number, number]; hoverD: number | null; selected: string | null
+function TrackMap({ a, b, corners, range, hoverD, selected, rot }: {
+  a: Series; b: Series; corners: CornerPt[]; range: [number, number]; hoverD: number | null; selected: string | null; rot: number
 }) {
-  const t = a.trace
+  // Rotated the way F1 graphics show the circuit (MultiViewer rotation, same as the thumbnails)
+  const R = useMemo(() => rotator(rot), [rot])
+  const t = useMemo(() => {
+    const xs: number[] = [], ys: number[] = []
+    a.trace.x.forEach((x, i) => { const [u, v] = R(x, a.trace.y[i]); xs.push(u); ys.push(v) })
+    return { x: xs, y: ys, dist: a.trace.dist }
+  }, [a.trace, R])
   const box = useMemo(() => {
     const xs = t.x.filter(Number.isFinite), ys = t.y.filter(Number.isFinite)
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
@@ -177,15 +184,15 @@ function TrackMap({ a, b, corners, range, hoverD, selected }: {
   const sw = box.w / 70
   const dot = (s: Series) => {
     if (hoverD == null || !s.trace.dist.length) return null
-    const x = interp(hoverD, s.trace.dist, s.trace.x), y = interp(hoverD, s.trace.dist, s.trace.y)
+    const [x, y] = R(interp(hoverD, s.trace.dist, s.trace.x), interp(hoverD, s.trace.dist, s.trace.y))
     return <circle cx={x - box.x0} cy={box.h - (y - box.y0)} r={sw * 0.9} fill={s.color} stroke="#0B0E14" strokeWidth={sw / 4} />
   }
   return (
     <svg viewBox={`0 0 ${box.w.toFixed(0)} ${box.h.toFixed(0)}`} className="h-auto w-full" role="img" aria-label="Track map">
       <polyline points={path} fill="none" stroke="#2A3445" strokeWidth={sw} strokeLinejoin="round" strokeLinecap="round" />
       {range[1] - range[0] < 2000 && <polyline points={win} fill="none" stroke="#00E5FF" strokeWidth={sw} strokeLinecap="round" strokeOpacity="0.8" />}
-      {corners.filter((c) => c.x != null && c.y != null).map((c) => (
-        <text key={c.corner} x={(c.x as number) - box.x0} y={box.h - ((c.y as number) - box.y0)} dy={-sw * 1.3}
+      {corners.filter((c) => c.x != null && c.y != null).map((c) => [c, R(c.x as number, c.y as number)] as const).map(([c, [cx, cy]]) => (
+        <text key={c.corner} x={cx - box.x0} y={box.h - (cy - box.y0)} dy={-sw * 1.3}
           fill={c.corner === selected ? '#FFFFFF' : '#93A0B4'} fontSize={sw * (c.corner === selected ? 2.2 : 1.6)}
           fontWeight={c.corner === selected ? 700 : 400} textAnchor="middle" fontFamily="JetBrains Mono">{c.corner}</text>
       ))}

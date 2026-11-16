@@ -4,6 +4,7 @@ python -m pipeline calendar --season 2026          sync events, sessions and res
 python -m pipeline latest   --season 2026 --max 6  ingest finished sessions not yet stored
 python -m pipeline round    --season 2026 --round 20 [--session Race] [--no-sync]
 python -m pipeline rounds   --season 2026          JSON list of finished rounds (for the backfill matrix)
+python -m pipeline tracks   --season 2026          (re)build the track outlines from stored traces
 """
 from __future__ import annotations
 
@@ -18,7 +19,8 @@ import fastf1
 import pandas as pd
 
 from . import jolpica, store
-from .ingest import SESSION_CODES, NoData, ingest_session, session_id
+from . import tracks
+from .ingest import SESSION_CODES, NoData, corner_markers, ingest_session, session_id
 from .openf1 import OpenF1
 
 log = logging.getLogger("pipeline")
@@ -154,7 +156,7 @@ def run_one(sb, oc: OpenF1, s: dict, mode: str) -> bool:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline")
-    ap.add_argument("cmd", choices=["calendar", "latest", "round", "rounds"])
+    ap.add_argument("cmd", choices=["calendar", "latest", "round", "rounds", "tracks"])
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int)
     ap.add_argument("--session", help="session name, e.g. Race, Qualifying")
@@ -172,6 +174,9 @@ def main(argv=None) -> int:
     if a.cmd == "rounds":
         print(json.dumps(sorted({s["round"] for s in finished(schedule(oc, a.season))})))
         return 0
+
+    if a.cmd == "tracks":
+        return build_tracks(store.client(), oc, a.season)
 
     if a.dry_run:
         from .dryrun import DryClient, report
@@ -206,6 +211,31 @@ def main(argv=None) -> int:
     if a.cmd == "latest" and not a.dry_run:
         return health(sb, sess, codes, results)
     return 1 if (a.cmd == "round" and fails) else 0
+
+
+def build_tracks(sb, oc: OpenF1, season: int) -> int:
+    """Outline for every round that has a stored trace (prefers the race, then qualifying)."""
+    keys = {s["round"]: s.get("circuit_key") for s in schedule(oc, season)}
+    rows = sb.table("sessions").select("round,session_code,trace_prefix").eq("season", season).eq("status", "ingested").execute().data
+    pref = {"R": 0, "Q": 1, "S": 2, "SQ": 3}
+    best: dict[int, dict] = {}
+    for r in rows:
+        if r["trace_prefix"] and r["session_code"] in pref:
+            if r["round"] not in best or pref[r["session_code"]] < pref[best[r["round"]]["session_code"]]:
+                best[r["round"]] = r
+    fails = 0
+    for rnd, r in sorted(best.items()):
+        try:
+            files = sb.storage.from_(store.WEB_BUCKET).list(r["trace_prefix"].rstrip("/"))
+            name = next(f["name"] for f in files if f["name"].startswith("trace_"))
+            tr = tracks.read_trace(sb, store.WEB_BUCKET, r["trace_prefix"] + name)
+            rot = corner_markers(season, keys.get(rnd)).attrs.get("rotation", 0.0)
+            path = tracks.upload(sb, season, rnd, tracks.outline(tracks.lap_xy_from_trace(tr), rot), store.WEB_BUCKET)
+            log.info("round %s: %s (from %s%s, rotation %s)", rnd, path, r["trace_prefix"], name, rot)
+        except Exception as e:
+            fails += 1
+            log.error("round %s outline failed: %s", rnd, e)
+    return 1 if fails else 0
 
 
 def health(sb, sess: list[dict], codes: set[str], results: dict[str, bool]) -> int:

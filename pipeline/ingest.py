@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
-from . import store
+from . import store, tracks
 from .geometry import CentreLine, build_centre_line
 from .openf1 import OpenF1
 from .process import corner_metrics, fuse_lap, pos_distance, refine_apexes
@@ -173,7 +173,11 @@ def corner_markers(season: int, circuit_key) -> pd.DataFrame:
         return pd.DataFrame()
     try:
         ci = fastf1.mvapi.get_circuit_info(year=season, circuit_key=int(circuit_key))
-        return ci.corners.copy() if ci is not None else pd.DataFrame()
+        if ci is None:
+            return pd.DataFrame()
+        out = ci.corners.copy()
+        out.attrs["rotation"] = float(getattr(ci, "rotation", 0.0) or 0.0)  # for the site's track outline
+        return out
     except Exception as e:
         log.warning("MultiViewer corners failed: %s", e)
         return pd.DataFrame()
@@ -286,6 +290,12 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
             store.upload_parquet(sb, f"{base}/trace_{drv}.parquet", tr, bucket=store.WEB_BUCKET)
         trace_prefix = f"{base}/"
     dist_path = None
+
+    # Track outline for the landing page and race story (same layout for every session of a round).
+    try:
+        tracks.upload(sb, season, rnd, tracks.outline(line.p[:, :2] * 10.0, markers.attrs.get("rotation", 0.0)), store.WEB_BUCKET)
+    except Exception as e:  # cosmetic: never fail an ingest over the thumbnail
+        log.warning("track outline for %s failed: %s", sid, e)
 
     store.delete_session_rows(sb, sid)
     store.upsert(sb, "sessions", [{
