@@ -67,7 +67,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'eras', title: 'Eras', file: 'eras',
-    note: 'Race wins by decade: the three most successful teams and engine makers, share of the decade\'s races. A shared drive (1951, 1956, 1957) counts once.',
+    note: 'Race wins by decade: the three most successful teams and engine makers, share of the decade\'s races.',
     rows: (d) => (d as Row[]).slice().reverse(),
     cols: [
       { key: 'decade', label: 'Decade', fmt: (r) => `${r.decade}s` }, { key: 'races', label: 'Races', num: true },
@@ -77,7 +77,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'circuits', title: 'Circuits', file: 'circuits', search: ['circuit', 'place', 'country', 'top_driver', 'top_team'],
-    note: 'Every circuit that has held a championship race, most recently used first. Ties for most wins list every name (more than three: the count). A shared drive (1951, 1956, 1957) counts once for the race and the team.',
+    note: 'Every circuit that has held a championship race, most recently used first.',
     cols: [
       { key: 'circuit', label: 'Circuit' }, { key: 'country', label: 'Country' }, { key: 'races', label: 'Races', num: true },
       { key: 'first', label: 'Years', fmt: (r) => `${r.first} to ${r.last}` },
