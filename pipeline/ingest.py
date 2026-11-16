@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 
-from . import store, tracks
+from . import replay, store, tracks
 from .geometry import CentreLine, build_centre_line
 from .openf1 import OpenF1
 from .process import corner_metrics, fuse_lap, pos_distance, refine_apexes
@@ -267,6 +267,7 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
     pos_path = store.upload_parquet(sb, f"{base}/pos_raw.parquet", pos)
     # Public per driver traces for the website: every car sample with lap, distance and map position.
     trace_prefix = None
+    traces: dict[str, pd.DataFrame] = {}
     if len(dist):
         # Keep each lap from 60 m before the line to 60 m after the next crossing: enough for the
         # site to line laps up at the line, without the 12 s margins used for corner windows.
@@ -288,8 +289,16 @@ def store_session(sb, meta: dict, laps: pd.DataFrame, car: pd.DataFrame, pos: pd
                 "y": np.interp(d["t"], p["t"], p["y"]).astype("float32"),
             }).sort_values(["lap_number", "t"])
             store.upload_parquet(sb, f"{base}/trace_{drv}.parquet", tr, bucket=store.WEB_BUCKET)
+            traces[str(drv)] = tr
         trace_prefix = f"{base}/"
     dist_path = None
+
+    # Race replay (every car, every second) for races and sprint races
+    if code in ("R", "S") and traces:
+        try:
+            replay.upload(sb, f"{base}/replay.parquet", replay.build(traces, line.length), store.WEB_BUCKET)
+        except Exception as e:  # never fail an ingest over the replay; the backfill command can redo it
+            log.warning("replay for %s failed: %s", sid, e)
 
     # Track outline for the landing page and race story (same layout for every session of a round).
     try:

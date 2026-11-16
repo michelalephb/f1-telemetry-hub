@@ -8,12 +8,18 @@ type L = { d: string; n: number; ms: number; c: string | null }
 
 const W = 900, H = 320, PL = 64, PR = 16, PT = 12, PB = 32
 
-/** Every clean lap: lap time by lap number, dot fill = tyre, ring = team colour. */
+/** Every clean lap: lap time by lap number, coloured by driver (second teammate drawn hollow). */
 export default function PaceChart({ drivers, laps }: { drivers: D[]; laps: L[] }) {
   const [on, setOn] = useState<Set<string>>(() => new Set(drivers.slice(0, 3).map((d) => d.num)))
   const [hover, setHover] = useState<L | null>(null)
   const color = useMemo(() => new Map(drivers.map((d) => [d.num, d.color])), [drivers])
   const code = useMemo(() => new Map(drivers.map((d) => [d.num, d.code])), [drivers])
+  // Teammates share a team colour: the second one in the list is drawn hollow so both read apart.
+  const hollow = useMemo(() => {
+    const seen = new Set<string>(), out = new Set<string>()
+    for (const d of drivers) { const c = d.color.toLowerCase(); if (seen.has(c)) out.add(d.num); else seen.add(c) }
+    return out
+  }, [drivers])
   const shown = laps.filter((l) => on.has(l.d))
   if (!laps.length) return null
 
@@ -49,7 +55,7 @@ export default function PaceChart({ drivers, laps }: { drivers: D[]; laps: L[] }
     <section className="rounded-xl border border-line bg-card p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-head text-lg font-bold">Pace and tyre degradation</h2>
-        <p className="text-xs text-mute">Clean laps within 107 % of the fastest. Lines: trend per stint, labelled in s per lap.</p>
+        <p className="text-xs text-mute">Clean laps within 107 % of the fastest, in each driver's colour (teammate hollow). Lines: trend per stint, in s per lap.</p>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {drivers.map((d) => (
@@ -80,12 +86,12 @@ export default function PaceChart({ drivers, laps }: { drivers: D[]; laps: L[] }
           </g>
         ))}
         {shown.map((l) => (
-          <circle key={`${l.d}-${l.n}`} cx={x(l.n)} cy={y(l.ms)} r="4.5" fill={TYRE[l.c ?? '']?.color ?? '#93A0B4'} fillOpacity="0.85"
+          <circle key={`${l.d}-${l.n}`} cx={x(l.n)} cy={y(l.ms)} r="4.5" fill={hollow.has(l.d) ? '#141923' : color.get(l.d)} fillOpacity="0.9"
             stroke={color.get(l.d)} strokeWidth="2" onMouseEnter={() => setHover(l)} onMouseLeave={() => setHover(null)} />
         ))}
       </svg>
       <div className="num h-5 text-sm text-mute">
-        {hover ? `${code.get(hover.d)} · L${hover.n} · ${lapTime(hover.ms)} · ${hover.c ?? 'unknown tyre'}` : 'Hover a dot for the lap'}
+        {hover ? `${code.get(hover.d)} · L${hover.n} · ${lapTime(hover.ms)} · ${TYRE[hover.c ?? '']?.label ? `${hover.c?.toLowerCase()} tyre` : 'tyre unknown'}` : 'Hover a dot for the lap and tyre'}
       </div>
     </section>
   )

@@ -1,13 +1,16 @@
-name: track outlines
+name: track outlines and replays
 
-# Rebuilds the small track outlines (landing page thumbnails, race story map) from the traces
-# already stored. New races get theirs during ingest; run this by hand after changing the format.
+# Rebuilds the files derived from the stored traces: track outlines (landing thumbnails, maps) and
+# race replays (race story). New sessions get theirs during ingest; run this after a format change.
 on:
   workflow_dispatch:
     inputs:
       season:
         description: Season (empty = current year)
         default: ""
+      what:
+        description: tracks, replay or both
+        default: both
 
 concurrency:
   group: tracks
@@ -16,7 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -30,4 +33,6 @@ jobs:
       - run: pip install -r requirements.txt
       - run: |
           SEASON="${{ inputs.season }}"; SEASON="${SEASON:-$(date -u +%Y)}"
-          python -m pipeline tracks --season "$SEASON"
+          WHAT="${{ inputs.what }}"; WHAT="${WHAT:-both}"
+          if [ "$WHAT" != replay ]; then python -m pipeline tracks --season "$SEASON"; fi
+          if [ "$WHAT" != tracks ]; then python -m pipeline replay --season "$SEASON"; fi
