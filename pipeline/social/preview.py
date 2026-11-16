@@ -502,8 +502,8 @@ def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
     flashes = [(f"{st['top_speed']}", "km/h", "TOP SPEED"), (f"{st['flat_pct']}", "%", "OF THE LAP FLAT OUT"),
                (f"{st['braking_zones']}", "zones", "BRAKING PER LAP"), ("0", "DRS zones", "NEW FOR 2026")]
     for big, u, lbl in flashes:
-        t1, t2 = c.number(0.79, big, u, size=150)
-        t3 = c.text(0.5, 0.725, lbl, 24, color=SUN, weight=800, track=True)
+        t1, t2 = c.number(0.255, big, u, size=150)
+        t3 = c.text(0.5, 0.215, lbl, 24, color=SUN, weight=800, track=True)
         r.add(c.fig, int(0.9 * FPS))
         for t in (t1, t2, t3):
             t.remove()
