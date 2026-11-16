@@ -86,17 +86,21 @@ const at = (c: LapClock, d: number, k: 't' | 'x' | 'y') => {
  * Where on the lap `me` got ahead of `other` (kind gain) or fell behind (loss): the last distance
  * at which the gap in time to reach that point changes sign. null when it cannot be seen in the data.
  */
-export function passPoint(me: LapClock, other: LapClock, kind: 'gain' | 'loss', step = 5): { d: number; x: number; y: number } | null {
+export function passPoint(me: LapClock, other: LapClock, kind: 'gain' | 'loss', step = 5): { d: number; x: number; y: number; early?: boolean } | null {
   if (me.dist.length < 5 || other.dist.length < 5) return null
   const d0 = Math.max(me.dist[0], other.dist[0]), d1 = Math.min(me.dist[me.dist.length - 1], other.dist[other.dist.length - 1])
   let found: number | null = null
   let prev = at(me, d0, 't') - at(other, d0, 't')
+  const g1 = at(me, d1, 't') - at(other, d1, 't')
+  // Already swapped where the data starts (the start: cars leave the grid before the traces begin)
+  const early = kind === 'gain' ? prev <= 0 && g1 <= 0 : prev >= 0 && g1 >= 0
   for (let d = d0 + step; d <= d1; d += step) {
     const g = at(me, d, 't') - at(other, d, 't')
     const flipped = kind === 'gain' ? prev > 0 && g <= 0 : prev < 0 && g >= 0
     if (flipped) found = d - step * (g / (g - prev || 1))
     prev = g
   }
+  if (found == null && early) return { d: d0, x: at(me, d0, 'x'), y: at(me, d0, 'y'), early: true }
   return found == null ? null : { d: found, x: at(me, found, 'x'), y: at(me, found, 'y') }
 }
 

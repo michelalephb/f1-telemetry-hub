@@ -37,6 +37,10 @@ test('passPoint finds where the time gap changes sign', () => {
   const p = passPoint(me, other, 'gain')
   assert.ok(p && p.d > 500 && p.d < 2000, `pass at ${p?.d}`)
   assert.equal(passPoint(me, other, 'loss'), null)
+  // already ahead where the data begins (start of the race): reported at the first point, flagged early
+  const fast = lapClock(rows(() => 80, 99.9, 0), 3)
+  const e = passPoint(fast, other, 'gain')
+  assert.ok(e?.early && e.d === 0)
 })
 
 test('cornerAt picks the corner the move belongs to', () => {

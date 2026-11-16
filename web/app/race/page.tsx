@@ -65,7 +65,7 @@ function RaceView() {
   )
 }
 
-type Loc = { d: number; u: number; v: number; corner: string | null } | null
+type Loc = { d: number; u: number; v: number; corner: string | null; start: boolean } | null
 
 function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result, corners, outline }: {
   sid: string; prefix: string | null; trackM: number; me: string; follow: (d: string) => void; drv: Map<string, Driver>; order: string[]
@@ -96,7 +96,7 @@ function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result
     for (const m of onTrack) {
       const p = passPoint(lapClock(mine, m.lap), lapClock(rows.get(m.other) ?? [], m.lap), m.kind)
       const [u, v] = p && map ? project(map, p.x, p.y) : [NaN, NaN]
-      out.set(`${m.lap}/${m.other}`, p ? { d: p.d, u, v, corner: cornerAt(p.d, corners, trackM) } : null)
+      out.set(`${m.lap}/${m.other}`, p ? { d: p.d, u, v, corner: p.early && m.lap === 1 ? null : cornerAt(p.d, corners, trackM), start: Boolean(p.early && m.lap === 1) } : null)
     }
     return { out, map }
   }, [sid, me])
@@ -148,7 +148,7 @@ function Story({ sid, prefix, trackM, me, follow, drv, order, laps, grid, result
                   {moves.map((m: Move) => {
                     const k = `${m.lap}/${m.other}`
                     const l = loc?.get(k)
-                    const where = m.pit ? 'pit stop' : l?.corner ? `T${l.corner}` : located.loading ? '…' : 'not seen'
+                    const where = m.pit ? 'pit stop' : l?.start ? 'start' : l?.corner ? `T${l.corner}` : located.loading ? '…' : 'not seen'
                     return (
                       <tr key={k + m.kind} onMouseEnter={() => setHi(k)} onMouseLeave={() => setHi(null)}
                         className={`border-t border-line font-mono ${hi === k ? 'bg-line/50' : ''} ${m.pit ? 'text-mute' : ''}`}>

@@ -81,7 +81,7 @@ if (s.session_code === 'R' || s.session_code === 'S') {
   for (const m of moves) {
     const p = passPoint(lapClock(mine, m.lap), lapClock(await getTrace(s.trace_prefix, m.other), m.lap), m.kind)
     if (p) found++
-    console.log(`  ${code(me)} L${m.lap} ${m.kind === 'gain' ? 'passed' : 'lost to'} ${code(m.other)}: ${p ? `T${cornerAt(p.d, corners, L)} at ${p.d.toFixed(0)} m` : 'not seen'}`)
+    console.log(`  ${code(me)} L${m.lap} ${m.kind === 'gain' ? 'passed' : 'lost to'} ${code(m.other)}: ${p ? `T${cornerAt(p.d, corners, L)} at ${p.d.toFixed(0)} m${p.early ? ' (already ahead where the data starts)' : ''}` : 'not seen'}`)
   }
   console.log(`race story for ${code(me)}: ${moves.length} on track moves, ${found} located`)
   assert.ok(moves.length === 0 || found / moves.length >= 0.7, 'at least 70 % of on track moves located')
