@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bisect, deltaAt, deltaTime, interp, lapTrace, type Sample } from '../lib/telemetry.ts'
+import { bisect, deltaAt, deltaTime, extrap, interp, lapTrace, type Sample } from '../lib/telemetry.ts'
 
 test('bisect and interp', () => {
   const xs = [0, 10, 20, 30]
@@ -70,4 +70,14 @@ test('finalSegmentKeys: Q3 starts after the last lap of drivers out in Q2', asyn
   const keys = finalSegmentKeys(laps, 'Q', [{ driver_number: '1', q3_ms: 80000 }, { driver_number: '9', q3_ms: null }])!
   assert.deepEqual([...keys].sort(), ['1/3', '1/4'])
   assert.equal(finalSegmentKeys(laps, 'R'), null)
+})
+
+test('lapTrace stretched to the official lap time: the gap at the line is the official gap', () => {
+  const L = 1000
+  const a = lapTrace(lapAt(50, 3, L), 3, L, 20.12)   // car clock says 20.0 s, timing says 20.12 s
+  const b = lapTrace(lapAt(40, 3, L), 3, L, 25.31)
+  assert.ok(Math.abs(extrap(L, a.dist, a.time) - 20.12) < 1e-6)
+  assert.ok(Math.abs(deltaAt(a, b, L) - (25.31 - 20.12)) < 1e-6)
+  const c = lapTrace(lapAt(50, 1, L), 1, L, 26)       // lap 1 from the start: 30 % off, left alone
+  assert.ok(Math.abs(extrap(L, c.dist, c.time) - 20) < 1e-6)
 })

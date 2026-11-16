@@ -37,22 +37,28 @@ async function load(sid: string, qa: string | null, qb: string | null, qla: stri
   const a = qa && order.includes(qa) ? qa : order[0]
   const b = qb && order.includes(qb) && qb !== a ? qb : order.find((d) => d !== a)
   if (!a || !b) throw new Error('not enough clean laps to compare')
-  const pick = (d: string, n: string | null): Lap => clean.find((l) => l.driver_number === d && String(l.lap_number) === n) ?? clean.find((l) => l.driver_number === d)!
+  // Qualifying: Q3 laps only, fastest first. Races and sprints: every timed lap, lap 1 by default.
+  const pool = isQ ? clean : laps.filter((l) => l.lap_time_ms != null).sort((x, y) => x.lap_number - y.lap_number)
+  const pick = (d: string, n: string | null): Lap =>
+    pool.find((l) => l.driver_number === d && String(l.lap_number) === n) ?? pool.find((l) => l.driver_number === d)!
   const lapA = pick(a, qla), lapB = pick(b, qlb)
   const trackM = session.track_length_m ?? 5000
 
   const [rowsA, rowsB, metrics, outline] = await Promise.all([getTrace(session.trace_prefix, a), getTrace(session.trace_prefix, b), getCornerMetrics(sid, [lapA, lapB]), getOutline(session.season, session.round)])
-  const tA = lapTrace(rowsA, lapA.lap_number, trackM), tB = lapTrace(rowsB, lapB.lap_number, trackM)
+  const officialS = (l: Lap) => (l.lap_time_ms != null ? l.lap_time_ms / 1000 : null)
+  const tA = lapTrace(rowsA, lapA.lap_number, trackM, officialS(lapA)), tB = lapTrace(rowsB, lapB.lap_number, trackM, officialS(lapB))
   const drv = new Map(drivers.map((d) => [d.driver_number, d]))
   const [colA, colB] = pairColors(teamColor(drv.get(a)?.team_color), teamColor(drv.get(b)?.team_color))
   const mk = (d: string, l: Lap, color: string, tr: typeof tA): Series => ({
     num: d, code: drv.get(d)?.abbreviation ?? d, team: drv.get(d)?.team_name ?? '', color,
-    lap: l.lap_number, lapTime: lapTime(l.lap_time_ms), compound: l.compound, trace: tr,
+    lap: l.lap_number, lapTime: lapTime(l.lap_time_ms), lapMs: l.lap_time_ms, compound: l.compound, trace: tr,
     metrics: metrics.filter((m) => m.driver_number === d && m.lap_number === l.lap_number),
   })
   const options = order.map((d) => ({
     num: d, code: drv.get(d)?.abbreviation ?? d,
-    laps: clean.filter((l) => l.driver_number === d).sort((x, y) => x.lap_number - y.lap_number).map((l) => ({ n: l.lap_number, t: lapTime(l.lap_time_ms) })),
+    laps: pool.filter((l) => l.driver_number === d).sort((x, y) => x.lap_number - y.lap_number).map((l) => ({
+      n: l.lap_number, t: `${lapTime(l.lap_time_ms)}${!isQ && l.lap_number === 1 ? ' · start' : l.pit_in ? ' · in lap' : l.pit_out ? ' · out lap' : ''}`,
+    })),
   }))
   return {
     session, event, trackM, options, isQ, rot: outline?.rot ?? 0,

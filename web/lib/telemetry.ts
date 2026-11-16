@@ -48,7 +48,7 @@ export function interp(x: number, xs: ArrayLike<number>, ys: ArrayLike<number>):
  * One lap from a driver's samples: from just before the timing line to just after the next crossing,
  * with the lap clock at zero at distance 0 (interpolated), so two laps line up exactly at the line.
  */
-export function lapTrace(rows: Sample[], lap: number, trackM: number): LapTrace {
+export function lapTrace(rows: Sample[], lap: number, trackM: number, officialS?: number | null): LapTrace {
   const sel = rows.filter((r) => r.lap_number === lap && r.lap_dist_m >= -40 && r.lap_dist_m <= trackM + 40).sort((a, b) => a.t - b.t)
   const out: LapTrace = { dist: [], time: [], speed: [], throttle: [], brake: [], gear: [], drs: [], x: [], y: [] }
   let lastD = -Infinity
@@ -76,6 +76,12 @@ export function lapTrace(rows: Sample[], lap: number, trackM: number): LapTrace 
   if (out.dist.length > 1) {
     const t0 = extrap(0, out.dist, out.time)
     for (let i = 0; i < out.time.length; i++) out.time[i] -= t0
+    // The car data clock and the official timing differ by a few tenths over a lap. Stretch the lap
+    // so it reads the official lap time at the line: deltas then end on the official gap. Skipped when
+    // the two disagree by more than 3 % (lap 1 is timed from the start, not from the line).
+    const atLine = extrap(trackM, out.dist, out.time)
+    const k = officialS && atLine > 0 ? officialS / atLine : 1
+    if (Math.abs(k - 1) < 0.03) for (let i = 0; i < out.time.length; i++) out.time[i] *= k
   }
   return out
 }

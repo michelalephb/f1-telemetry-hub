@@ -64,7 +64,9 @@ function SessionView() {
 
   // The official classification drives the order and the default comparison
   const classified = results.filter((r) => r.position != null).sort((a, b) => a.position! - b.position!)
+  // Qualifying links open on each driver's best Q3 lap; races open on lap 1 (the compare page default)
   const cmp = (a: string, b: string) => {
+    if (!isQ) return `/compare/?id=${sid}&a=${a}&b=${b}`
     const la = best.get(a), lb = best.get(b)
     return `/compare/?id=${sid}&a=${a}&b=${b}${la ? `&la=${la.lap_number}` : ''}${lb ? `&lb=${lb.lap_number}` : ''}`
   }
