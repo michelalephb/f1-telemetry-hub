@@ -1,13 +1,26 @@
 // Qualifying segments from the running itself: Q1, Q2 and Q3 are separated by the two longest
 // breaks with no car on a timed lap. OpenF1 does not label segments, so this is derived.
 
-type L = { driver_number: string; lap_number: number; lap_start_s: number | null; lap_end_s: number | null }
+type L = { driver_number: string; lap_number: number; lap_start_s: number | null; lap_end_s: number | null; lap_time_ms?: number | null }
+
+/**
+ * Laps that are real running: the feed also logs "laps" that span a whole stop in the garage
+ * (Miami 2026: 671 s and 918 s), which bridge the breaks between segments. A lap counts as running
+ * when it lasted under twice the session's fastest lap.
+ */
+function running<T extends L>(laps: T[]): T[] {
+  const dur = (l: L) => (l.lap_start_s != null && l.lap_end_s != null ? l.lap_end_s - l.lap_start_s : NaN)
+  const timed = laps.map((l) => l.lap_time_ms).filter((v): v is number => v != null && v > 0)
+  const best = timed.length ? Math.min(...timed) / 1000 : NaN
+  if (!Number.isFinite(best)) return laps
+  return laps.filter((l) => dur(l) < 2 * best)
+}
 
 /** Map "driver/lap" to segment index 0, 1, 2 (Q1, Q2, Q3). Empty for non qualifying sessions. */
 export function qualiSegments(laps: L[], code: string): Map<string, number> {
   const out = new Map<string, number>()
   if (code !== 'Q' && code !== 'SQ') return out
-  const iv = laps
+  const iv = running(laps)
     .filter((l) => l.lap_start_s != null && l.lap_end_s != null)
     .map((l) => [l.lap_start_s as number, l.lap_end_s as number] as const)
     .sort((a, b) => a[0] - b[0])
@@ -41,7 +54,7 @@ export function finalSegmentKeys(laps: L[], code: string, results: R[] = []): Se
   if (code !== 'Q' && code !== 'SQ') return null
   const inQ3 = new Set(results.filter((r) => r.q3_ms != null).map((r) => r.driver_number))
   if (inQ3.size > 0 && results.length > inQ3.size) {
-    const cut = Math.max(...laps.filter((l) => !inQ3.has(l.driver_number) && l.lap_end_s != null).map((l) => l.lap_end_s as number))
+    const cut = Math.max(...running(laps).filter((l) => !inQ3.has(l.driver_number) && l.lap_end_s != null).map((l) => l.lap_end_s as number))
     if (Number.isFinite(cut)) {
       return new Set(laps.filter((l) => inQ3.has(l.driver_number) && l.lap_start_s != null && l.lap_start_s >= cut).map((l) => `${l.driver_number}/${l.lap_number}`))
     }

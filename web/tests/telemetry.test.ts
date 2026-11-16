@@ -101,3 +101,12 @@ test('sectors must add up to the lap time', async () => {
   assert.equal(sectorsAddUp({ lap_time_ms: 98575, sector1_ms: 39596, sector2_ms: 42242, sector3_ms: 68383 }), false) // 2026_04_Q #81 L3
   assert.equal(sectorsAddUp({ lap_time_ms: 90000, sector1_ms: null, sector2_ms: 1, sector3_ms: 1 }), false)
 })
+
+test('finalSegmentKeys ignores laps that span a garage stop (Miami 2026)', async () => {
+  const { finalSegmentKeys } = await import('../lib/segments.ts')
+  const lap = (d: string, n: number, s: number, len = 90) => ({ driver_number: d, lap_number: n, lap_start_s: s, lap_end_s: s + len, lap_time_ms: len * 1000 })
+  // driver 9 is out in Q2: last real lap ends at 2090, then a 900 s "lap" in the garage runs past the start of Q3
+  const laps = [lap('1', 1, 100), lap('9', 1, 2000), lap('9', 2, 2090, 900), lap('1', 2, 2600), lap('1', 3, 2690)]
+  const keys = finalSegmentKeys(laps, 'Q', [{ driver_number: '1', q3_ms: 90000 }, { driver_number: '9', q3_ms: null }])!
+  assert.deepEqual([...keys].sort(), ['1/2', '1/3'])
+})
