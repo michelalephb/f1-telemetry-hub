@@ -7,6 +7,7 @@ python -m pipeline rounds   --season 2026          JSON list of finished rounds 
 python -m pipeline tracks   --season 2026          (re)build the track outlines from stored traces
 python -m pipeline replay   --season 2026          (re)build race replays from stored traces
 python -m pipeline f1db                            load the latest F1DB release (all time results, CC BY 4.0)
+python -m pipeline historique                      publish the GP Historique statistics (after an F1DB load)
 """
 from __future__ import annotations
 
@@ -158,7 +159,7 @@ def run_one(sb, oc: OpenF1, s: dict, mode: str) -> bool:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline")
-    ap.add_argument("cmd", choices=["calendar", "latest", "round", "rounds", "tracks", "replay", "f1db"])
+    ap.add_argument("cmd", choices=["calendar", "latest", "round", "rounds", "tracks", "replay", "f1db", "historique"])
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int)
     ap.add_argument("--session", help="session name, e.g. Race, Qualifying")
@@ -182,8 +183,14 @@ def main(argv=None) -> int:
     if a.cmd == "replay":
         return build_replays(store.client(), a.season)
     if a.cmd == "f1db":
-        from . import f1db
-        print(json.dumps(f1db.run(store.client(), os.environ.get("GITHUB_TOKEN"))))
+        from . import f1db, historique
+        sb = store.client()
+        print(json.dumps(f1db.run(sb, os.environ.get("GITHUB_TOKEN"))))
+        print(json.dumps(historique.build(sb, store.WEB_BUCKET)))  # statistics follow every load
+        return 0
+    if a.cmd == "historique":
+        from . import historique
+        print(json.dumps(historique.build(store.client(), store.WEB_BUCKET)))
         return 0
 
     if a.dry_run:

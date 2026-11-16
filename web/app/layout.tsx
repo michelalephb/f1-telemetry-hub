@@ -26,6 +26,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/logo.png`} alt="F1 Telemetry Hub" className="h-6 w-auto" />
             </Link>
+            <nav aria-label="Main" className="flex items-center gap-1 text-sm">
+              <Link href="/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">Season</Link>
+              <Link href="/historique/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">GP Historique</Link>
+            </nav>
             <span className="ml-auto rounded border border-line px-2 py-1 font-mono text-xs text-mute">TEST BUILD · data: OpenF1</span>
           </div>
         </header>
