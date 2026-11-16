@@ -81,3 +81,57 @@ test('lapTrace stretched to the official lap time: the gap at the line is the of
   const c = lapTrace(lapAt(50, 1, L), 1, L, 26)       // lap 1 from the start: 30 % off, left alone
   assert.ok(Math.abs(extrap(L, c.dist, c.time) - 20) < 1e-6)
 })
+
+test('corner window time equals the change of the delta curve across the window', async () => {
+  const { windowTime, deltaAt } = await import('../lib/telemetry.ts')
+  const mk = (v: (d: number) => number) => {
+    const dist: number[] = [], time: number[] = []
+    for (let d = -20; d <= 1020; d += 7) { dist.push(d); time.push(v(d)) }
+    return { dist, time, speed: [], throttle: [], brake: [], gear: [], drs: [], x: [], y: [] }
+  }
+  const a = mk((d) => d / 50), b = mk((d) => d / 50 + (d > 400 ? (d - 400) / 2000 : 0))
+  const ta = windowTime(a, 250, 650)!, tb = windowTime(b, 250, 650)!
+  assert.ok(Math.abs((tb - ta) - (deltaAt(a, b, 650) - deltaAt(a, b, 250))) < 1e-9)
+  assert.equal(windowTime(a, -100, 200), null)                  // window not covered
+})
+
+test('sectors must add up to the lap time', async () => {
+  const { sectorsAddUp } = await import('../lib/segments.ts')
+  assert.equal(sectorsAddUp({ lap_time_ms: 86745, sector1_ms: 22253, sector2_ms: 45447, sector3_ms: 19045 }), true)
+  assert.equal(sectorsAddUp({ lap_time_ms: 98575, sector1_ms: 39596, sector2_ms: 42242, sector3_ms: 68383 }), false) // 2026_04_Q #81 L3
+  assert.equal(sectorsAddUp({ lap_time_ms: 90000, sector1_ms: null, sector2_ms: 1, sector3_ms: 1 }), false)
+})
+
+test('finalSegmentKeys ignores laps that span a garage stop (Miami 2026)', async () => {
+  const { finalSegmentKeys } = await import('../lib/segments.ts')
+  const lap = (d: string, n: number, s: number, len = 90) => ({ driver_number: d, lap_number: n, lap_start_s: s, lap_end_s: s + len, lap_time_ms: len * 1000 })
+  // driver 9 is out in Q2: last real lap ends at 2090, then a 900 s "lap" in the garage runs past the start of Q3
+  const laps = [lap('1', 1, 100), lap('9', 1, 2000), lap('9', 2, 2090, 900), lap('1', 2, 2600), lap('1', 3, 2690)]
+  const keys = finalSegmentKeys(laps, 'Q', [{ driver_number: '1', q3_ms: 90000 }, { driver_number: '9', q3_ms: null }])!
+  assert.deepEqual([...keys].sort(), ['1/2', '1/3'])
+})
+
+test('finalSegmentKeys: a top ten driver with no Q3 time still marks Q3', async () => {
+  const { finalSegmentKeys } = await import('../lib/segments.ts')
+  const lap = (d: string, n: number, s: number) => ({ driver_number: d, lap_number: n, lap_start_s: s, lap_end_s: s + 90, lap_time_ms: 90000 })
+  const laps = [lap('1', 1, 100), lap('9', 1, 2000), lap('6', 1, 2100), lap('6', 2, 2700), lap('1', 2, 2600)]
+  const res = [{ driver_number: '1', q3_ms: 90000, position: 1 }, { driver_number: '6', q3_ms: null, position: 10 }, { driver_number: '9', q3_ms: null, position: 11 }]
+  assert.deepEqual([...finalSegmentKeys(laps, 'Q', res)!].sort(), ['1/2', '6/1', '6/2'])
+})
+
+test('finalSegmentKeys: a driver with no official time does not mark the end of Q2', async () => {
+  const { finalSegmentKeys } = await import('../lib/segments.ts')
+  const lap = (d: string, n: number, s: number) => ({ driver_number: d, lap_number: n, lap_start_s: s, lap_end_s: s + 90, lap_time_ms: 90000 })
+  const laps = [lap('1', 1, 100), lap('9', 1, 2000), lap('6', 1, 2700), lap('1', 2, 2600)]
+  const res = [{ driver_number: '1', q1_ms: 1, q2_ms: 1, q3_ms: 90000, position: 1 }, { driver_number: '9', q1_ms: 1, q2_ms: 1, q3_ms: null, position: 11 },
+    { driver_number: '6', q1_ms: null, q2_ms: null, q3_ms: null, position: 22 }]
+  assert.deepEqual([...finalSegmentKeys(laps, 'Q', res)!].sort(), ['1/2'])
+})
+
+test('countsInFinal drops a Q3 lap faster than the official time (deleted)', async () => {
+  const { countsInFinal } = await import('../lib/segments.ts')
+  const ok = countsInFinal([{ driver_number: '1', q3_ms: 95049 }, { driver_number: '9', q3_ms: null }])
+  assert.equal(ok({ driver_number: '1', lap_time_ms: 94379 }), false)
+  assert.equal(ok({ driver_number: '1', lap_time_ms: 95049 }), true)
+  assert.equal(ok({ driver_number: '9', lap_time_ms: 80000 }), true)
+})

@@ -9,7 +9,7 @@ import ShareButton from '@/components/ShareButton'
 import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getCornerMetrics, getCorners, getDrivers, getEvent, getLaps, getResults, getSession, getTrace, type Lap } from '@/lib/api'
-import { finalSegmentKeys } from '@/lib/segments'
+import { countsInFinal, finalSegmentKeys } from '@/lib/segments'
 import { lapTime, pairColors, SESSION_LABEL, teamColor } from '@/lib/format'
 import { deltaTime, lapTrace } from '@/lib/telemetry'
 import { getOutline } from '@/lib/track'
@@ -30,6 +30,7 @@ async function load(sid: string, qa: string | null, qb: string | null, qla: stri
   const finalKeys = finalSegmentKeys(laps, session.session_code, results)
   const clean = laps
     .filter((l) => l.is_accurate && l.lap_time_ms != null && (!finalKeys || finalKeys.has(`${l.driver_number}/${l.lap_number}`)))
+    .filter(isQ ? countsInFinal(results) : () => true)
     .sort((x, y) => (x.lap_time_ms ?? 0) - (y.lap_time_ms ?? 0))
   const withLaps = new Set(clean.map((l) => l.driver_number))
   const official = results.filter((r) => r.position != null).sort((x, y) => x.position! - y.position!).map((r) => r.driver_number).filter((d) => withLaps.has(d))

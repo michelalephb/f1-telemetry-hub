@@ -17,6 +17,11 @@ async function load(name: string): Promise<Doc> {
 }
 
 const pct = (k: string) => (r: Row) => (r[k] == null ? '—' : `${(r[k] as number).toFixed(1)} %`)
+// Tied names arrive joined with ' / '; past three, show how many are tied instead of a long list.
+const tied = (v: unknown, what: string) => {
+  const n = String(v ?? '').split(' / ')
+  return n.length > 3 ? `${n.length} ${what} tied` : n.join(' / ')
+}
 const span = (r: Row) => (r.from === r.to ? `${r.from}` : `${r.from} to ${r.to ?? 'now'}`)
 
 type Section = { id: string; title: string; file: string; note: string; search?: string[]; cols: Col[]; rows?: (d: unknown) => Row[] }
@@ -28,7 +33,7 @@ const SECTIONS: Section[] = [
     cols: [
       { key: 'grid', label: 'Grid', num: true }, { key: 'starts', label: 'Starts', num: true }, { key: 'wins', label: 'Wins', num: true },
       { key: 'win_pct', label: 'Win %', num: true, fmt: pct('win_pct') }, { key: 'podium_pct', label: 'Podium %', num: true, fmt: pct('podium_pct') },
-      { key: 'avg_finish', label: 'Avg finish', num: true }, { key: 'starts_2000', label: 'Starts since 2000', num: true },
+      { key: 'avg_finish', label: 'Avg finish (classified)', num: true }, { key: 'starts_2000', label: 'Starts since 2000', num: true },
       { key: 'win_pct_2000', label: 'Win % since 2000', num: true, fmt: pct('win_pct_2000') },
       { key: 'podium_pct_2000', label: 'Podium % since 2000', num: true, fmt: pct('podium_pct_2000') },
     ],
@@ -62,7 +67,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'eras', title: 'Eras', file: 'eras',
-    note: 'Race wins by decade: the three most successful teams and engine makers, share of the decade\'s races.',
+    note: 'Race wins by decade: the three most successful teams and engine makers, share of the decade\'s races. A shared drive (1951, 1956, 1957) counts once.',
     rows: (d) => (d as Row[]).slice().reverse(),
     cols: [
       { key: 'decade', label: 'Decade', fmt: (r) => `${r.decade}s` }, { key: 'races', label: 'Races', num: true },
@@ -72,13 +77,13 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'circuits', title: 'Circuits', file: 'circuits', search: ['circuit', 'place', 'country', 'top_driver', 'top_team'],
-    note: 'Every circuit that has held a championship race, most recently used first.',
+    note: 'Every circuit that has held a championship race, most recently used first. Ties for most wins list every name (more than three: the count). A shared drive (1951, 1956, 1957) counts once for the race and the team.',
     cols: [
       { key: 'circuit', label: 'Circuit' }, { key: 'country', label: 'Country' }, { key: 'races', label: 'Races', num: true },
       { key: 'first', label: 'Years', fmt: (r) => `${r.first} to ${r.last}` },
-      { key: 'pole_win_pct', label: 'Won from pole', num: true, fmt: pct('pole_win_pct') },
-      { key: 'top_driver', label: 'Most wins: driver', fmt: (r) => `${r.top_driver} (${r.top_driver_wins})` },
-      { key: 'top_team', label: 'Most wins: team', fmt: (r) => `${r.top_team} (${r.top_team_wins})` },
+      { key: 'pole_win_pct', label: 'Won from P1 on the grid', num: true, fmt: pct('pole_win_pct') },
+      { key: 'top_driver', label: 'Most wins: driver', fmt: (r) => `${tied(r.top_driver, 'drivers')} (${r.top_driver_wins})` },
+      { key: 'top_team', label: 'Most wins: team', fmt: (r) => `${tied(r.top_team, 'teams')} (${r.top_team_wins})` },
     ],
   },
   {

@@ -126,10 +126,19 @@ def time_at(lap: Lap, d: np.ndarray) -> np.ndarray:
 
 def final_segment_laps(laps: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
     """Laps in Q3 / SQ3: after the last lap of every driver who did not reach it (site rule)."""
-    inq3 = set(results.loc[results["q3_ms"].notna(), "driver_number"].astype(str))
+    # A driver can reach Q3 and set no time (Miami 2026), so the top ten count too
+    top = results["position"].notna() & (results["position"] <= 10) if "position" in results else False
+    inq3 = set(results.loc[results["q3_ms"].notna() | top, "driver_number"].astype(str))
     if not inq3 or len(results) <= len(inq3):
         raise StoryError("no final segment in the official result")
-    out = laps[~laps["driver_number"].isin(inq3) & laps["lap_end_s"].notna()]
+    # Ignore "laps" that span a garage stop (longer than twice the fastest lap): they bridge the break
+    best = laps["lap_time_ms"].dropna()
+    dur = laps["lap_end_s"] - laps["lap_start_s"]
+    real = dur < 2 * best.min() / 1000 if len(best) else dur.notna()
+    # Only drivers knocked out with an official time mark the end of Q2 (a driver with no time may have run in Q3)
+    timed = results[[c for c in ("q1_ms", "q2_ms") if c in results]].notna().any(axis=1) if {"q1_ms", "q2_ms"} & set(results) else True
+    knocked = set(results.loc[~results["driver_number"].astype(str).isin(inq3) & timed, "driver_number"].astype(str))
+    out = laps[laps["driver_number"].isin(knocked) & laps["lap_end_s"].notna() & real]
     if out.empty:
         raise StoryError("cannot place the start of the final segment")
     cut = out["lap_end_s"].max()

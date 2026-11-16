@@ -20,8 +20,8 @@ const clock = (s: number) => {
   return `${h ? `${h}:` : ''}${String(m).padStart(h ? 2 : 1, '0')}:${String(x).padStart(2, '0')}`
 }
 
-export default function RaceReplay({ sid, prefix, trackM, raceLaps, title, drivers, grid, classified, outline, corners, me, initialT }: {
-  sid: string; prefix: string; trackM: number; raceLaps: number; title: string
+export default function RaceReplay({ sid, prefix, trackM, raceLaps, title, drivers, grid, classified, finish, outline, corners, me, initialT }: {
+  sid: string; prefix: string; trackM: number; raceLaps: number; title: string; finish: string[]
   drivers: Map<string, Driver>; grid: Map<string, number | null>; classified: Set<string>
   outline: Outline | null; corners: Corner[]; me: string; initialT: number | null
 }) {
@@ -63,7 +63,7 @@ export default function RaceReplay({ sid, prefix, trackM, raceLaps, title, drive
 
   const frameAt = (time: number) => {
     const states = stateAt(replay, time, grid, classified)
-    const order = runningOrder(replay, states, time, trackM)
+    const order = runningOrder(replay, states, time, trackM, finish)
     const pos = new Map(order.map((o) => [o.num, o.pos]))
     return { states, order, pos, lap: leaderLap(states, trackM, raceLaps) }
   }

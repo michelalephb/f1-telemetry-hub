@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useId, useMemo, useRef, useState } from 'react'
 import type { CornerMetric } from '@/lib/api'
 import { TYRE } from '@/lib/format'
-import { bisect, interp, type LapTrace } from '@/lib/telemetry'
+import { bisect, interp, windowTime, type LapTrace } from '@/lib/telemetry'
 import { rotator } from '@/lib/track'
 
 export type Series = {
@@ -74,7 +74,7 @@ export default function CompareView({ sid, a, b, delta, corners, options, initia
         <span className="font-semibold" style={{ color: ahead.color }}>{ahead.code}</span> is{' '}
         <span className="num font-semibold">{Math.abs(final).toFixed(3)} s</span> faster over the lap ({a.code} {a.lapTime} vs {b.code} {b.lapTime}, official lap times).
         {(a.lap === 1 || b.lap === 1) && <span className="text-mute"> Lap 1 is timed from the start; the charts run from the timing line.</span>}
-        {sel && <CornerVerdict a={a} b={b} corner={sel.corner} />}
+        {sel && <CornerVerdict a={a} b={b} corner={sel.corner} apex={sel.apex_m} />}
       </div>
 
       {/* corner chips */}
@@ -87,7 +87,7 @@ export default function CompareView({ sid, a, b, delta, corners, options, initia
         {/* map */}
         <section className="min-w-0 flex-[1_1_320px] rounded-xl border border-line bg-card p-3">
           <TrackMap a={a} b={b} corners={corners} range={range} hoverD={hoverD} selected={sel?.corner ?? null} rot={rot} />
-          {sel && <CornerCards a={a} b={b} corner={sel.corner} />}
+          {sel && <CornerCards a={a} b={b} corner={sel.corner} apex={sel.apex_m} />}
         </section>
 
         {/* traces */}
@@ -112,12 +112,17 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   )
 }
 
-function CornerVerdict({ a, b, corner }: { a: Series; b: Series; corner: string }) {
+// Window time from the plotted traces (not the pipeline's raw car clock), so the gain quoted here is
+// exactly how much the delta curve moves across the zoomed window.
+const winT = (s: Series, apex: number) => windowTime(s.trace, apex - WIN_BEFORE, apex + WIN_AFTER)
+
+function CornerVerdict({ a, b, corner, apex }: { a: Series; b: Series; corner: string; apex: number }) {
   const ma = a.metrics.find((m) => m.corner === corner), mb = b.metrics.find((m) => m.corner === corner)
-  if (!ma?.window_time_s || !mb?.window_time_s) return null
-  const d = mb.window_time_s - ma.window_time_s
+  const ta = winT(a, apex), tb = winT(b, apex)
+  if (ta == null || tb == null) return null
+  const d = tb - ta
   const w = d > 0 ? a : b
-  const dv = (ma.min_speed_kph ?? 0) - (mb.min_speed_kph ?? 0)
+  const dv = ma?.min_speed_kph != null && mb?.min_speed_kph != null ? ma.min_speed_kph - mb.min_speed_kph : 0
   return (
     <span>
       {' '}Through T{corner}: <span className="font-semibold" style={{ color: w.color }}>{w.code}</span> gains{' '}
@@ -127,7 +132,7 @@ function CornerVerdict({ a, b, corner }: { a: Series; b: Series; corner: string 
   )
 }
 
-function CornerCards({ a, b, corner }: { a: Series; b: Series; corner: string }) {
+function CornerCards({ a, b, corner, apex }: { a: Series; b: Series; corner: string; apex: number }) {
   const ma = a.metrics.find((m) => m.corner === corner), mb = b.metrics.find((m) => m.corner === corner)
   const f = (v: number | null | undefined, unit: string, dp = 0, sign = false) =>
     v == null ? '—' : `${sign && v > 0 ? '+' : ''}${v.toFixed(dp)}${unit}`
@@ -137,7 +142,7 @@ function CornerCards({ a, b, corner }: { a: Series; b: Series; corner: string })
     ['Min speed', f(ma?.min_speed_kph, ''), f(mb?.min_speed_kph, '')],
     ['Min speed at', f(ma?.min_speed_at_m, ' m', 0, true), f(mb?.min_speed_at_m, ' m', 0, true)],
     ['Exit (+100 m)', f(ma?.exit_speed_kph, ''), f(mb?.exit_speed_kph, '')],
-    ['Window time', f(ma?.window_time_s, ' s', 3), f(mb?.window_time_s, ' s', 3)],
+    ['Window time', f(winT(a, apex), ' s', 3), f(winT(b, apex), ' s', 3)],
   ]
   return (
     <table className="mt-3 w-full text-sm">

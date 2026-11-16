@@ -113,3 +113,14 @@ export function deltaTime(a: LapTrace, b: LapTrace): number[] {
 export function rangeIdx(dist: number[], lo: number, hi: number): [number, number] {
   return [Math.max(0, bisect(dist, lo)), Math.min(dist.length - 1, bisect(dist, hi) + 1)]
 }
+
+/**
+ * Time a lap spends between two distances, read off the same trace the delta chart uses, so the
+ * difference between two drivers equals the change of the delta curve across the window exactly.
+ * Null when the trace does not cover the window.
+ */
+export function windowTime(t: LapTrace, from: number, to: number): number | null {
+  const n = t.dist.length
+  if (n < 2 || t.dist[0] > from || t.dist[n - 1] < to) return null
+  return interp(to, t.dist, t.time) - interp(from, t.dist, t.time)
+}

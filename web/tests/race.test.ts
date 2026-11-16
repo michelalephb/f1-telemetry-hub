@@ -49,3 +49,14 @@ test('cornerAt picks the corner the move belongs to', () => {
   assert.equal(cornerAt(1250, cs, 4300), '4')   // just past the apex
   assert.equal(cornerAt(4200, cs, 4300), '1')   // after the last corner: next lap's first
 })
+
+test('last lap near ties follow the official order', async () => {
+  const { ordersByLap } = await import('../lib/race.ts')
+  const L = (d: string, n: number, end: number) => ({ driver_number: d, lap_number: n, lap_end_s: end, lap_start_s: end - 100, lap_time_ms: 100000, pit_in: false, pit_out: false })
+  const laps = [L('63', 1, 100), L('3', 1, 100.7), L('63', 2, 200.003), L('3', 2, 200.0), L('6', 1, 101), L('6', 2, 210)]
+  const grid = new Map([['63', 1], ['3', 2], ['6', 3]])
+  assert.deepEqual(ordersByLap(laps as never, grid).at(-1), ['3', '63', '6'])               // timestamps alone
+  assert.deepEqual(ordersByLap(laps as never, grid, ['63', '3', '6']).at(-1), ['63', '3', '6']) // 3 ms apart: official order
+  const far = laps.map((l) => (l.driver_number === '3' && l.lap_number === 2 ? { ...l, lap_end_s: 199 } : l))
+  assert.deepEqual(ordersByLap(far as never, grid, ['63', '3', '6']).at(-1), ['3', '63', '6'])  // 1 s apart: timestamps stand
+})

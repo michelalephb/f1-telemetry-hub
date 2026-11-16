@@ -8,7 +8,15 @@ export type RaceLap = {
 }
 
 /** Running order at the end of every lap; index 0 is the starting grid. */
-export function ordersByLap(laps: RaceLap[], grid: Map<string, number | null>): string[][] {
+/** Line crossing times are only good to about 0.2 s (checked against the official finishing gaps). */
+export const TIMING_RES_S = 0.25
+
+/**
+ * finish: the official classification order. On the last lap, cars that crossed within TIMING_RES_S
+ * of each other are put in that order, since the timestamps cannot separate them (Baku 2026: Russell
+ * won by 0.196 s, the timestamps had Verstappen 3 ms ahead).
+ */
+export function ordersByLap(laps: RaceLap[], grid: Map<string, number | null>, finish: string[] = []): string[][] {
   const byDriver = new Map<string, Map<number, RaceLap>>()
   for (const l of laps) {
     if (!byDriver.has(l.driver_number)) byDriver.set(l.driver_number, new Map())
@@ -25,7 +33,20 @@ export function ordersByLap(laps: RaceLap[], grid: Map<string, number | null>): 
   const nLaps = Math.max(0, ...laps.map((l) => l.lap_number))
   for (let k = 1; k <= nLaps; k++) {
     const at = drivers.map((d) => [d, crossed(d, k)] as const).filter((x): x is readonly [string, number] => x[1] != null)
-    out.push(at.sort((a, b) => a[1] - b[1]).map(([d]) => d))
+    at.sort((a, b) => a[1] - b[1])
+    if (k === nLaps && finish.length) {
+      const idx = (d: string) => { const i = finish.indexOf(d); return i < 0 ? Infinity : i }
+      for (let swapped = true; swapped;) {
+        swapped = false
+        for (let i = 0; i + 1 < at.length; i++) {
+          if (at[i + 1][1] - at[i][1] < TIMING_RES_S && idx(at[i + 1][0]) < idx(at[i][0])) {
+            [at[i], at[i + 1]] = [at[i + 1], at[i]]
+            swapped = true
+          }
+        }
+      }
+    }
+    out.push(at.map(([d]) => d))
   }
   return out
 }

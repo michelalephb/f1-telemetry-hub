@@ -27,7 +27,7 @@ test('state, order and gaps', () => {
   const o = runningOrder(r, stateAt(r, 120, grid, new Set(['1'])), 120, 1000)
   assert.deepEqual(o.map((x) => x.num), ['1', '44'])
   assert.equal(o[0].gap, 'Leader')
-  assert.equal(o[1].gap, '+5.6')                             // car 44 at 720 m; car 1 was there at 114.4 s
+  assert.equal(o[1].gap, '')                                 // same lap: no seconds gap (not official)
   const later = stateAt(r, 170, grid, new Set(['1']))
   assert.ok(later.find((x) => x.num === '44')!.out)          // retired, gone after 30 s
   assert.equal(leaderLap(later, 1000, 3), 3)
