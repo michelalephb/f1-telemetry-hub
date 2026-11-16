@@ -79,3 +79,12 @@ export function sectorsAddUp(l: S): boolean {
   if (l.lap_time_ms == null || l.sector1_ms == null || l.sector2_ms == null || l.sector3_ms == null) return false
   return Math.abs(l.sector1_ms + l.sector2_ms + l.sector3_ms - l.lap_time_ms) <= 2
 }
+
+/**
+ * Final segment laps that count: a lap faster than the driver's official Q3 time was deleted
+ * (track limits); the feed does not flag it (round 18 of 2026: Norris 1:34.379 deleted, official 1:35.049).
+ */
+export function countsInFinal(results: R[]): (l: { driver_number: string; lap_time_ms: number | null }) => boolean {
+  const q3 = new Map(results.filter((r) => r.q3_ms != null).map((r) => [r.driver_number, r.q3_ms as number]))
+  return (l) => l.lap_time_ms == null || !q3.has(l.driver_number) || l.lap_time_ms >= q3.get(l.driver_number)! - 5
+}

@@ -11,7 +11,7 @@ import PaceChart from '@/components/PaceChart'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getDrivers, getEvent, getLaps, getResults, getSession, type Driver, type Lap, type Result } from '@/lib/api'
 import { gap, lapTime, secs, SESSION_LABEL, teamColor, TYRE } from '@/lib/format'
-import { finalSegmentKeys, sectorsAddUp, segLabel } from '@/lib/segments'
+import { countsInFinal, finalSegmentKeys, sectorsAddUp, segLabel } from '@/lib/segments'
 
 export default function Page() {
   return <Suspense fallback={<Loading what="session" />}><SessionView /></Suspense>
@@ -48,7 +48,8 @@ function SessionView() {
   const finalKeys = finalSegmentKeys(laps, code, results)
 
   // Qualifying: only the final segment (Q3 / SQ3) counts. Other sessions: every clean lap.
-  const allClean = laps.filter((l) => l.is_accurate && l.lap_time_ms != null && (!finalKeys || finalKeys.has(`${l.driver_number}/${l.lap_number}`)))
+  const counts = isQ ? countsInFinal(results) : () => true
+  const allClean = laps.filter((l) => l.is_accurate && l.lap_time_ms != null && (!finalKeys || finalKeys.has(`${l.driver_number}/${l.lap_number}`)) && counts(l))
   const pool = allClean
   const best = new Map<string, Lap>()
   for (const l of pool) {

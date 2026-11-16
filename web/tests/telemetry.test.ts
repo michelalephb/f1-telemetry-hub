@@ -127,3 +127,11 @@ test('finalSegmentKeys: a driver with no official time does not mark the end of 
     { driver_number: '6', q1_ms: null, q2_ms: null, q3_ms: null, position: 22 }]
   assert.deepEqual([...finalSegmentKeys(laps, 'Q', res)!].sort(), ['1/2'])
 })
+
+test('countsInFinal drops a Q3 lap faster than the official time (deleted)', async () => {
+  const { countsInFinal } = await import('../lib/segments.ts')
+  const ok = countsInFinal([{ driver_number: '1', q3_ms: 95049 }, { driver_number: '9', q3_ms: null }])
+  assert.equal(ok({ driver_number: '1', lap_time_ms: 94379 }), false)
+  assert.equal(ok({ driver_number: '1', lap_time_ms: 95049 }), true)
+  assert.equal(ok({ driver_number: '9', lap_time_ms: 80000 }), true)
+})
