@@ -78,8 +78,9 @@ Schema: `supabase/migrations/`.
 
 * **instagram** (`instagram.yml`): after every ingest run. Posts sessions ingested in the last 72 hours, one post per run (Reel first, carousel an hour later). Tuesdays in the off season: one "season rewind" qualifying Reel. Pushes to other branches dry run São Paulo (round 20) and keep the renders as a workflow artifact.
 * **instagram token** (`ig_token.yml`): weekly refresh of the long lived token.
-* Stories: qualifying = pole lap vs P2 (final segment laps, matched to the official times), the corner where pole gained most and where P2 hit back. Race = winner, gaps to the winner lap by lap, biggest climb from the grid.
-* Guardrails: no post unless the computed gap at the line is within 50 ms of the official gap (qualifying) or the order at the flag matches the official top 3 (race). Sessions wait up to 12 runs for results, then are skipped. One post per session and kind, ever (`ig_posts` unique key). Publish failures retry 3 times.
+* Stories: qualifying = pole lap vs P2 (final segment laps, matched to the official times): official sector gaps, the same clock replay, and the braking corners with the biggest apex speed differences. Race = winner and podium gaps, running order of the top 5 lap by lap, biggest climb from the grid.
+* Time claims come only from official timing (lap and sector times). Per corner time gains are not published: at OpenF1's 240 ms sampling a few metres of alignment error through a slow apex is worth 0.1 to 0.2 s (São Paulo Q3: trace gap 90 ms off the official S2 split while exact at the line).
+* Guardrails: no post unless the trace gap at the line is within 50 ms of the official gap and within 150 ms at both sector splits (qualifying), or the order at the flag matches the official top 3 (race). Sessions wait up to 12 runs for results, then are skipped. One post per session and kind, ever (`ig_posts` unique key). Publish failures retry 3 times.
 * Storage: videos are uploaded to the public `web` bucket only while Instagram fetches them, then deleted (posted or failed). Covers and slides stay (`web/ig/...`).
 * Kill switch: `social_settings.enabled` (off by default). Set it to false to stop posting at once.
 
