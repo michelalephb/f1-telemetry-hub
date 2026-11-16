@@ -195,7 +195,7 @@ def race_carousel(st: RaceStory, meta: dict, out: Path) -> list[Path]:
     for i, p in enumerate(st.podium):
         y = 0.62 - i * 0.13
         g = st.gaps.get(p["code"])
-        gap = "" if i == 0 or g is None or np.isnan(g[-1]) else f"+{g[-1]:.3f} s"
+        gap = "" if i == 0 or g is None or not np.isfinite(g) else f"+{g:.3f} s"
         fig.text(0.08, y, f"P{p['position']}", fontsize=60, color=S.GOLD if i == 0 else S.MUTE, weight="bold", family=S.MONO)
         fig.text(0.30, y, p["code"], fontsize=60, color=p["color"], weight="bold", family=S.HEAD)
         fig.text(0.92, y + 0.01, gap, fontsize=34, ha="right", family=S.MONO)
@@ -205,8 +205,8 @@ def race_carousel(st: RaceStory, meta: dict, out: Path) -> list[Path]:
     paths.append(save_jpeg(fig, out / "slide_1.jpg"))
 
     fig = new_fig(H_POST)
-    chrome(fig, kick, "Gap to the leader, lap by lap")
-    gap_axes(fig.add_axes([0.12, 0.18, 0.82, 0.62]), st)
+    chrome(fig, kick, "Top 5, lap by lap")
+    order_axes(fig.add_axes([0.12, 0.18, 0.82, 0.62]), st)
     paths.append(save_jpeg(fig, out / "slide_2.jpg"))
 
     if st.mover:
@@ -220,31 +220,29 @@ def race_carousel(st: RaceStory, meta: dict, out: Path) -> list[Path]:
     return paths
 
 
-def gap_limits(st: RaceStory) -> float:
-    """Scale to the typical spread, not to pit stop spikes (those run off the chart)."""
-    q = [np.nanpercentile(g, 90) for g in st.gaps.values() if np.isfinite(g).any()]
-    return float(min(max(q + [5.0]) * 1.15, 60.0))
-
-
-def gap_axes(ax, st: RaceStory, upto: int | None = None) -> None:
-    laps = np.arange(1, st.n_laps + 1)
+def order_axes(ax, st: RaceStory, upto: int | None = None) -> None:
+    """Running position of the top 5 finishers (pit stops show as dips)."""
+    laps = np.arange(0, st.n_laps + 1)
     k = st.n_laps if upto is None else upto
-    for code, g in st.gaps.items():
-        ax.plot(laps[:k], g[:k], color=st.colors[code], lw=3, label=code)
-        if k and np.isfinite(g[k - 1]):
-            ax.plot(laps[k - 1], g[k - 1], "o", color=st.colors[code], ms=10)
-    ax.set_xlim(1, st.n_laps)
-    ax.set_ylim(gap_limits(st), -0.5)
-    ax.set_xlabel("Lap")
-    ax.set_ylabel("Seconds behind the leader")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.09), frameon=False, fontsize=20, ncol=5)
+    top = [p["code"] for p in st.podium] + [c for c in st.positions if c not in [p["code"] for p in st.podium]]
+    for code in top[:5]:
+        p = st.positions[code]
+        ax.plot(laps[: k + 1], p[: k + 1], color=st.colors[code], lw=3.5, drawstyle="steps-post", label=code)
+        last = p[: k + 1][np.isfinite(p[: k + 1])]
+        if len(last):
+            ax.text(k + 0.6, last[-1], code, color=st.colors[code], va="center", fontsize=18, weight="bold")
+    ax.set_xlim(0, st.n_laps + 4)
+    ax.set_ylim(min(22.5, np.nanmax([np.nanmax(st.positions[c]) for c in top[:5]]) + 1.5), 0.5)
+    ax.set_yticks([1, 3, 5, 10, 15, 20])
+    ax.set_xlabel("Lap (0 = grid)")
+    ax.set_ylabel("Position")
 
 
 def mover_axes(ax, st: RaceStory, upto: int | None = None) -> None:
     m = st.mover
     k = st.n_laps if upto is None else upto
     laps = np.arange(0, st.n_laps + 1)
-    ax.plot(laps[: k + 1], st.positions[: k + 1], color=m["color"], lw=4, drawstyle="steps-post")
+    ax.plot(laps[: k + 1], st.positions[m["code"]][: k + 1], color=m["color"], lw=4, drawstyle="steps-post")
     ax.set_xlim(0, st.n_laps)
     ax.set_ylim(22.5, 0.5)
     ax.set_yticks([1, 5, 10, 15, 20])
@@ -392,14 +390,14 @@ def race_reel(st: RaceStory, meta: dict, out: Path) -> tuple[Path, Path]:
     cover = save_jpeg_reel(fig, out / "cover.jpg")
     plt.close(fig)
 
-    fig = reel_fig(kick, "Gap to the leader")
-    ax = fig.add_axes([0.13, 0.17, 0.81, 0.63])
+    fig = reel_fig(kick, "Top 5, lap by lap")
+    ax = fig.add_axes([0.13, 0.12, 0.81, 0.68])
     lap_txt = fig.text(0.5, 0.835, "", ha="center", fontsize=40, family=S.MONO, color=S.CYAN)
     n = int(8 * FPS)
     for i in range(n + 1):
         k = max(1, round(st.n_laps * i / n))
         ax.cla()
-        gap_axes(ax, st, upto=k)
+        order_axes(ax, st, upto=k)
         lap_txt.set_text(f"Lap {k} / {st.n_laps}")
         r.add(fig)
     r.add(fig, FPS)
@@ -415,7 +413,7 @@ def race_reel(st: RaceStory, meta: dict, out: Path) -> tuple[Path, Path]:
             k = round(st.n_laps * i / n)
             ax.cla()
             mover_axes(ax, st, upto=k)
-            p = st.positions[: k + 1]
+            p = st.positions[m["code"]][: k + 1]
             p = p[np.isfinite(p)]
             big.set_text(f"P{int(p[-1]) if len(p) else m['grid']}")
             r.add(fig)

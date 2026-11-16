@@ -42,12 +42,12 @@ def race(st: RaceStory, meta: dict, kind: str) -> str:
     lines = [f"{w} wins the {what}.", ""]
     for p in st.podium[1:]:
         g = st.gaps.get(p["code"])
-        if g is not None and np.isfinite(g[-1]):
-            lines.append(f"P{p['position']} {p['code']} +{g[-1]:.3f} s")
+        if g is not None and np.isfinite(g):
+            lines.append(f"P{p['position']} {p['code']} +{g:.3f} s")
     if st.mover:
         m = st.mover
         lines += ["", f"Biggest climb: {m['code']}, P{m['grid']} on the grid to P{m['position']} at the flag."]
-    lines += ["", "Gap to the leader, lap by lap." if kind == "reel" else "Swipe for the gaps lap by lap and the biggest climb.",
+    lines += ["", "The top 5, lap by lap." if kind == "reel" else "Swipe for the running order lap by lap and the biggest climb.",
               "", FOOTER, "", tags(meta["event"], w, st.mover["code"] if st.mover else "")]
     return clean("\n".join(lines))
 

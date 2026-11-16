@@ -108,14 +108,23 @@ def test_quali_story_refuses_when_a_split_disagrees():
         story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
 
 
+def test_apex_speed_ignores_flat_out_kinks_and_neighbouring_corners():
+    results, laps, drivers, traces = quali_fixture()
+    corners = pd.concat([CORNERS, pd.DataFrame({"corner": ["9"], "apex_m": [2560.0]}),
+                         pd.DataFrame({"corner": ["K"], "apex_m": [1000.0]})])   # 9: 60 m after T8; K: on a straight
+    st = story.quali_story(results, laps, drivers, corners, traces, TRACK_M)
+    names = [c.corner for c in story.corner_speeds(st.a, st.b, corners)]
+    assert "K" not in names and "9" not in names and st.best_a.corner == "8"
+
+
 def test_race_story_and_biggest_climb():
     results, laps, drivers = race_fixture()
     st = story.race_story(results, laps, drivers)
     assert st.winner["code"] == "NOR"
     assert st.mover["code"] == "VER" and st.mover["grid"] == 15 and st.mover["position"] == 2
-    assert st.positions[0] == 15 and st.positions[-1] == 2
+    assert st.positions["VER"][0] == 15 and st.positions["VER"][-1] == 2
     assert st.colors["HAD"] != st.colors["VER"]   # teammates get distinct colours
-    assert all(np.nanmin(g) >= 0 for g in st.gaps.values())   # gap to the leader on track
+    assert st.gaps["VER"] > 0 and set(st.positions) >= {"NOR", "VER", "HAD", "LEC", "HAM"}
 
 
 def test_race_story_refuses_a_wrong_order_at_the_flag():

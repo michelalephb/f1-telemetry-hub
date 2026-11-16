@@ -18,6 +18,7 @@ SECTOR_TOLERANCE_S = 0.15    # raw gap at the official sector splits (São Paulo
 LAP_MATCH_MS = 30            # OpenF1 lap duration vs official Q3 time
 MIN_SPEED_KPH = 3.0          # smaller apex speed differences are within sampling noise
 APEX_WINDOW_M = 60.0         # minimum speed is taken within this distance of the marked apex
+BRAKING_RATIO = 0.85         # a corner counts when its apex speed is below 85 % of the speed around it
 
 
 class StoryError(Exception):
@@ -76,9 +77,9 @@ class RaceStory:
     winner: dict
     podium: list[dict]
     mover: dict | None       # {"code", "color", "grid", "position", "gained"}
-    gaps: dict               # code -> np.ndarray of gap to the leader on track (s) per lap, NaN where unknown
+    gaps: dict               # code -> gap to the winner at the flag, s (podium)
     colors: dict
-    positions: np.ndarray    # position per lap of the mover (index = lap number, 0 = grid)
+    positions: dict          # code -> position per lap (index = lap number, 0 = grid), top 5 plus the mover
     n_laps: int
     checks: dict = field(default_factory=dict)
 
@@ -147,13 +148,36 @@ def match_lap(q3: pd.DataFrame, driver: str, official_ms: int) -> pd.Series:
 
 # ---------------------------------------------------------------- qualifying
 
+def apex_min(L: Lap, lo: float, hi: float) -> float | None:
+    """Lowest speed between lo and hi, only if it is a true local minimum (not at either edge)."""
+    m = (L.dist >= lo) & (L.dist <= hi)
+    sp = L.speed[m]
+    if len(sp) < 3:
+        return None
+    i = int(np.argmin(sp))
+    return float(sp[i]) if 0 < i < len(sp) - 1 else None
+
+
 def corner_speeds(a: Lap, b: Lap, corners: pd.DataFrame) -> list[CornerSpeed]:
+    """Apex speed per corner, from each corner's own stretch (never reaching into the next corner),
+    braking corners only: flat out kinks have no apex speed worth comparing."""
+    c = corners.sort_values("apex_m").reset_index(drop=True)
+    apex = c["apex_m"].to_numpy(float)
     out = []
-    for _, c in corners.iterrows():
-        win = lambda L: L.speed[np.abs(L.dist - c["apex_m"]) <= APEX_WINDOW_M]
-        sa, sb = win(a), win(b)
-        if len(sa) >= 2 and len(sb) >= 2:
-            out.append(CornerSpeed(str(c["corner"]), float(c["apex_m"]), float(sa.min()), float(sb.min())))
+    for k, row in c.iterrows():
+        half = APEX_WINDOW_M
+        if k > 0:
+            half = min(half, 0.45 * (apex[k] - apex[k - 1]))
+        if k < len(c) - 1:
+            half = min(half, 0.45 * (apex[k + 1] - apex[k]))
+        lo, hi = apex[k] - half, apex[k] + half
+        ma, mb = apex_min(a, lo, hi), apex_min(b, lo, hi)
+        if ma is None or mb is None:
+            continue
+        around = a.speed[(a.dist >= apex[k] - 250) & (a.dist <= apex[k] + 150)]
+        if len(around) == 0 or ma > BRAKING_RATIO * around.max():
+            continue
+        out.append(CornerSpeed(str(row["corner"]), float(apex[k]), ma, mb))
     return out
 
 
@@ -267,12 +291,10 @@ def race_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame)
         raise StoryError(f"order at the flag {final[:3]} differs from the official top 3 {checks['official_top3']}")
 
     end = laps.pivot_table(index="lap_number", columns="driver_number", values="lap_end_s", aggfunc="first")
-    leader = end.min(axis=1)   # gap to whoever led at the end of each lap: never negative
     gaps = {}
     for t in top:
-        if t["driver"] in end:
-            g = (end[t["driver"]] - leader).reindex(range(1, n + 1))
-            gaps[t["code"]] = g.to_numpy(float)
+        if t["driver"] in end and n in end.index:
+            gaps[t["code"]] = float(end.loc[n, t["driver"]] - end.loc[n, winner["driver"]])
 
     fin = res[res["status"].fillna("").str.contains("Finished|Lap", case=False) & res["grid"].notna()]
     mover = None
@@ -284,13 +306,17 @@ def race_story(results: pd.DataFrame, laps: pd.DataFrame, drivers: pd.DataFrame)
             mover = who(fin.loc[i]) | {"gained": int(gained[i])}
             if mover["grid"] in (0, None):
                 mover["grid"] = 22
-    pos = np.full(n + 1, np.nan)
-    if mover:
-        pos[0] = mover["grid"]
+    tracked = top + ([mover] if mover and mover["driver"] not in [t["driver"] for t in top] else [])
+    positions = {}
+    for t in tracked:
+        p = np.full(n + 1, np.nan)
+        p[0] = t["grid"] if t.get("grid") else np.nan
         for k, order in orders.items():
-            if mover["driver"] in order:
-                pos[k] = order.index(mover["driver"]) + 1
-    return RaceStory("race", winner, top[:3], mover, gaps, {t["code"]: t["color"] for t in top}, pos, n, checks)
+            if t["driver"] in order:
+                p[k] = order.index(t["driver"]) + 1
+        positions[t["code"]] = p
+    colors = {t["code"]: t["color"] for t in tracked}
+    return RaceStory("race", winner, top[:3], mover, gaps, colors, positions, n, checks)
 
 
 # ---------------------------------------------------------------- helpers
