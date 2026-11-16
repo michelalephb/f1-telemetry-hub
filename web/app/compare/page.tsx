@@ -4,12 +4,14 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import CompareView, { type Series } from '@/components/CompareView'
+import EventNav from '@/components/EventNav'
 import Flag from '@/components/Flag'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { getCornerMetrics, getCorners, getDrivers, getEvent, getLaps, getResults, getSession, getTrace, type Lap } from '@/lib/api'
 import { finalSegmentKeys } from '@/lib/segments'
 import { lapTime, pairColors, SESSION_LABEL, teamColor } from '@/lib/format'
 import { deltaTime, lapTrace } from '@/lib/telemetry'
+import { getOutline } from '@/lib/track'
 
 export default function Page() {
   return <Suspense fallback={<Loading what="telemetry" />}><Compare /></Suspense>
@@ -38,7 +40,7 @@ async function load(sid: string, qa: string | null, qb: string | null, qla: stri
   const lapA = pick(a, qla), lapB = pick(b, qlb)
   const trackM = session.track_length_m ?? 5000
 
-  const [rowsA, rowsB, metrics] = await Promise.all([getTrace(session.trace_prefix, a), getTrace(session.trace_prefix, b), getCornerMetrics(sid, [lapA, lapB])])
+  const [rowsA, rowsB, metrics, outline] = await Promise.all([getTrace(session.trace_prefix, a), getTrace(session.trace_prefix, b), getCornerMetrics(sid, [lapA, lapB]), getOutline(session.season, session.round)])
   const tA = lapTrace(rowsA, lapA.lap_number, trackM), tB = lapTrace(rowsB, lapB.lap_number, trackM)
   const drv = new Map(drivers.map((d) => [d.driver_number, d]))
   const [colA, colB] = pairColors(teamColor(drv.get(a)?.team_color), teamColor(drv.get(b)?.team_color))
@@ -52,7 +54,7 @@ async function load(sid: string, qa: string | null, qb: string | null, qla: stri
     laps: clean.filter((l) => l.driver_number === d).sort((x, y) => x.lap_number - y.lap_number).map((l) => ({ n: l.lap_number, t: lapTime(l.lap_time_ms) })),
   }))
   return {
-    session, event, trackM, options, isQ,
+    session, event, trackM, options, isQ, rot: outline?.rot ?? 0,
     a: mk(a, lapA, colA, tA), b: mk(b, lapB, colB, tB), delta: deltaTime(tA, tB),
     corners: corners.map((c) => ({ corner: c.corner, apex_m: c.apex_m, x: c.x, y: c.y })),
   }
@@ -72,13 +74,14 @@ function Compare() {
           {data && <Flag country={data.event?.country} className="h-3.5" />}
           <span>{data ? `${data.event?.event_name ?? ''} ${SESSION_LABEL[data.session.session_code] ?? ''}` : 'Session'}</span>
         </Link>
-        <h1 className="mt-2 font-head text-2xl font-bold sm:text-3xl">{data?.isQ ? `${data.session.session_code === 'SQ' ? 'SQ3' : 'Q3'} telemetry compare` : 'Telemetry compare'}</h1>
+        <h1 className="mt-2 font-head text-2xl font-bold sm:text-3xl">{data?.isQ ? `${data.session.session_code === 'SQ' ? 'SQ3' : 'Q3'} corner compare` : 'Corner compare'}</h1>
       </div>
+      {data && <EventNav season={data.session.season} round={data.session.round} sid={sid} tab="corners" />}
       {error && <Failed error={error} />}
       {loading && <Loading what="telemetry" />}
       {data && !loading && (
         <CompareView sid={sid} a={data.a} b={data.b} delta={data.delta} corners={data.corners} options={data.options}
-          initialCorner={q.get('c')} trackM={data.trackM} />
+          initialCorner={q.get('c')} trackM={data.trackM} rot={data.rot} />
       )}
     </div>
   )

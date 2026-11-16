@@ -1,0 +1,33 @@
+name: track outlines
+
+# Rebuilds the small track outlines (landing page thumbnails, race story map) from the traces
+# already stored. New races get theirs during ingest; run this by hand after changing the format.
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: Season (empty = current year)
+        default: ""
+
+concurrency:
+  group: tracks
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      FASTF1_CACHE: .fastf1_cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: |
+          SEASON="${{ inputs.season }}"; SEASON="${SEASON:-$(date -u +%Y)}"
+          python -m pipeline tracks --season "$SEASON"

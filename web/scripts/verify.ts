@@ -2,6 +2,7 @@
 // files) and asserts known facts. node --experimental-strip-types scripts/verify.ts 2026_20_R
 import assert from 'node:assert/strict'
 import { getCornerMetrics, getCorners, getDrivers, getLaps, getResults, getSession, getTrace, SUPABASE_URL } from '../lib/api.ts'
+import { cornerAt, lapClock, movesOf, ordersByLap, passPoint } from '../lib/race.ts'
 import { finalSegmentKeys } from '../lib/segments.ts'
 import { deltaAt, extrap, lapTrace } from '../lib/telemetry.ts'
 
@@ -60,4 +61,32 @@ if (s.session_code === 'Q') {
     }
   }
 }
+// Race story: our running order at the flag must match the official classification, and most
+// on track moves must be found on the map.
+if (s.session_code === 'R' || s.session_code === 'S') {
+  const res = (await getResults(s.season, s.round, s.session_code)).filter((r) => r.position != null).sort((x, y) => x.position! - y.position!)
+  const orders = ordersByLap(laps, new Map(res.map((r) => [r.driver_number, r.grid])))
+  const flag = orders[orders.length - 1]
+  const leadLap = res.filter((r) => r.laps === res[0].laps).map((r) => r.driver_number)
+  const ours = flag.filter((d) => leadLap.includes(d))
+  const off = leadLap.filter((d, i) => ours[i] !== d)
+  console.log(`order at the flag (lead lap): ours ${ours.map(code).join(' ')} | official ${leadLap.map(code).join(' ')}`)
+  assert.deepEqual(ours.slice(0, 3), leadLap.slice(0, 3), 'podium order from lap times matches the official result')
+  assert.ok(off.length <= 2, `at most 2 lead lap places differ (time penalties), got ${off.length}`)
+  const climb = (r: (typeof res)[number]) => (r.grid && r.grid > 0 ? r.grid : res.length) - r.position!
+  const me = [...res].sort((x, y) => climb(y) - climb(x))[0].driver_number
+  const moves = movesOf(me, orders, laps).filter((m) => !m.pit)
+  const mine = await getTrace(s.trace_prefix, me)
+  let found = 0
+  for (const m of moves) {
+    const p = passPoint(lapClock(mine, m.lap), lapClock(await getTrace(s.trace_prefix, m.other), m.lap), m.kind)
+    if (p) found++
+    console.log(`  ${code(me)} L${m.lap} ${m.kind === 'gain' ? 'passed' : 'lost to'} ${code(m.other)}: ${p ? `T${cornerAt(p.d, corners, L)} at ${p.d.toFixed(0)} m` : 'not seen'}`)
+  }
+  console.log(`race story for ${code(me)}: ${moves.length} on track moves, ${found} located`)
+  assert.ok(moves.length === 0 || found / moves.length >= 0.7, 'at least 70 % of on track moves located')
+}
+const outline = await fetch(`${SUPABASE_URL}/storage/v1/object/public/web/tracks/${s.season}/${s.round}.json`)
+console.log(`track outline: HTTP ${outline.status}${outline.ok ? '' : ' (built by the track outlines workflow)'}`)
+
 console.log(`OK in ${Date.now() - t0} ms`)
