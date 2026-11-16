@@ -216,8 +216,7 @@ class Card:
         ax = self.fig.add_axes([0, 0, 1, 1], zorder=-10)
         yy, xx = np.mgrid[0:1:240j, 0:1:240j]
         base = np.dstack([np.interp(yy, [0, 1], [c0, c1]) for c0, c1 in zip(_rgb(S.NIGHT_BOTTOM), _rgb(S.NIGHT_TOP))])
-        glow = np.exp(-(((xx - 0.5) / 0.55) ** 2 + ((yy - 0.55) * h / W / 0.5) ** 2))[..., None]
-        img = np.clip(base + glow * (np.array(_rgb(PINK)) * 0.16), 0, 1)
+        img = np.clip(base, 0, 1)   # plain plum night gradient, no pink tint (Michel, 15 Nov 2026)
         ax.imshow(img, extent=[0, 1, 0, 1], aspect="auto", origin="lower", interpolation="bicubic")
         rng = np.random.default_rng(5)
         ax.imshow(rng.random((h // 4, W // 4)), cmap="gray", alpha=0.03, extent=[0, 1, 0, 1], aspect="auto")
