@@ -234,7 +234,7 @@ function PositionChart({ pos, moves, stops, n, color }: { pos: (number | null)[]
           ))}
           <path d={d} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" />
           {moves.map((m, i) => (
-            <circle key={i} cx={X(m.lap - 0.5)} cy={Y(m.posAfter)} r={4} fill={m.pit ? '#93A0B4' : m.kind === 'gain' ? GAIN : LOSS}>
+            <circle key={i} cx={X(m.lap)} cy={Y(m.posAfter)} r={4} fill={m.pit ? '#93A0B4' : m.kind === 'gain' ? GAIN : LOSS}>
               <title>{`L${m.lap} ${m.kind === 'gain' ? 'won' : 'lost'} a place${m.pit ? ' (pit stop)' : ''}`}</title>
             </circle>
           ))}
