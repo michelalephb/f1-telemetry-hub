@@ -42,7 +42,10 @@ export function qualiSegments(laps: L[], code: string): Map<string, number> {
 
 export const segLabel = (code: string, i: number) => `${code === 'SQ' ? 'SQ' : 'Q'}${i + 1}`
 
-type R = { driver_number: string; q3_ms: number | null }
+type R = { driver_number: string; q3_ms: number | null; position?: number | null }
+
+/** Q3 (and SQ3) runs with the top ten of Q2. */
+const FINAL_SEGMENT_CARS = 10
 
 /**
  * Keys ("driver/lap") of laps in the final segment (Q3 / SQ3), or null for non qualifying sessions.
@@ -52,7 +55,8 @@ type R = { driver_number: string; q3_ms: number | null }
  */
 export function finalSegmentKeys(laps: L[], code: string, results: R[] = []): Set<string> | null {
   if (code !== 'Q' && code !== 'SQ') return null
-  const inQ3 = new Set(results.filter((r) => r.q3_ms != null).map((r) => r.driver_number))
+  // A driver can reach Q3 and set no time (Miami 2026: Hadjar), so the top ten count too
+  const inQ3 = new Set(results.filter((r) => r.q3_ms != null || (r.position != null && r.position <= FINAL_SEGMENT_CARS)).map((r) => r.driver_number))
   if (inQ3.size > 0 && results.length > inQ3.size) {
     const cut = Math.max(...running(laps).filter((l) => !inQ3.has(l.driver_number) && l.lap_end_s != null).map((l) => l.lap_end_s as number))
     if (Number.isFinite(cut)) {
