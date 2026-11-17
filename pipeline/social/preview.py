@@ -133,6 +133,32 @@ def last_year_results(season: int, rnd: int) -> dict:
     }
 
 
+WET_COMPOUNDS = {"INTERMEDIATE": "INTER", "WET": "WET"}
+
+
+def quali_conditions(oc, year: int, circuit_key: int, pole_code: str | None) -> dict:
+    """Was last year's qualifying wet? Pole sitter's last compound (OpenF1 stints) decides; if that is
+    missing, any rainfall in the session weather. Empty dict when OpenF1 has nothing: no guess."""
+    qs = oc.frame("sessions", year=year, circuit_key=int(circuit_key), session_name="Qualifying")
+    if qs.empty:
+        return {}
+    sk = int(qs.iloc[0]["session_key"])
+    comp = None
+    if pole_code:
+        drv = oc.frame("drivers", session_key=sk)
+        num = drv.loc[drv["name_acronym"] == pole_code, "driver_number"]
+        if len(num):
+            st = oc.frame("stints", session_key=sk, driver_number=int(num.iloc[0]))
+            if len(st) and "compound" in st:
+                comp = str(st.sort_values("stint_number")["compound"].dropna().iloc[-1]).upper() or None
+    w = oc.frame("weather", session_key=sk)
+    rain = bool(len(w) and "rainfall" in w and (w["rainfall"].fillna(0) > 0).any())
+    if comp is None and not len(w):
+        return {}
+    wet = comp in WET_COMPOUNDS if comp else rain
+    return {"quali_wet": wet, "pole_compound": comp}
+
+
 def load(season: int, rnd: int) -> Preview:
     from ..__main__ import schedule
     from ..ingest import corner_markers
@@ -190,6 +216,10 @@ def load(season: int, rnd: int) -> Preview:
         p.last_year = last_year_results(season, rnd)
     except Exception as e:  # the fact cards still work without it
         log.warning("last year's results unavailable: %s", e)
+    try:
+        p.last_year |= quali_conditions(oc, season - 1, ck, p.last_year.get("pole"))
+    except Exception as e:  # no conditions, no pole comparison card
+        log.warning("last year's qualifying conditions unavailable: %s", e)
     log.info("preview %s: %s %s lap %.3f s, stats %s, sessions %s", p.title, p.ref_year, p.driver, p.lap_s, p.stats, p.sessions)
     return p
 
@@ -450,12 +480,7 @@ def facts(p: "Preview") -> list[dict]:
     ]
     ly = p.last_year or {}
     if ly.get("pole_ms") and ly.get("pole"):
-        gap = ly["pole_ms"] / 1000 - p.lap_s
-        if gap > 1:
-            out.append({"kicker": f"{p.ref_year} flashback", "number": f"{gap:.1f}", "unit": "s",
-                        "line": f"Pole ({ly['pole']} {lap_time(ly['pole_ms'])}) was slower than the race's fastest lap",
-                        "source": f"Fastest race lap: {p.driver} {lap_time(round(p.lap_s * 1000))}. Official results",
-                        "draw": lambda ax: (base_line(ax, p), speed_line(ax, p, lw=6))})
+        out += pole_vs_race(p, ly)
     t = TYRES.get(p.title)
     if t:
         out.append({"kicker": "Tyres", "number": "3", "unit": f"softest of {t['range']}",
@@ -463,6 +488,46 @@ def facts(p: "Preview") -> list[dict]:
                     "source": f"{t['why']}. Source: {t['source']}", "tyres": t,
                     "draw": lambda ax: tyre_row(ax, t)})
     return out
+
+
+def pole_vs_race(p: "Preview", ly: dict) -> list[dict]:
+    """Last year's pole against the race's fastest lap, always with the reason. A wet qualifying
+    gets the rain card with the pole sitter's tyre; a dry one gets pole vs race; unknown
+    conditions get no card (an unexplained 14.6 s gap is misleading)."""
+    gap = ly["pole_ms"] / 1000 - p.lap_s
+    pole_t, race_t = lap_time(ly["pole_ms"]), lap_time(round(p.lap_s * 1000))
+    race_src = f"Fastest race lap: {p.driver} {race_t}"
+    if ly.get("quali_wet") is True and gap > 0:
+        comp = WET_COMPOUNDS.get(ly.get("pole_compound") or "")
+        on = f" on {'intermediates' if comp == 'INTER' else 'full wets'}" if comp else ""
+        return [{"kicker": f"{p.ref_year} rain qualifying", "number": f"{gap:.1f}", "unit": "s slower",
+                 "line": f"Wet pole, {ly['pole']} {pole_t}{on}, vs the dry race",
+                 "source": f"{race_src}. Official results; OpenF1 weather and tyre data",
+                 "draw": lambda ax: (base_line(ax, p), speed_line(ax, p, lw=6), comp and tyre_badge(ax, comp))}]
+    if ly.get("quali_wet") is False and gap < 0:
+        return [{"kicker": f"{p.ref_year} pole vs race", "number": f"{-gap:.1f}", "unit": "s faster",
+                 "line": f"Pole, {ly['pole']} {pole_t}: low fuel and fresh tyres",
+                 "source": f"{race_src}. Official results",
+                 "draw": lambda ax: (base_line(ax, p), speed_line(ax, p, lw=6))}]
+    return []
+
+
+def tyre_badge(ax, compound: str):
+    """One labelled tyre in the emptiest spot of the track map (furthest from the racing line),
+    so it never sits on the track whatever the circuit's shape."""
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    pts = np.column_stack([ax.lines[0].get_xdata(), ax.lines[0].get_ydata()])[::3] if ax.lines else np.zeros((1, 2))
+    gx, gy = np.meshgrid(np.linspace(x0, x1, 48), np.linspace(y0, y1, 36))
+    cand = np.column_stack([gx.ravel(), gy.ravel()])
+    d = np.sqrt(((cand[:, None, :] - pts[None, :, :]) ** 2).sum(-1)).min(1)
+    edge = np.minimum.reduce([cand[:, 0] - x0, x1 - cand[:, 0], cand[:, 1] - y0, y1 - cand[:, 1]])
+    room = np.minimum(d, edge)
+    k = int(np.argmax(room))
+    r = min(0.42 * room[k], 0.09 * (x1 - x0))
+    cx, cy = cand[k]
+    tyre(ax, cx, cy + 0.3 * r, r, compound, "I" if compound == "INTER" else "W")
+    return ax
 
 
 def ordinal(n: int) -> str:

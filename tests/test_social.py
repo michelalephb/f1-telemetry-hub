@@ -422,8 +422,18 @@ def test_preview_renders(tmp_path):
     slides = preview.carousel(p, tmp_path)
     assert len(slides) == 2 + len(preview.facts(p)) <= 10            # cover, facts, closing; Instagram max 10
     assert len(preview.stories(p, tmp_path / "s")) == len(slides)
-    p.last_year = {"pole": "NOR", "pole_ms": 107934, "winner": "VER"}
-    assert any(f["unit"] == "s" for f in preview.facts(p))          # flashback card appears with last year's pole
+    slow = round((p.lap_s + 14.6) * 1000)
+    p.last_year = {"pole": "NOR", "pole_ms": slow, "winner": "VER"}
+    assert not any("pole" in f["kicker"] or "rain" in f["kicker"] for f in preview.facts(p))   # conditions unknown: no card
+    p.last_year |= {"quali_wet": True, "pole_compound": "INTERMEDIATE"}
+    rain = [f for f in preview.facts(p) if "rain" in f["kicker"]]
+    assert rain and rain[0]["number"] == "14.6" and "intermediates" in rain[0]["line"]
+    p.last_year = {"pole": "RUS", "pole_ms": round((p.lap_s - 2.6) * 1000), "quali_wet": False}
+    dry = [f for f in preview.facts(p) if "pole vs race" in f["kicker"]]
+    assert dry and dry[0]["unit"] == "s faster" and dry[0]["number"] == "2.6"
+    p.last_year = {"pole": "NOR", "pole_ms": slow, "quali_wet": False}            # dry yet slower: odd, so no card
+    assert not any("pole" in f["kicker"] for f in preview.facts(p))
+    p.last_year = {"pole": "NOR", "pole_ms": slow, "quali_wet": True, "pole_compound": "INTERMEDIATE"}
     from PIL import Image
     with Image.open(preview.stories(p, tmp_path / "s2")[1]) as im:
         assert im.size == (1080, 1920)
