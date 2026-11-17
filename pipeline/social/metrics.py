@@ -120,8 +120,12 @@ def cmd_optimize(a) -> int:
     sb = store.client()
     since = (date.today() - timedelta(days=14)).isoformat()
     met = sb.table("ig_metrics").select("*").gte("day", since).execute().data
+    # a story keeps gaining reach until it expires after 24 h: only score posts whose numbers are final
+    final = (datetime.now(timezone.utc) - timedelta(hours=26)).isoformat()
     posts = {r["session_id"]: r.get("content") for r in
-             sb.table("ig_posts").select("session_id,content").eq("status", "published").execute().data}
+             sb.table("ig_posts").select("session_id,content").eq("status", "published")
+             .lt("created_at", final).execute().data}
+    met = [m for m in met if m["session_id"] in posts]
     for m in met:
         m["content"] = posts.get(m["session_id"])
     ranked = rank([m for m in met if m["kind"] == "story"])
