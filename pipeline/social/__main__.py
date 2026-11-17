@@ -386,6 +386,9 @@ def finish(report: list, out: str, failed: int) -> int:
         print(f"{r['status']:>20}  {r['session_id']}  {r['kind']:<8}  {r.get('permalink') or r.get('reason') or ''}")
         if r.get("checks"):
             print(f"{'checks':>20}  {json.dumps(r['checks'], default=str)}")
+        if r["status"].startswith("rendered") and r.get("caption"):        # dry run: show the exact caption
+            for line in r["caption"].splitlines():
+                print(f"{'caption |':>20}  {line}")
     return 1 if failed else 0
 
 
