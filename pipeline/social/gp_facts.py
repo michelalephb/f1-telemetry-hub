@@ -116,6 +116,12 @@ HISTORY = {
             "https://www.f1oversteer.com/races/everything-to-know-about-the-las-vegas-grand-prix-including-track-stats-and-previous-winners/",
         ],
     },
+}
+
+# Checked chapters on hold: history.py still writes the Las Vegas hook ("From a hotel car park to the
+# Strip") on every history cover and caption, so these would post a false line. Move each entry into
+# HISTORY once that text comes from the GP's own facts. Nothing reads this dict.
+HISTORY_ON_HOLD = {
     "LUSAIL": {
         "chapters": [
             {"year": "2008", "number": "1st", "unit": "night race", "head": "MotoGP under the lights",
