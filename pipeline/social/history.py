@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import style as S
-from .captions import FOOTER, clean, event_tag
+from .captions import FOOTER, clean, event_tag, paragraphs
 from .gp_facts import HISTORY
 from .preview import (CYAN, FONT, GOLD, MUTED, TEXT, Card, Preview, ease, gp_name, set_event, times_text, tyre)
 from .render import FPS, H_POST, H_REEL, W, Reel
@@ -211,12 +211,15 @@ def carousel(p: Preview, out: Path) -> list[Path]:
 def caption(p: Preview) -> str:
     chs = HISTORY[p.title]["chapters"]
     q, r = times_text(p)
-    lines = [f"{p.title.title()} in numbers: F1 raced here in a hotel car park before it ever raced the Strip.", ""]
+    facts = []
     for ch in chs:
         u = f" {ch['unit']}" if ch["unit"] else ""
-        lines.append(f"{ch['year']}: {ch['number']}{u}. {ch['head']}. {ch['line']}.")
+        facts.append(f"📅 {ch['year']}: {ch['number']}{u}\n{ch['head']}. {ch['line']}.")
     srcs = sorted({s.strip() for ch in chs for s in ch["source"].split(";")})
-    lines += ["", "Sources: " + "; ".join(srcs) + ".", "",
-              f"{p.season}: Quali {q}, Race {r}, local time. Follow so you don't miss it.",
-              "", FOOTER, "", " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1History", "#RaceWeek"])]
-    return clean("\n".join(lines))
+    return clean(paragraphs(
+        f"🕰️ {p.title.title()} in numbers: F1 raced here in a hotel car park before it ever raced the Strip.",
+        *facts,
+        "📚 Sources: " + "; ".join(srcs) + ".",
+        f"⏰ {p.season}: Quali {q}, Race {r} (local time)",
+        "💾 Save this and follow so you don't miss it.\n💬 Which fact did you not know? Tell us below.",
+        FOOTER, " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1History", "#RaceWeek"])))

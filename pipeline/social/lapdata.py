@@ -17,7 +17,7 @@ from matplotlib.colors import LinearSegmentedColormap
 
 from . import preview as P
 from . import style as S
-from .captions import FOOTER, clean, event_tag
+from .captions import FOOTER, clean, drv, event_tag, paragraphs
 from .render import H_POST, lap_time
 
 SAMPLING = "OpenF1 car data, about 4 samples per second"
@@ -153,16 +153,20 @@ def braking_carousel(p, out: Path) -> list[Path]:
 def braking_caption(p) -> str:
     zs = zones(p)
     q, r = P.times_text(p)
-    lines = [f"{p.title.title()} has {len(zs)} braking zones. Here is every one, measured on the {lap_src(p)}.", ""]
+    big = max(zs, key=lambda z: z["shed"])
+    rows = []
     for n, z in enumerate(zs, 1):
         where = z["turn"] or f"{z['km']:.1f} km"
-        lines.append(f"Zone {n}, {where}: {z['entry']} km/h in, about {z['min']} km/h at the slowest point, gear {z['gear']}.")
-    big = max(zs, key=lambda z: z["shed"])
-    lines += ["", f"Biggest stop: zone {zs.index(big) + 1}, about {big['shed']} km/h shed.",
-              f"Data: {SAMPLING}, so the slowest point is within about 10 km/h.", "",
-              f"Quali {q}. Race {r}. Local time.", "Save this for race week.", "", FOOTER, "",
-              " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])]
-    return clean("\n".join(lines))
+        rows.append(f"Zone {n}, {where}: {z['entry']} → about {z['min']} km/h, gear {z['gear']}")
+    return clean(paragraphs(
+        f"🛑 {p.title.title()} has {len(zs)} braking zones. Here is every one.",
+        f"📊 Measured on the {lap_src(p).replace(p.driver, drv(p.driver, p.colors))}",
+        rows,
+        f"🔥 Biggest stop: zone {zs.index(big) + 1}, about {big['shed']} km/h shed",
+        f"ℹ️ {SAMPLING}, so the slowest point is within about 10 km/h.",
+        f"⏰ Quali {q}\n🏁 Race {r}\n(local time)",
+        "💾 Save this for race week.\n💬 Which stop is the hardest? Tell us below.",
+        FOOTER, " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])))
 
 
 # ---------------------------------------------------------------- the lap in data
@@ -250,14 +254,18 @@ def lap_caption(p) -> str:
     share = gear_share(p)
     g8 = max(share, key=share.get)
     q, r = P.times_text(p)
-    lines = [f"One lap of {p.title.title()}, in data: the {lap_src(p)}.", "",
-             f"Top speed {st['top_speed']} km/h. {share[g8]:.0f}% of the lap in {P.ordinal(g8)} gear.",
-             f"{st['flat_pct']}% of the lap flat out, the longest run {P.km(st['longest_flat_m'])} km without lifting.",
-             f"{st['braking_zones']} braking zones (shaded).", "",
-             "Speed on top, then throttle, brake and gear, all against distance.",
-             f"Data: {SAMPLING}.", "", f"Quali {q}. Race {r}. Local time.", "", FOOTER, "",
-             " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])]
-    return clean("\n".join(lines))
+    return clean(paragraphs(
+        f"📈 One lap of {p.title.title()}, in data",
+        f"🏎️ The {lap_src(p).replace(p.driver, drv(p.driver, p.colors))}",
+        [f"🚀 Top speed: {st['top_speed']} km/h",
+         f"⚙️ {share[g8]:.0f}% of the lap in {P.ordinal(g8)} gear",
+         f"🟢 {st['flat_pct']}% flat out, longest run {P.km(st['longest_flat_m'])} km without lifting",
+         f"🛑 {st['braking_zones']} braking zones (shaded)"],
+        "👀 Speed on top, then throttle, brake and gear, all against distance.",
+        f"ℹ️ Data: {SAMPLING}.",
+        f"⏰ Quali {q}\n🏁 Race {r}\n(local time)",
+        "💾 Save this one.\n💬 What surprises you most? Tell us below.",
+        FOOTER, " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])))
 
 
 # ---------------------------------------------------------------- gear map
@@ -314,8 +322,10 @@ def gear_caption(p) -> str:
     share = gear_share(p)
     top = max(share, key=share.get)
     q, r = P.times_text(p)
-    lines = [f"Gear map of {p.title.title()}: {share[top]:.0f}% of the lap in {P.ordinal(top)} gear.", "",
-             "Time in each gear: " + ", ".join(f"{P.ordinal(g)} {share[g]:.0f}%" for g in sorted(share)) + ".",
-             f"Measured on the {lap_src(p)}. Data: {SAMPLING}.", "", f"Quali {q}. Race {r}. Local time.", "", FOOTER, "",
-             " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])]
-    return clean("\n".join(lines))
+    return clean(paragraphs(
+        f"⚙️ Gear map of {p.title.title()}: {share[top]:.0f}% of the lap in {P.ordinal(top)} gear",
+        ["⏱️ Time in each gear"] + [f"{P.ordinal(g)}: {share[g]:.0f}%" for g in sorted(share)],
+        f"📊 Measured on the {lap_src(p).replace(p.driver, drv(p.driver, p.colors))}. Data: {SAMPLING}.",
+        f"⏰ Quali {q}\n🏁 Race {r}\n(local time)",
+        "💾 Save this for race week.\n💬 Guess the lowest gear used? Tell us below.",
+        FOOTER, " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])))

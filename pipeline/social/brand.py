@@ -12,7 +12,7 @@ from matplotlib.patches import Circle, FancyBboxPatch, Rectangle, Wedge
 
 from . import preview as P
 from . import style as S
-from .captions import FOOTER, clean, event_tag
+from .captions import FOOTER, clean, event_tag, paragraphs
 from .gp_facts import RACE_DAY, TYRES, trio
 from .render import H_POST, H_REEL, W
 
@@ -139,14 +139,14 @@ def race_day_caption(p) -> str:
     f = RACE_DAY[p.title]
     t = TYRES.get(p.title)
     q, r = P.times_text(p)
-    lines = [f"Race day in {p.title.title()}. Lights out {r}, local time.", "",
-             f"{f['laps']} laps of {f['lap_km']} km: {f['race_km']} km in all, {f['corners']} corners a lap.",
-             f"Lap record: {f['lap_record']}, {f['lap_record_by']}."]
-    if t:
-        lines.append(f"Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft.")
-    lines += [f"Sources: {f['source']}.", "", "Race decoded here after the flag. Follow so you don't miss it.",
-              "", FOOTER, "", " ".join(["#F1", "#Formula1", event_tag(p.event), "#RaceDay", "#F1Telemetry"])]
-    return clean("\n".join(lines))
+    return clean(paragraphs(
+        f"🏁 Race day in {p.title.title()}. Lights out {r}, local time.",
+        [f"🔁 {f['laps']} laps of {f['lap_km']} km", f"📏 {f['race_km']} km in all", f"↪️ {f['corners']} corners a lap",
+         f"⏱️ Lap record: {f['lap_record']}, {f['lap_record_by']}"]
+        + ([f"🛞 Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft"] if t else []),
+        f"📚 Sources: {f['source']}.",
+        "🔔 Race decoded here after the flag. Follow so you don't miss it.\n💬 Your winner? Tell us below.",
+        FOOTER, " ".join(["#F1", "#Formula1", event_tag(p.event), "#RaceDay", "#F1Telemetry"])))
 
 
 # ---------------------------------------------------------------- glyphs (original, line style)
