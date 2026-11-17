@@ -10,6 +10,19 @@ from __future__ import annotations
 COMPOUND_COLOR = {"SOFT": "#FF3333", "MEDIUM": "#FFF200", "HARD": "#F2F4F7",
                   "INTER": "#39B54A", "WET": "#00AEEF"}
 
+def trio(t: dict) -> str:
+    """Where the three nominated compounds sit in Pirelli's range: softest, hardest or middle."""
+    soft, hard = int(t["soft"][1:]), int(t["hard"][1:])
+    return "softest" if soft == t["range"] else "hardest" if hard == 1 else "middle"
+
+
+def streak_text(t: dict) -> str:
+    n = t.get("streak", 1)
+    if n > 1:
+        return f"for the {n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')} year running"
+    return "Pirelli's pick this year"
+
+
 TYRES = {
     "LAS VEGAS": {
         "hard": "C3", "medium": "C4", "soft": "C5",
@@ -41,8 +54,8 @@ TYRES = {
             "https://press.pirelli.com/2019-abu-dhabi-grand-prix--preview/",
         ],
     },
-    # LUSAIL left out on purpose: Pirelli gives Qatar the hardest trio (C1 C2 C3), but the tyre
-    # card and captions say "softest 3 of 5", which would be wrong for it.
+    # LUSAIL: Pirelli gives Qatar the hardest trio (C1 C2 C3); the cards now say "hardest 3 of 5"
+    # (see trio()), so the weekly facts task can add it.
 }
 
 # Race day card: official race format, hand checked.

@@ -13,7 +13,7 @@ from matplotlib.patches import Circle, FancyBboxPatch, Rectangle, Wedge
 from . import preview as P
 from . import style as S
 from .captions import FOOTER, clean, event_tag
-from .gp_facts import RACE_DAY, TYRES
+from .gp_facts import RACE_DAY, TYRES, trio
 from .render import H_POST, H_REEL, W
 
 
@@ -119,7 +119,8 @@ def race_day(p, out: Path) -> Path:
     c.text(0.5, top - 0.115, f"Lights out {r}, local time", 24, weight=300)
     tiles = [(str(f["laps"]), "LAPS"), (f["lap_km"], "KM A LAP"), (f["race_km"], "KM RACE DISTANCE"),
              (str(f["corners"]), "CORNERS"), (f["lap_record"], f"LAP RECORD, {f['lap_record_by']}"),
-             (f"{t['hard']} {t['medium']} {t['soft']}" if t else "", "TYRES, SOFTEST 3 OF 5")]
+             (f"{t['hard']} {t['medium']} {t['soft']}" if t else "",
+              f"TYRES, {trio(t).upper()} 3 OF {t['range']}" if t else "TYRES")]
     for k, (v, u) in enumerate(tiles):
         col, row = k % 2, k // 2
         x0, y0 = 0.07 + col * 0.44, 0.60 - row * 0.19
