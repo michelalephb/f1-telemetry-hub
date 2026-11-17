@@ -543,3 +543,10 @@ def test_tyre_trio_label():
     assert trio({"hard": "C1", "medium": "C2", "soft": "C3", "range": 5}) == "hardest"
     assert trio({"hard": "C2", "medium": "C3", "soft": "C4", "range": 5}) == "middle"
     assert streak_text({"streak": 4}) == "for the 4th year running" and streak_text({"streak": 1}) == "Pirelli's pick this year"
+
+
+def test_story_counter_ignores_feed_post_ids():
+    import inspect
+    from pipeline.social import hourly
+    src = inspect.getsource(hourly)
+    assert 'published_count(sb, f"{prefix}20")' in src and "published_count(sb, prefix)" not in src

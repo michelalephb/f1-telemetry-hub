@@ -281,8 +281,8 @@ def cmd_hourly(a) -> int:
         if ig is not None and published_count(sb, f"{prefix}{tag}"):
             log.info("%s%s already published: nothing more this %s", prefix, tag, "hour" if w["race_week"] else "day")
             return 0
-        k = published_count(sb, prefix) if ig is not None else 0
-        item = items[k % len(items)]
+        k = published_count(sb, f"{prefix}20") if ig is not None else 0   # only hourly or daily ids (prefix + date),
+        item = items[k % len(items)]                                      # not _HISTORY and the like
         img = render_story(p, item, out)
         jobs = [(f"{prefix}{tag}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
         checks |= {"story": f"{item[0]} {item[1] + 1}", "pool": len(items), "posted_before": k}
@@ -300,7 +300,7 @@ def daily_rewind(sb, ig, w: dict, now: datetime, a) -> int:
     if ig is not None and published_count(sb, f"{prefix}{now:%Y%m%d}"):
         log.info("today's rewind story is already out")
         return 0
-    k = published_count(sb, prefix) if ig is not None else 0
+    k = published_count(sb, f"{prefix}20") if ig is not None else 0
     img, item = None, None
     for j in range(len(items)):                      # skip sessions we have no data for
         item = items[(k + j) % len(items)]
