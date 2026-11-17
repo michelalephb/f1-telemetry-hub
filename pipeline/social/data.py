@@ -36,6 +36,7 @@ def session_meta(sb, sid: str) -> dict:
         raise StoryError(f"{sid}: status {s['status']}, nothing to post")
     e = rows(sb, "events", "event_name,country", season=s["season"], round=s["round"])
     s["event"] = e.iloc[0]["event_name"] if len(e) else f"Round {s['round']}"
+    s["country"] = e.iloc[0]["country"] if len(e) else ""
     s["code"] = s["session_code"]
     return s
 

@@ -311,6 +311,26 @@ def cmd_preview(a) -> int:
                 return 1
             v, c = history.reel(p, out)
             jobs.append((f"{sid}_HISTORY", "reel", {"video": v, "cover": c, "files": [], "caption": history.caption(p)}))
+        elif kind in ("braking", "lap", "gears", "raceday", "starthere"):
+            from . import brand, lapdata
+            if kind == "braking":
+                jobs.append((f"{sid}_BRAKING", "carousel", {"video": None, "cover": None, "files": lapdata.braking_carousel(p, out),
+                                                            "caption": lapdata.braking_caption(p)}))
+            elif kind == "lap":
+                jobs.append((f"{sid}_LAP", "carousel", {"video": None, "cover": None, "files": [lapdata.lap_in_data(p, out)],
+                                                        "caption": lapdata.lap_caption(p)}))
+            elif kind == "gears":
+                jobs.append((f"{sid}_GEARS", "carousel", {"video": None, "cover": None, "files": [lapdata.gear_map(p, out)],
+                                                          "caption": lapdata.gear_caption(p)}))
+            elif kind == "raceday":
+                if p.title not in brand.RACE_DAY:
+                    log.error("no checked race day facts for %s: add them to gp_facts.RACE_DAY", p.title)
+                    return 1
+                jobs.append((f"{sid}_RACEDAY", "carousel", {"video": None, "cover": None, "files": [brand.race_day(p, out)],
+                                                            "caption": brand.race_day_caption(p)}))
+            else:
+                jobs.append((f"{a.season}_BRAND_START", "carousel", {"video": None, "cover": None, "files": brand.start_here(out),
+                                                                     "caption": brand.start_here_caption()}))
         elif kind == "history_carousel":
             from . import history
             if not history.available(p):
@@ -375,7 +395,7 @@ def main(argv=None) -> int:
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
-    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel"))
+    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel", "braking", "lap", "gears", "raceday", "starthere"))
     ap.add_argument("--story", type=int, help="preview stories: post only story number N (1 = cover)")
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")

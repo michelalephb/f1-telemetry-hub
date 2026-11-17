@@ -52,6 +52,7 @@ class Preview:
     country: str = ""             # host country, for the flag
     gp: str = ""                  # "Las Vegas GP"
     last_year: dict = field(default_factory=dict)   # official results of last year's race here (Jolpica)
+    corners: list = field(default_factory=list)     # [(number, letter, x, y)] MultiViewer markers, same rotation as x, y
 
 
 # ---------------------------------------------------------------- numbers from the lap
@@ -210,6 +211,11 @@ def load(season: int, rnd: int) -> Preview:
                 ct, dist, sp, car["throttle"].to_numpy(float), car["brake"].to_numpy(float),
                 car["n_gear"].to_numpy(float), xr, yr, times)
     p.stats = lap_stats(p)
+    if len(markers):
+        mx, my = markers["X"].to_numpy(float), markers["Y"].to_numpy(float)
+        p.corners = [(int(n), str(l or ""), float(cx), float(cy)) for n, l, cx, cy in
+                     zip(markers["Number"], markers["Letter"].fillna(""),
+                         mx * math.cos(a) - my * math.sin(a), mx * math.sin(a) + my * math.cos(a))]
     p.country = sess[0].get("country") or ""
     p.gp = event.replace("Grand Prix", "GP")
     try:

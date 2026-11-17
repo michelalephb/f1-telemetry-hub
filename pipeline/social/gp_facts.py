@@ -25,6 +25,18 @@ TYRES = {
     },
 }
 
+# Race day card: official race format, hand checked.
+RACE_DAY = {
+    "LAS VEGAS": {
+        "laps": 50, "lap_km": "6.201", "race_km": "309.958", "corners": 17,
+        "lap_record": "1:33.365", "lap_record_by": "VER 2025",
+        "source": "Wikipedia, Las Vegas Grand Prix and Strip Circuit; Pirelli",
+        "refs": ["https://en.wikipedia.org/wiki/Las_Vegas_Grand_Prix",
+                 "https://en.wikipedia.org/wiki/Las_Vegas_Strip_Circuit",
+                 "https://www.lightsoutblog.com/f1-las-vegas-grand-prix-facts-statistics/"],
+    },
+}
+
 # History reel chapters: year, hero number, unit, headline, detail line, source.
 HISTORY = {
     "LAS VEGAS": {

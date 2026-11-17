@@ -471,3 +471,19 @@ def test_gp_facts_sourced_and_history_caption():
     assert history.available(p)
     c = history.caption(p)
     assert "Sources:" in c and "f1telemetryhub.com" in c and "-" not in c and "DRS" not in c
+
+
+def test_new_race_week_posts_render(tmp_path):
+    from pipeline.social import brand, lapdata, preview
+    p = preview_fixture()
+    p.country, p.gp = "United States", "Las Vegas GP"
+    zs = lapdata.zones(p)
+    assert len(zs) == p.stats["braking_zones"] and all(z["entry"] >= z["min"] for z in zs)
+    assert len(lapdata.braking_carousel(p, tmp_path / "b")) == len(zs) + 2
+    assert lapdata.lap_in_data(p, tmp_path).exists() and lapdata.gear_map(p, tmp_path).exists()
+    assert abs(sum(lapdata.gear_share(p).values()) - 100) < 0.5
+    assert brand.race_day(p, tmp_path).exists() and len(brand.start_here(tmp_path / "s")) == 4
+    assert len(brand.highlight_covers(tmp_path / "h")) == len(brand.HIGHLIGHTS)
+    for c in (lapdata.braking_caption(p), lapdata.lap_caption(p), lapdata.gear_caption(p), brand.race_day_caption(p),
+              brand.start_here_caption()):
+        assert "-" not in c and "f1telemetryhub.com" in c and "DRS" not in c

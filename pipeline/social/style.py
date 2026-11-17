@@ -92,13 +92,14 @@ def load_fonts() -> None:
             except Exception:
                 pass
     names = {f.name for f in font_manager.fontManager.ttflist}
-    HEAD = next((n for n in ("Space Grotesk", "Inter", "DejaVu Sans") if n in names), "DejaVu Sans")
-    MONO = next((n for n in ("JetBrains Mono", "DejaVu Sans Mono") if n in names), "DejaVu Sans Mono")
+    # Paddock Cyan (template v01): Inter everywhere, thin numbers; charts sit on the card gradient.
+    HEAD = next((n for n in ("Inter", "Space Grotesk", "DejaVu Sans") if n in names), "DejaVu Sans")
+    MONO = next((n for n in ("Inter", "JetBrains Mono", "DejaVu Sans Mono") if n in names), "DejaVu Sans Mono")
     plt.rcParams.update({
-        "font.family": HEAD, "text.color": INK, "axes.labelcolor": MUTE, "xtick.color": MUTE, "ytick.color": MUTE,
-        "axes.edgecolor": BORDER, "axes.facecolor": BG, "figure.facecolor": BG, "savefig.facecolor": BG,
-        "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.color": BORDER,
-        "grid.linewidth": 0.8, "font.size": 18,
+        "font.family": HEAD, "text.color": TEXT, "axes.labelcolor": MUTED, "xtick.color": MUTED, "ytick.color": MUTED,
+        "axes.edgecolor": "#3A4458", "axes.facecolor": "none", "figure.facecolor": BG, "savefig.facecolor": BG,
+        "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.color": "#1E2533",
+        "grid.linewidth": 0.6, "font.size": 18, "font.weight": 300,
     })
 
 

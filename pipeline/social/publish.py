@@ -205,8 +205,8 @@ class UploadPost:
             self._post("upload_photos", data, [("photos[]", ("story.jpg", h, "image/jpeg"))], request_id)
 
     def send_carousel(self, images: list[str], caption: str, request_id: str) -> None:
-        if not 2 <= len(images) <= 10:
-            raise IGError(f"a carousel needs 2 to 10 items, got {len(images)}")
+        if not 1 <= len(images) <= 10:          # one image is a single photo post
+            raise IGError(f"a photo post needs 1 to 10 images, got {len(images)}")
         handles = [open(p, "rb") for p in images]
         try:
             files = [("photos[]", (f"slide_{i + 1}.jpg", h, "image/jpeg")) for i, h in enumerate(handles)]
