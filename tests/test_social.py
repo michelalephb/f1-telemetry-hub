@@ -487,3 +487,19 @@ def test_new_race_week_posts_render(tmp_path):
     for c in (lapdata.braking_caption(p), lapdata.lap_caption(p), lapdata.gear_caption(p), brand.race_day_caption(p),
               brand.start_here_caption()):
         assert "-" not in c and "f1telemetryhub.com" in c and "DRS" not in c
+
+
+def test_hourly_pool_and_window(tmp_path):
+    from pipeline.social import hourly
+    from argparse import Namespace
+    p = preview_fixture()
+    p.country, p.gp = "United States", "Las Vegas GP"
+    items = hourly.pool(p)
+    assert len(items) == len(set(items)) and items[0][0] != items[1][0]          # no repeats, varied
+    img = hourly.render_story(p, ("gears", 0), tmp_path)
+    from PIL import Image
+    with Image.open(img) as im:
+        assert im.size == (1080, 1920)
+    a = Namespace(now="2026-11-18T03:05:00-08:00", dry_run=True, season=2026, round=21, out=str(tmp_path))
+    assert hourly.cmd_hourly(a) == 0                                              # 3 AM PT: outside the window
+    assert all(h in hourly.WINDOW for d in hourly.SLOTS.values() for h in d)
