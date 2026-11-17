@@ -282,35 +282,8 @@ def cmd_rewind(a) -> int:
     return finish(report, a.out, failed)
 
 
-def cmd_preview(a) -> int:
-    """Race week fact posts for one round: Reel, carousel and/or stories (original artwork, own data).
-    Stories go out one image per story, in order; each is recorded so none is ever posted twice."""
-    from . import preview
-    sb = store.client()
-    ig = connect(sb, a.dry_run)
-    if ig is not None and not getattr(ig, "sends_files", False):
-        log.error("preview posts need the Upload-Post publisher")
-        return 1
-    p = preview.load(a.season, a.round)
-    if a.dump:
-        import dataclasses
-        import pickle
-        Path(a.dump).write_bytes(pickle.dumps(dataclasses.asdict(p)))
-    sid = f"{a.season}_{a.round:02d}_PREVIEW"
-    checks = p.stats | {"driver": p.driver, "lap_s": p.lap_s, "ref_year": p.ref_year, "sessions": p.sessions, "last_year": p.last_year}
-    jobs = []
-    for kind in ([a.kind] if a.kind else ["reel", "carousel"]):
-        out = Path(a.out) / sid / f"preview_{kind}"
-        if kind == "reel":
-            v, c = preview.reel(p, out)
-            jobs.append((sid, "reel", {"video": v, "cover": c, "files": [], "caption": preview.caption(p, kind)}))
-        elif kind == "carousel":
-            jobs.append((sid, "carousel", {"video": None, "cover": None, "files": preview.carousel(p, out), "caption": preview.caption(p, kind)}))
-        else:
-            imgs = preview.stories(p, out)
-            pick = range(len(imgs)) if a.story is None else [a.story - 1]
-            for i in pick:
-                jobs.append((f"{sid}_S{i + 1:02d}", "story", {"video": None, "cover": None, "files": [imgs[i]], "caption": ""}))
+def publish_jobs(sb, ig, jobs: list, checks: dict) -> tuple[list, int]:
+    """Post each job once: skip what is published, resume what is queued, send the rest."""
     report, failed = [], 0
     for jsid, kind, built in jobs:
         entry = {"session_id": jsid, "kind": kind, "story": "session", "checks": checks, "caption": built["caption"]}
@@ -328,6 +301,82 @@ def cmd_preview(a) -> int:
                 send_files(sb, ig, jsid, kind, "session", built, (row or {}).get("attempts", 0) + 1, entry, report)
         except Exception:
             failed += 1
+    return report, failed
+
+
+def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story: int | None = None) -> list | None:
+    """(session id, kind, built) for each requested race week post; None when a GP lacks checked facts."""
+    from . import preview
+    jobs = []
+    for kind in kinds:
+        out = Path(out_dir) / sid / f"preview_{kind}"
+        if kind == "reel":
+            v, c = preview.reel(p, out)
+            jobs.append((sid, "reel", {"video": v, "cover": c, "files": [], "caption": preview.caption(p, kind)}))
+        elif kind == "history":
+            from . import history
+            if not history.available(p):
+                log.error("no checked history facts for %s: add them to gp_facts.HISTORY", p.title)
+                return None
+            v, c = history.reel(p, out)
+            jobs.append((f"{sid}_HISTORY", "reel", {"video": v, "cover": c, "files": [], "caption": history.caption(p)}))
+        elif kind in ("braking", "lap", "gears", "raceday", "starthere"):
+            from . import brand, lapdata
+            if kind == "braking":
+                jobs.append((f"{sid}_BRAKING", "carousel", {"video": None, "cover": None, "files": lapdata.braking_carousel(p, out),
+                                                            "caption": lapdata.braking_caption(p)}))
+            elif kind == "lap":
+                jobs.append((f"{sid}_LAP", "carousel", {"video": None, "cover": None, "files": [lapdata.lap_in_data(p, out)],
+                                                        "caption": lapdata.lap_caption(p)}))
+            elif kind == "gears":
+                jobs.append((f"{sid}_GEARS", "carousel", {"video": None, "cover": None, "files": [lapdata.gear_map(p, out)],
+                                                          "caption": lapdata.gear_caption(p)}))
+            elif kind == "raceday":
+                if p.title not in brand.RACE_DAY:
+                    log.error("no checked race day facts for %s: add them to gp_facts.RACE_DAY", p.title)
+                    return None
+                jobs.append((f"{sid}_RACEDAY", "carousel", {"video": None, "cover": None, "files": [brand.race_day(p, out)],
+                                                            "caption": brand.race_day_caption(p)}))
+            else:
+                jobs.append((f"{season}_BRAND_START", "carousel", {"video": None, "cover": None, "files": brand.start_here(out),
+                                                                     "caption": brand.start_here_caption()}))
+        elif kind == "history_carousel":
+            from . import history
+            if not history.available(p):
+                log.error("no checked history facts for %s: add them to gp_facts.HISTORY", p.title)
+                return None
+            jobs.append((f"{sid}_HISTORY", "carousel", {"video": None, "cover": None, "files": history.carousel(p, out),
+                                                        "caption": history.caption(p)}))
+        elif kind == "carousel":
+            jobs.append((sid, "carousel", {"video": None, "cover": None, "files": preview.carousel(p, out), "caption": preview.caption(p, kind)}))
+        else:
+            imgs = preview.stories(p, out)
+            pick = range(len(imgs)) if story is None else [story - 1]
+            for i in pick:
+                jobs.append((f"{sid}_S{i + 1:02d}", "story", {"video": None, "cover": None, "files": [imgs[i]], "caption": ""}))
+    return jobs
+
+
+def cmd_preview(a) -> int:
+    """Race week fact posts for one round: Reel, carousel and/or stories (original artwork, own data).
+    Stories go out one image per story, in order; each is recorded so none is ever posted twice."""
+    from . import preview
+    sb = store.client()
+    ig = connect(sb, a.dry_run)
+    if ig is not None and not getattr(ig, "sends_files", False):
+        log.error("preview posts need the Upload-Post publisher")
+        return 1
+    p = preview.load(a.season, a.round)
+    if a.dump:
+        import dataclasses
+        import pickle
+        Path(a.dump).write_bytes(pickle.dumps(dataclasses.asdict(p)))
+    sid = f"{a.season}_{a.round:02d}_PREVIEW"
+    checks = p.stats | {"driver": p.driver, "lap_s": p.lap_s, "ref_year": p.ref_year, "sessions": p.sessions, "last_year": p.last_year}
+    jobs = preview_jobs(p, sid, [a.kind] if a.kind else ["reel", "carousel"], a.out, a.season, a.story)
+    if jobs is None:
+        return 1
+    report, failed = publish_jobs(sb, ig, jobs, checks)
     return finish(report, a.out, failed)
 
 
@@ -352,26 +401,32 @@ def finish(report: list, out: str, failed: int) -> int:
         print(f"{r['status']:>20}  {r['session_id']}  {r['kind']:<8}  {r.get('permalink') or r.get('reason') or ''}")
         if r.get("checks"):
             print(f"{'checks':>20}  {json.dumps(r['checks'], default=str)}")
+        if r["status"].startswith("rendered") and r.get("caption"):        # dry run: show the exact caption
+            for line in r["caption"].splitlines():
+                print(f"{'caption |':>20}  {line}")
     return 1 if failed else 0
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.social")
-    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview"])
+    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview", "hourly"])
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
-    ap.add_argument("--kind", choices=KINDS + ("stories",))
+    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel", "braking", "lap", "gears", "raceday", "starthere"))
     ap.add_argument("--story", type=int, help="preview stories: post only story number N (1 = cover)")
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")
     ap.add_argument("--out", default="ig_out")
     ap.add_argument("--dump", help="preview: also save the lap data (pickle) for design work")
+    ap.add_argument("--now", help="hourly: pretend it is this time (ISO), for testing")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)   # request URLs can carry the token
     style.load_fonts()
-    return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh, "preview": cmd_preview}[a.cmd](a)
+    from .hourly import cmd_hourly
+    return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh, "preview": cmd_preview,
+            "hourly": cmd_hourly}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -34,26 +34,50 @@ def rotate_xy(x: np.ndarray, y: np.ndarray, deg: float) -> tuple[np.ndarray, np.
     return x * c - y * s, x * s + y * c
 
 
+_META: dict = {}            # session the figures being drawn belong to (flag, GP name, season)
+
+
 def new_fig(h: int):
-    fig = plt.figure(figsize=(W / DPI, h / DPI), dpi=DPI)
-    fig.patch.set_facecolor(S.BG)
-    return fig
+    """Paddock Cyan card: gradient, grain and chequered motif (template v01)."""
+    from .preview import Card
+    return Card(h, story=False).fig
 
 
 def chrome(fig, kicker: str, title: str, reel: bool = False) -> None:
-    """Header (kicker, title, logo) and footer (handle, site) on every slide and frame."""
-    top = 0.955 if reel else 0.94
-    fig.text(0.06, top, kicker.upper(), fontsize=22, color=S.CYAN, weight="bold", family=S.HEAD)
-    fig.text(0.06, top - (0.035 if reel else 0.05), title, fontsize=44, color=S.INK, weight="bold", family=S.HEAD)
-    logo = S.logo_image()
-    if logo is not None:
-        h = 0.05 if reel else 0.07
-        ax = fig.add_axes([0.80, top - h + 0.02, 0.14, h])
-        ax.imshow(logo)
+    """Header (flag, GP and season, session in champagne, hairline), title, and footer (logo left,
+    website right) on every slide and frame."""
+    from .preview import tracked
+    hfig = fig.get_figheight() * DPI
+    top = 0.93 if reel else 0.948
+    x = 0.06
+    flag = S.flag_image(_META.get("country"))
+    if flag is not None:
+        hh = 0.022 * H_POST / hfig
+        w = hh * 1.5 * hfig / W
+        ax = fig.add_axes([x, top - hh / 2, w, hh])
+        ax.imshow(flag, aspect="auto")
         ax.axis("off")
-    y = 0.025 if reel else 0.03
-    fig.text(0.06, y, S.HANDLE, fontsize=20, color=S.MUTE, family=S.MONO)
-    fig.text(0.94, y, S.SITE, fontsize=20, color=S.MUTE, family=S.MONO, ha="right")
+        x += w + 0.018
+    ev, _, sess = kicker.partition("|")
+    name = (_META.get("event") or ev.strip()).replace("Grand Prix", "GP").upper()
+    season = f" {_META['season']}" if _META.get("season") else ""
+    fig.text(x, top, tracked(name + season), fontsize=16, color=S.TEXT, weight=500, va="center", family=S.HEAD)
+    if sess.strip():
+        fig.text(0.94, top, tracked(sess.strip().upper()), fontsize=13, color=S.GOLD_HAIR, weight=500, ha="right",
+                 va="center", family=S.HEAD)
+    y = top - 0.028 * H_POST / hfig
+    fig.add_artist(plt.Line2D([0.06, 0.94], [y, y], transform=fig.transFigure, color=S.GOLD_HAIR, lw=0.6))
+    fig.text(0.06, y - (0.045 if not reel else 0.035), title, fontsize=40, color=S.TEXT, weight=300, va="center",
+             family=S.HEAD)
+    fy = 0.03 if not reel else 0.025
+    logo = S.logo_image()
+    lw = 0.20
+    lh = lw * W / S.LOGO_ASPECT / hfig
+    ax = fig.add_axes([0.06, fy - lh / 2, lw, lh])
+    ax.imshow(logo, aspect="auto", interpolation="lanczos")
+    ax.axis("off")
+    fig.text(0.94, fy, tracked(S.SITE.upper()), fontsize=13, color=S.MUTED, weight=500, ha="right", va="center",
+             family=S.HEAD)
 
 
 def track_axes(fig, rect):
@@ -81,7 +105,7 @@ def sector_map(ax, st: QualiStory, rot: float, lw: float = 10, labels: bool = Tr
         ax.plot(x, y, color=col, lw=lw, solid_capstyle="round")
         if labels:
             ax.annotate(f"S{k + 1}  {sector_text(g, st.a.code, st.b.code, '')}", (x[100], y[100]), xytext=(0, 0), textcoords="offset points",
-                        ha="center", va="center", fontsize=20, color=S.INK, family=S.MONO, weight="bold",
+                        ha="center", va="center", fontsize=20, color=S.INK, family=S.MONO, weight=400,
                         bbox=dict(boxstyle="round,pad=0.35", fc=S.CARD, ec=col, lw=2))
     ax.autoscale()
     ax.margins(0.08)
@@ -109,6 +133,8 @@ def save_jpeg(fig, path: Path) -> Path:
 # ---------------------------------------------------------------- carousel: qualifying
 
 def quali_carousel(st: QualiStory, meta: dict, rot: float, out: Path) -> list[Path]:
+    _META.clear()
+    _META.update(meta)
     a, b = st.a, st.b
     seg = "SQ3" if meta["code"] == "SQ" else "Q3"
     kick = f"{meta['event']}  |  {seg}"
@@ -117,8 +143,8 @@ def quali_carousel(st: QualiStory, meta: dict, rot: float, out: Path) -> list[Pa
     fig = new_fig(H_POST)
     chrome(fig, kick, f"{a.code} on pole by {st.official_gap_s:.3f} s")
     sector_map(track_axes(fig, [0.06, 0.25, 0.88, 0.57]), st, rot)
-    fig.text(0.06, 0.19, f"{a.code}  {lap_time(a.lap_ms)}", fontsize=34, color=a.color, family=S.MONO, weight="bold")
-    fig.text(0.06, 0.14, f"{b.code}  {lap_time(b.lap_ms)}", fontsize=34, color=b.color, family=S.MONO, weight="bold")
+    fig.text(0.06, 0.19, f"{a.code}  {lap_time(a.lap_ms)}", fontsize=34, color=a.color, family=S.MONO, weight=400)
+    fig.text(0.06, 0.14, f"{b.code}  {lap_time(b.lap_ms)}", fontsize=34, color=b.color, family=S.MONO, weight=400)
     fig.text(0.94, 0.165, "Track coloured by who won\neach official sector", fontsize=18, color=S.MUTE, ha="right", va="center")
     paths.append(save_jpeg(fig, out / "slide_1.jpg"))
 
@@ -136,7 +162,7 @@ def quali_carousel(st: QualiStory, meta: dict, rot: float, out: Path) -> list[Pa
     ax.legend(loc="lower right", frameon=False, fontsize=20)
     for c in (st.best_a, st.best_b):
         if c:
-            ax.text(c.apex_m, ax.get_ylim()[1], f"T{c.corner}", ha="center", va="bottom", color=S.PURPLE, fontsize=18)
+            ax.text(c.apex_m, ax.get_ylim()[1], f"T{c.corner}", ha="center", va="bottom", color=S.GOLD_HAIR, fontsize=18)
     paths.append(save_jpeg(fig, out / "slide_2.jpg"))
 
     for i, c in enumerate((st.best_a, st.best_b)):
@@ -160,7 +186,7 @@ def corner_zoom(ax, a: Lap, b: Lap, g, upto: float | None = None) -> None:
     for L, lw in ((a, 3.2), (b, 2.6)):
         m = (L.dist >= lo) & (L.dist <= (hi if upto is None else min(hi, upto)))
         ax.plot(L.dist[m] - g.apex_m, L.speed[m], color=L.color, lw=lw, label=L.code)
-    ax.axvline(0, color=S.PURPLE, lw=1.5, ls="--")
+    ax.axvline(0, color=S.GOLD_HAIR, lw=1.5, ls="--")
     ax.set_xlim(-250, 150)
     sp = np.concatenate([L.speed[(L.dist >= lo) & (L.dist <= hi)] for L in (a, b)])
     ax.set_ylim(max(0, sp.min() - 25), sp.max() + 15)
@@ -178,7 +204,7 @@ def cta_slide(kick: str, path: Path) -> Path:
         ax.imshow(logo)
         ax.axis("off")
     fig.text(0.5, 0.34, "Compare any two drivers, corner by corner", ha="center", fontsize=30)
-    fig.text(0.5, 0.27, S.SITE, ha="center", fontsize=40, color=S.CYAN, weight="bold", family=S.MONO)
+    fig.text(0.5, 0.27, S.SITE, ha="center", fontsize=40, color=S.CYAN, weight=400, family=S.MONO)
     fig.text(0.5, 0.21, "link in bio", ha="center", fontsize=22, color=S.MUTE)
     return save_jpeg(fig, path)
 
@@ -186,6 +212,8 @@ def cta_slide(kick: str, path: Path) -> Path:
 # ---------------------------------------------------------------- carousel: race
 
 def race_carousel(st: RaceStory, meta: dict, out: Path) -> list[Path]:
+    _META.clear()
+    _META.update(meta)
     kick = f"{meta['event']}  |  {'Sprint' if meta['code'] == 'S' else 'Race'}"
     w = st.winner
     paths = []
@@ -196,8 +224,8 @@ def race_carousel(st: RaceStory, meta: dict, out: Path) -> list[Path]:
         y = 0.62 - i * 0.13
         g = st.gaps.get(p["code"])
         gap = "" if i == 0 or g is None or not np.isfinite(g) else f"+{g:.3f} s"
-        fig.text(0.08, y, f"P{p['position']}", fontsize=60, color=S.GOLD if i == 0 else S.MUTE, weight="bold", family=S.MONO)
-        fig.text(0.30, y, p["code"], fontsize=60, color=p["color"], weight="bold", family=S.HEAD)
+        fig.text(0.08, y, f"P{p['position']}", fontsize=60, color=S.GOLD_HAIR if i == 0 else S.MUTE, weight=400, family=S.MONO)
+        fig.text(0.30, y, p["code"], fontsize=60, color=p["color"], weight=400, family=S.HEAD)
         fig.text(0.92, y + 0.01, gap, fontsize=34, ha="right", family=S.MONO)
     if st.mover:
         m = st.mover
@@ -230,7 +258,7 @@ def order_axes(ax, st: RaceStory, upto: int | None = None) -> None:
         ax.plot(laps[: k + 1], p[: k + 1], color=st.colors[code], lw=3.5, drawstyle="steps-post", label=code)
         last = p[: k + 1][np.isfinite(p[: k + 1])]
         if len(last):
-            ax.text(k + 0.6, last[-1], code, color=st.colors[code], va="center", fontsize=18, weight="bold")
+            ax.text(k + 0.6, last[-1], code, color=st.colors[code], va="center", fontsize=18, weight=400)
     ax.set_xlim(0, st.n_laps + 4)
     ax.set_ylim(min(22.5, np.nanmax([np.nanmax(st.positions[c]) for c in top[:5]]) + 1.5), 0.5)
     ax.set_yticks([1, 3, 5, 10, 15, 20])
@@ -290,6 +318,8 @@ def reel_fig(kick: str, title: str):
 
 
 def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float = 11.0) -> tuple[Path, Path]:
+    _META.clear()
+    _META.update(meta)
     a, b = st.a, st.b
     seg = "SQ3" if meta["code"] == "SQ" else "Q3"
     kick = f"{meta['event']}  |  {seg}"
@@ -297,9 +327,9 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
 
     # 1. Intro, 1.5 s
     fig = reel_fig(kick, "Pole lap vs P2")
-    fig.text(0.5, 0.56, a.code, ha="center", fontsize=150, color=a.color, weight="bold")
+    fig.text(0.5, 0.56, a.code, ha="center", fontsize=150, color=a.color, weight=400)
     fig.text(0.5, 0.49, "vs", ha="center", fontsize=50, color=S.MUTE)
-    fig.text(0.5, 0.39, b.code, ha="center", fontsize=150, color=b.color, weight="bold")
+    fig.text(0.5, 0.39, b.code, ha="center", fontsize=150, color=b.color, weight=400)
     fig.text(0.5, 0.30, "Same clock. Who wins where?", ha="center", fontsize=40, color=S.CYAN)
     r.add(fig, int(1.5 * FPS))
     cover = save_jpeg_reel(fig, out / "cover.jpg")
@@ -315,7 +345,7 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     axm.margins(0.05)
     dot_b, = axm.plot([], [], "o", ms=26, color=b.color, mec=S.BG, mew=3)
     dot_a, = axm.plot([], [], "o", ms=26, color=a.color, mec=S.BG, mew=3)
-    sec_txt = [fig.text(0.5, 0.465 - 0.03 * k, "", ha="center", fontsize=34, weight="bold", family=S.MONO) for k in range(3)]
+    sec_txt = [fig.text(0.5, 0.465 - 0.03 * k, "", ha="center", fontsize=34, weight=400, family=S.MONO) for k in range(3)]
     clock = fig.text(0.5, 0.375, "", ha="center", fontsize=26, color=S.MUTE, family=S.MONO)
     axs = fig.add_axes([0.12, 0.08, 0.82, 0.26])
     la, = axs.plot([], [], color=a.color, lw=3.5, label=a.code)
@@ -352,7 +382,7 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     axm = track_axes(fig, [0.30, 0.66, 0.40, 0.20])
     axm.plot(xa, ya, color=S.BORDER, lw=8)
     cx, cy = np.interp(c.apex_m, a.dist, xa), np.interp(c.apex_m, a.dist, ya)
-    axm.plot([cx], [cy], "o", ms=30, mfc="none", mec=S.PURPLE, mew=4)
+    axm.plot([cx], [cy], "o", ms=30, mfc="none", mec=S.GOLD_HAIR, mew=4)
     axm.margins(0.05)
     axz = fig.add_axes([0.12, 0.24, 0.82, 0.36])
     badge = fig.text(0.5, 0.13, "", ha="center", fontsize=34, family=S.MONO)
@@ -368,23 +398,25 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
 
     # 4. End card, 2.5 s
     fig = reel_fig(kick, "Pole position")
-    fig.text(0.5, 0.60, a.code, ha="center", fontsize=170, color=a.color, weight="bold")
+    fig.text(0.5, 0.60, a.code, ha="center", fontsize=170, color=a.color, weight=400)
     fig.text(0.5, 0.52, lap_time(a.lap_ms), ha="center", fontsize=64, family=S.MONO)
     fig.text(0.5, 0.46, f"{b.code} +{st.official_gap_s:.3f} s", ha="center", fontsize=44, color=b.color, family=S.MONO)
     fig.text(0.5, 0.33, "Full lap, every corner", ha="center", fontsize=40)
-    fig.text(0.5, 0.28, S.SITE, ha="center", fontsize=48, color=S.CYAN, weight="bold", family=S.MONO)
+    fig.text(0.5, 0.28, S.SITE, ha="center", fontsize=48, color=S.CYAN, weight=400, family=S.MONO)
     r.add(fig, int(2.5 * FPS))
     plt.close(fig)
     return r.close(), cover
 
 
 def race_reel(st: RaceStory, meta: dict, out: Path) -> tuple[Path, Path]:
+    _META.clear()
+    _META.update(meta)
     kick = f"{meta['event']}  |  {'Sprint' if meta['code'] == 'S' else 'Race'}"
     w = st.winner
     r = Reel(out / "reel.mp4")
 
     fig = reel_fig(kick, "How it was won")
-    fig.text(0.5, 0.50, w["code"], ha="center", fontsize=190, color=w["color"], weight="bold")
+    fig.text(0.5, 0.50, w["code"], ha="center", fontsize=190, color=w["color"], weight=400)
     fig.text(0.5, 0.41, f"wins the {'Sprint' if meta['code'] == 'S' else meta['event']}", ha="center", fontsize=42)
     r.add(fig, int(1.5 * FPS))
     cover = save_jpeg_reel(fig, out / "cover.jpg")
@@ -407,7 +439,7 @@ def race_reel(st: RaceStory, meta: dict, out: Path) -> tuple[Path, Path]:
         m = st.mover
         fig = reel_fig(kick, f"{m['code']} from P{m['grid']}")
         ax = fig.add_axes([0.13, 0.14, 0.81, 0.60])
-        big = fig.text(0.5, 0.78, "", ha="center", fontsize=90, weight="bold", color=m["color"], family=S.MONO)
+        big = fig.text(0.5, 0.78, "", ha="center", fontsize=90, weight=400, color=m["color"], family=S.MONO)
         n = int(4 * FPS)
         for i in range(n + 1):
             k = round(st.n_laps * i / n)
@@ -421,9 +453,9 @@ def race_reel(st: RaceStory, meta: dict, out: Path) -> tuple[Path, Path]:
         plt.close(fig)
 
     fig = reel_fig(kick, "Every lap of every GP")
-    fig.text(0.5, 0.52, w["code"], ha="center", fontsize=150, color=w["color"], weight="bold")
+    fig.text(0.5, 0.52, w["code"], ha="center", fontsize=150, color=w["color"], weight=400)
     fig.text(0.5, 0.44, "Race story, passes and pace", ha="center", fontsize=40)
-    fig.text(0.5, 0.37, S.SITE, ha="center", fontsize=48, color=S.CYAN, weight="bold", family=S.MONO)
+    fig.text(0.5, 0.37, S.SITE, ha="center", fontsize=48, color=S.CYAN, weight=400, family=S.MONO)
     r.add(fig, int(2.5 * FPS))
     plt.close(fig)
     return r.close(), cover

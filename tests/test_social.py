@@ -413,7 +413,7 @@ def test_preview_numbers_and_caption():
     b = np.array([0, 100, 100, 0, 100, 0, 0, 0, 0, 100, 0, 0])   # 0.25..1.0 one zone (gap 0.5 merged), 2.25 blip dropped
     assert preview.braking_zones(t, b) == 1
     c = preview.caption(p, "reel")
-    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Quali Fri 8 PM" in c and "zero DRS" in c
+    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Quali Fri 8 PM" in c and "DRS" not in c and "C3 hard" in c
 
 
 def test_preview_renders(tmp_path):
@@ -422,8 +422,18 @@ def test_preview_renders(tmp_path):
     slides = preview.carousel(p, tmp_path)
     assert len(slides) == 2 + len(preview.facts(p)) <= 10            # cover, facts, closing; Instagram max 10
     assert len(preview.stories(p, tmp_path / "s")) == len(slides)
-    p.last_year = {"pole": "NOR", "pole_ms": 107934, "winner": "VER"}
-    assert any(f["unit"] == "s" for f in preview.facts(p))          # flashback card appears with last year's pole
+    slow = round((p.lap_s + 14.6) * 1000)
+    p.last_year = {"pole": "NOR", "pole_ms": slow, "winner": "VER"}
+    assert not any("pole" in f["kicker"] or "rain" in f["kicker"] for f in preview.facts(p))   # conditions unknown: no card
+    p.last_year |= {"quali_wet": True, "pole_compound": "INTERMEDIATE"}
+    rain = [f for f in preview.facts(p) if "rain" in f["kicker"]]
+    assert rain and rain[0]["number"] == "14.6" and "intermediates" in rain[0]["line"]
+    p.last_year = {"pole": "RUS", "pole_ms": round((p.lap_s - 2.6) * 1000), "quali_wet": False}
+    dry = [f for f in preview.facts(p) if "pole vs race" in f["kicker"]]
+    assert dry and dry[0]["unit"] == "s faster" and dry[0]["number"] == "2.6"
+    p.last_year = {"pole": "NOR", "pole_ms": slow, "quali_wet": False}            # dry yet slower: odd, so no card
+    assert not any("pole" in f["kicker"] for f in preview.facts(p))
+    p.last_year = {"pole": "NOR", "pole_ms": slow, "quali_wet": True, "pole_compound": "INTERMEDIATE"}
     from PIL import Image
     with Image.open(preview.stories(p, tmp_path / "s2")[1]) as im:
         assert im.size == (1080, 1920)
@@ -439,3 +449,57 @@ def test_uploadpost_story_is_one_image_as_stories(tmp_path):
     UploadPost("KEY", "f1telemetryhub", session=http).send_story(str(img), "rid-1")
     path, data, files, _ = http.posts[0]
     assert path == "upload_photos" and data["media_type"] == "STORIES" and files == ["photos[]"]
+
+
+def test_logo_and_site_on_every_post():
+    from pipeline.social import style as S
+    img = S.logo_image()
+    assert img.shape[2] == 4 and abs(img.shape[1] / img.shape[0] - S.LOGO_ASPECT) < 0.01
+    assert S.SITE == "f1telemetryhub.com"
+    from pipeline.social import captions
+    assert "f1telemetryhub.com" in captions.FOOTER
+
+
+def test_gp_facts_sourced_and_history_caption():
+    from pipeline.social import gp_facts, history
+    for t in gp_facts.TYRES.values():
+        assert {"hard", "medium", "soft", "source", "refs"} <= t.keys() and t["refs"]
+    for h in gp_facts.HISTORY.values():
+        assert h["refs"] and all(ch["source"] and ch["number"] for ch in h["chapters"])
+    p = preview_fixture()
+    p.country, p.gp = "United States", "Las Vegas GP"
+    assert history.available(p)
+    c = history.caption(p)
+    assert "Sources:" in c and "f1telemetryhub.com" in c and "-" not in c and "DRS" not in c
+
+
+def test_new_race_week_posts_render(tmp_path):
+    from pipeline.social import brand, lapdata, preview
+    p = preview_fixture()
+    p.country, p.gp = "United States", "Las Vegas GP"
+    zs = lapdata.zones(p)
+    assert len(zs) == p.stats["braking_zones"] and all(z["entry"] >= z["min"] for z in zs)
+    assert len(lapdata.braking_carousel(p, tmp_path / "b")) == len(zs) + 2
+    assert lapdata.lap_in_data(p, tmp_path).exists() and lapdata.gear_map(p, tmp_path).exists()
+    assert abs(sum(lapdata.gear_share(p).values()) - 100) < 0.5
+    assert brand.race_day(p, tmp_path).exists() and len(brand.start_here(tmp_path / "s")) == 4
+    assert len(brand.highlight_covers(tmp_path / "h")) == len(brand.HIGHLIGHTS)
+    for c in (lapdata.braking_caption(p), lapdata.lap_caption(p), lapdata.gear_caption(p), brand.race_day_caption(p),
+              brand.start_here_caption()):
+        assert "-" not in c and "f1telemetryhub.com" in c and "DRS" not in c
+
+
+def test_hourly_pool_and_window(tmp_path):
+    from pipeline.social import hourly
+    from argparse import Namespace
+    p = preview_fixture()
+    p.country, p.gp = "United States", "Las Vegas GP"
+    items = hourly.pool(p)
+    assert len(items) == len(set(items)) and items[0][0] != items[1][0]          # no repeats, varied
+    img = hourly.render_story(p, ("gears", 0), tmp_path)
+    from PIL import Image
+    with Image.open(img) as im:
+        assert im.size == (1080, 1920)
+    a = Namespace(now="2026-11-18T03:05:00-08:00", dry_run=True, season=2026, round=21, out=str(tmp_path))
+    assert hourly.cmd_hourly(a) == 0                                              # 3 AM PT: outside the window
+    assert all(h in hourly.WINDOW for d in hourly.SLOTS.values() for h in d)
