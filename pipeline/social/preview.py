@@ -20,6 +20,7 @@ from matplotlib.colors import LinearSegmentedColormap
 
 from . import style as S
 from .gp_facts import COMPOUND_COLOR, TYRES, streak_text, trio
+from .captions import drv as _drv, paragraphs
 from .captions import FOOTER, clean, event_tag
 from .render import DPI, FPS, H_POST, H_REEL, W, Reel, lap_time
 
@@ -53,6 +54,7 @@ class Preview:
     gp: str = ""                  # "Las Vegas GP"
     last_year: dict = field(default_factory=dict)   # official results of last year's race here (Jolpica)
     corners: list = field(default_factory=list)     # [(number, letter, x, y)] MultiViewer markers, same rotation as x, y
+    colors: dict = field(default_factory=dict)      # driver code -> team colour hex in last year's race (caption dots)
 
 
 # ---------------------------------------------------------------- numbers from the lap
@@ -186,8 +188,11 @@ def load(season: int, rnd: int) -> Preview:
     win = [f"date>={(t0 - pd.Timedelta(seconds=1)).isoformat()}", f"date<={(t1 + pd.Timedelta(seconds=1)).isoformat()}"]
     car = oc.frame("car_data", win, session_key=int(ps["session_key"]), driver_number=drv)
     loc = oc.frame("location", win, session_key=int(ps["session_key"]), driver_number=drv)
-    info = oc.frame("drivers", session_key=int(ps["session_key"]), driver_number=drv)
+    grid = oc.frame("drivers", session_key=int(ps["session_key"]))
+    info = grid[grid["driver_number"] == drv] if len(grid) else grid
     code = info.iloc[0]["name_acronym"] if len(info) else str(drv)
+    colors = {r["name_acronym"]: "#" + str(r.get("team_colour") or "").lstrip("#") for _, r in grid.iterrows()
+              if r.get("team_colour")} if len(grid) else {}
 
     ct = (pd.to_datetime(car["date"], format="ISO8601", utc=True) - t0).dt.total_seconds().to_numpy()
     lt = (pd.to_datetime(loc["date"], format="ISO8601", utc=True) - t0).dt.total_seconds().to_numpy()
@@ -211,6 +216,7 @@ def load(season: int, rnd: int) -> Preview:
                 ct, dist, sp, car["throttle"].to_numpy(float), car["brake"].to_numpy(float),
                 car["n_gear"].to_numpy(float), xr, yr, times)
     p.stats = lap_stats(p)
+    p.colors = colors
     if len(markers):
         mx, my = markers["X"].to_numpy(float), markers["Y"].to_numpy(float)
         p.corners = [(int(n), str(l or ""), float(cx), float(cy)) for n, l, cx, cy in
@@ -724,18 +730,23 @@ def caption(p: Preview, kind: str) -> str:
     st = p.stats
     q, r = times_text(p)
     ly = p.last_year or {}
-    lines = [f"How fast is {p.title.title()}? {st['top_speed']} km/h fast.",
-             "",
-             f"On last year's fastest race lap ({p.driver}, {lap_time(round(p.lap_s * 1000))}): {st['flat_pct']}% of the lap flat out, "
-             f"one run of {km(st['longest_flat_m'])} km without lifting, and only {st['braking_zones']} braking zones.",
-             ]
+    c = p.colors
     t = TYRES.get(p.title)
-    if t:
-        lines.append(f"Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft. Pirelli's {trio(t)} 3 of {t['range']}, "
-                     f"{streak_text(t)}. {t['why']}.")
+    lap = [f"📊 Last year's fastest race lap: {_drv(p.driver, c)}, {lap_time(round(p.lap_s * 1000))}",
+           f"🚀 Top speed: {st['top_speed']} km/h",
+           f"🟢 Flat out: {st['flat_pct']}% of the lap",
+           f"📏 Longest run without lifting: {km(st['longest_flat_m'])} km",
+           f"🛑 Braking zones: {st['braking_zones']}"]
+    tyres = ([f"🛞 Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft",
+              f"Pirelli's {trio(t)} 3 of {t['range']}, {streak_text(t)}. {t['why']}."] if t else None)
+    last = None
     if ly.get("winner"):
-        lines.append(f"Last year: {ly['winner']} won" + (f", {ly['pole']} took pole" if ly.get("pole") else "") + ".")
-    lines += ["", f"Quali {q}. Race {r}. Local time.",
-              "Save this for race week and follow so you don't miss quali." if kind != "reel" else "Follow so you don't miss quali.",
-              "", FOOTER, "", " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])]
-    return clean("\n".join(lines))
+        last = f"🏆 Last year: {_drv(ly['winner'], c)} won" + (f", {_drv(ly['pole'], c)} took pole" if ly.get("pole") else "")
+    return clean(paragraphs(
+        f"🏎️ How fast is {p.title.title()}? {st['top_speed']} km/h fast.",
+        lap, tyres, last,
+        f"⏰ Quali {q}\n🏁 Race {r}\n(local time)",
+        "💾 Save this for race week and follow so you don't miss quali." if kind != "reel"
+        else "🔔 Follow so you don't miss quali.",
+        "💬 Where will pole be won? Tell us below.",
+        FOOTER, " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Telemetry", "#RaceWeek"])))
