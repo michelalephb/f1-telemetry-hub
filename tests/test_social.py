@@ -413,7 +413,7 @@ def test_preview_numbers_and_caption():
     b = np.array([0, 100, 100, 0, 100, 0, 0, 0, 0, 100, 0, 0])   # 0.25..1.0 one zone (gap 0.5 merged), 2.25 blip dropped
     assert preview.braking_zones(t, b) == 1
     c = preview.caption(p, "reel")
-    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Quali Fri 8 PM" in c and "zero DRS" in c
+    assert "300 km/h" in c and "#LasVegasGP" in c and "-" not in c and "Quali Fri 8 PM" in c and "DRS" not in c and "C3 hard" in c
 
 
 def test_preview_renders(tmp_path):
@@ -448,3 +448,16 @@ def test_logo_and_site_on_every_post():
     assert S.SITE == "f1telemetryhub.com"
     from pipeline.social import captions
     assert "f1telemetryhub.com" in captions.FOOTER
+
+
+def test_gp_facts_sourced_and_history_caption():
+    from pipeline.social import gp_facts, history
+    for t in gp_facts.TYRES.values():
+        assert {"hard", "medium", "soft", "source", "refs"} <= t.keys() and t["refs"]
+    for h in gp_facts.HISTORY.values():
+        assert h["refs"] and all(ch["source"] and ch["number"] for ch in h["chapters"])
+    p = preview_fixture()
+    p.country, p.gp = "United States", "Las Vegas GP"
+    assert history.available(p)
+    c = history.caption(p)
+    assert "Sources:" in c and "f1telemetryhub.com" in c and "-" not in c and "DRS" not in c

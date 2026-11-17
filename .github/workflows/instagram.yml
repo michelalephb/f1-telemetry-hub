@@ -18,7 +18,7 @@ on:
       mode: {description: "run, rewind or preview", default: "run"}
       round: {description: "preview: round of the coming Grand Prix", default: ""}
       session: {description: "Session id, e.g. 2026_20_Q (empty = sessions from the last 72 h)", default: ""}
-      kind: {description: "reel, carousel or stories (empty = reel and carousel)", default: ""}
+      kind: {description: "reel, carousel, stories or history (empty = reel and carousel)", default: ""}
       story: {description: "stories: only story number N (1 = cover), empty = all", default: ""}
       dry_run: {description: "Render only, post nothing", type: boolean, default: true}
 

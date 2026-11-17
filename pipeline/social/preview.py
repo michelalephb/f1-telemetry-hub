@@ -19,6 +19,7 @@ import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
 
 from . import style as S
+from .gp_facts import COMPOUND_COLOR, TYRES
 from .captions import FOOTER, clean, event_tag
 from .render import DPI, FPS, H_POST, H_REEL, W, Reel, lap_time
 
@@ -227,6 +228,7 @@ class Card:
         rng = np.random.default_rng(5)
         ax.imshow(rng.random((h // 4, W // 4)), cmap="gray", alpha=0.03, extent=[0, 1, 0, 1], aspect="auto")
         ax.axis("off")
+        chequer(self.fig, h)
         self.top = 0.875 if story else 0.948
         self.bottom = 0.14 if story else 0.035
 
@@ -295,6 +297,71 @@ class Card:
         self.fig.savefig(path, dpi=DPI, format="jpg", pil_kwargs={"quality": 94, "optimize": True})
         plt.close(self.fig)
         return path
+
+
+def chequer(fig, h: int, sq: int = 12):
+    """Chequered flag motif: a two row band along the top edge that fades out towards the centre,
+    and a faint waving field rising from the bottom right corner. Drawn behind everything."""
+    rgb = _rgb(TEXT)
+    # top band, full width, 2 squares tall
+    cols, rows = W // sq, 2
+    g = (np.add.outer(np.arange(rows), np.arange(cols)) % 2).astype(float)
+    x = np.linspace(0, 1, cols)
+    fade = np.clip((np.abs(x - 0.5) - 0.12) / 0.38, 0, 1) ** 1.4   # strong at both edges, gone in the middle
+    img = np.zeros((rows, cols, 4))
+    img[..., :3] = rgb
+    img[..., 3] = g * fade[None, :] * 0.45
+    ax = fig.add_axes([0, 1 - rows * sq / h, 1, rows * sq / h], zorder=-9)
+    ax.imshow(img, aspect="auto", interpolation="nearest", extent=[0, 1, 0, 1])
+    ax.axis("off")
+    # corner field: larger squares, sheared slightly so it reads as a flag in the wind
+    big = 3 * sq
+    cols, rows = int(0.46 * W / big), int(0.26 * h / big)
+    yy, xx = np.mgrid[0:rows, 0:cols]
+    wave = np.sin(xx / cols * math.pi * 1.5) * 0.9
+    g = ((xx + np.floor(yy + wave)) % 2).astype(float)
+    dx = (cols - 1 - xx) / cols
+    dy = yy / rows                                              # row 0 is the bottom
+    a = np.clip(1 - np.hypot(dx, dy) / 1.0, 0, 1) ** 2
+    img = np.zeros((rows, cols, 4))
+    img[..., :3] = rgb
+    img[..., 3] = g * a * 0.08
+    ax = fig.add_axes([1 - cols * big / W, 0, cols * big / W, rows * big / h], zorder=-9)
+    ax.imshow(img, aspect="auto", interpolation="nearest", origin="lower", extent=[0, 1, 0, 1])
+    ax.axis("off")
+
+
+def tyre(ax, cx: float, cy: float, r: float, compound: str, code: str, label: bool = True, alpha: float = 1.0):
+    """An original tyre glyph: rubber, a coloured sidewall band in the compound colour, rim, code in the hub."""
+    from matplotlib.patches import Circle, Wedge
+    col = COMPOUND_COLOR[compound]
+    ax.add_patch(Circle((cx, cy), r, fc="#14171D", ec="#3A4150", lw=1.2, alpha=alpha, zorder=5))
+    for a0 in (12, 102, 192, 282):                              # band with four short breaks, like sidewall text
+        ax.add_patch(Wedge((cx, cy), r * 0.80, a0, a0 + 78, width=r * 0.08, fc=col, ec="none", alpha=alpha, zorder=6))
+    ax.add_patch(Circle((cx, cy), r * 0.60, fc="#0B0E14", ec="#5A6272", lw=1.0, alpha=alpha, zorder=6))
+    ax.text(cx, cy, code, ha="center", va="center", color=TEXT, fontsize=r * 0.42 * _pt(ax), family=FONT,
+            weight=300, alpha=alpha, zorder=7)
+    if label:
+        ax.text(cx, cy - r * 1.32, compound, ha="center", va="center", color=col, fontsize=15, family=FONT,
+                weight=600, alpha=alpha, zorder=7)
+
+
+def _pt(ax) -> float:
+    """Points per data unit along x, for text sized to a glyph."""
+    fig = ax.figure
+    bb = ax.get_position()
+    x0, x1 = ax.get_xlim()
+    return bb.width * fig.get_figwidth() * 72 / (x1 - x0)
+
+
+def tyre_row(ax, t: dict, r: float = 1.0, labels: bool = True, alpha: float = 1.0):
+    """Hard, medium, soft side by side in data units: ax spans x 0..9, y -2.2..1.4."""
+    ax.set_xlim(0, 9)
+    ax.set_ylim(-2.2, 1.4)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    for i, k in enumerate(("hard", "medium", "soft")):
+        tyre(ax, 1.5 + 3 * i, 0, r, k.upper(), t[k], label=labels, alpha=alpha)
 
 
 def _rgb(hexs: str):
@@ -389,10 +456,17 @@ def facts(p: "Preview") -> list[dict]:
                         "line": f"Pole ({ly['pole']} {lap_time(ly['pole_ms'])}) was slower than the race's fastest lap",
                         "source": f"Fastest race lap: {p.driver} {lap_time(round(p.lap_s * 1000))}. Official results",
                         "draw": lambda ax: (base_line(ax, p), speed_line(ax, p, lw=6))})
-    out.append({"kicker": "New for 2026", "number": "0", "unit": "DRS zones",
-                "line": "Straight Mode wings and Overtake Mode replace it", "source": "2026 technical and sporting regulations",
-                "draw": lambda ax: (base_line(ax, p), speed_line(ax, p, lw=6))})
+    t = TYRES.get(p.title)
+    if t:
+        out.append({"kicker": "Tyres", "number": "3", "unit": f"softest of {t['range']}",
+                    "line": f"{t['hard']} {t['medium']} {t['soft']}, for the {ordinal(t['streak'])} year running",
+                    "source": f"{t['why']}. Source: {t['source']}", "tyres": t,
+                    "draw": lambda ax: tyre_row(ax, t)})
     return out
+
+
+def ordinal(n: int) -> str:
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 
 
 def brake_map(ax, p: "Preview"):
@@ -425,7 +499,12 @@ def cover(p: "Preview", h: int, story: bool, n_facts: int) -> Card:
     speed_line(ax, p, lw=3.6)
     q, r = times_text(p)
     y = 0.215 if not story else 0.27
-    c.rule(0.44, 0.56, y + 0.035)
+    t = TYRES.get(p.title)
+    if t:
+        tax = c.fig.add_axes([0.41, y + 0.022, 0.18, 0.05 * H_POST / h])
+        tyre_row(tax, t, labels=False)
+    else:
+        c.rule(0.44, 0.56, y + 0.035)
     c.text(0.5, y, f"{n_facts} FACTS BEFORE LIGHTS OUT", 18, color=CYAN, weight=600, track=True)
     c.text(0.5, y - 0.05, f"Quali {q}   |   Race {r}   |   local time", 17, color=MUTED, weight=400)
     c.footer("SWIPE  →" if not story else "TAP  →")
@@ -439,8 +518,12 @@ def fact_card(p: "Preview", f: dict, n: int, total: int, h: int, story: bool) ->
     c.kicker(t - 0.07, f["kicker"], n, total)
     c.number(t - (0.235 if not story else 0.195), f["number"], f["unit"], size=170 if not story else 180)
     c.text(0.5, t - (0.285 if not story else 0.235), f["line"], 24, weight=300)
-    rect = [0.10, 0.16, 0.80, 0.42] if not story else [0.08, 0.29, 0.84, 0.32]
-    f["draw"](track_ax(c, rect, p))
+    if "tyres" in f:
+        rect = [0.05, 0.19, 0.90, 0.42] if not story else [0.04, 0.28, 0.92, 0.34]
+        f["draw"](c.fig.add_axes(rect))
+    else:
+        rect = [0.10, 0.16, 0.80, 0.42] if not story else [0.08, 0.29, 0.84, 0.32]
+        f["draw"](track_ax(c, rect, p))
     c.text(0.5, (0.115 if not story else 0.235), f["source"], 14, color=MUTED, weight=300)
     c.footer("SWIPE  →" if not story else None)
     return c
@@ -531,7 +614,8 @@ def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
 
     q, rr = times_text(p)
     flashes = [(f"{st['top_speed']}", "km/h", "Top speed"), (f"{st['flat_pct']}", "% flat out", "Of the lap"),
-               (f"{st['braking_zones']}", "zones", "Braking per lap"), ("0", "DRS zones", "New for 2026")]
+               (km(st["longest_flat_m"]), "km", "Longest run without lifting"),
+               (f"{st['braking_zones']}", "zones", "Braking per lap")]
     for big, u, lbl in flashes:
         t1, t2 = c.number(0.25, big, u, size=150)
         t3 = c.text(0.5, 0.20, lbl.upper(), 18, color=MUTED, weight=500, track=True)
@@ -542,6 +626,21 @@ def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
             r.add(c.fig)
         for t in (t1, t2, t3):
             t.remove()
+    t = TYRES.get(p.title)
+    if t:                                                       # the tyres, so it reads F1 at a glance
+        tax = c.fig.add_axes([0.12, 0.175, 0.76, 0.12])
+        lbl = c.text(0.5, 0.345, f"TYRES  {t['hard']}  {t['medium']}  {t['soft']}", 18, color=CYAN, weight=600, track=True)
+        sub = c.text(0.5, 0.312, f"SOFTEST 3 OF {t['range']}", 15, color=MUTED, weight=500, track=True)
+        for i in range(int(1.4 * FPS)):
+            a_ = ease(i / (0.3 * FPS))
+            tax.clear()
+            tyre_row(tax, t, labels=True, alpha=a_)
+            lbl.set_alpha(a_)
+            sub.set_alpha(a_)
+            r.add(c.fig)
+        tax.remove()
+        lbl.remove()
+        sub.remove()
     c.text(0.5, 0.27, f"QUALI  {q.upper()}", 30, weight=300, track=False)
     c.text(0.5, 0.23, f"RACE  {rr.upper()}", 30, color=CYAN, weight=400)
     c.text(0.5, 0.195, "LOCAL TIME", 13, color=MUTED, weight=500, track=True)
@@ -558,8 +657,11 @@ def caption(p: Preview, kind: str) -> str:
              "",
              f"On last year's fastest race lap ({p.driver}, {lap_time(round(p.lap_s * 1000))}): {st['flat_pct']}% of the lap flat out, "
              f"one run of {km(st['longest_flat_m'])} km without lifting, and only {st['braking_zones']} braking zones.",
-             "And for 2026: zero DRS zones. Straight Mode and Overtake Mode take over.",
              ]
+    t = TYRES.get(p.title)
+    if t:
+        lines.append(f"Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft. Pirelli's softest 3 of {t['range']}, "
+                     f"for the {ordinal(t['streak'])} year running. {t['why']}.")
     if ly.get("winner"):
         lines.append(f"Last year: {ly['winner']} won" + (f", {ly['pole']} took pole" if ly.get("pole") else "") + ".")
     lines += ["", f"Quali {q}. Race {r}. Local time.",
