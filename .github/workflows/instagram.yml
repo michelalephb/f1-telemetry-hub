@@ -10,7 +10,7 @@ on:
     types: [completed]
   schedule:
     - cron: "41 17 * * 2"     # Tuesdays: off season rewind (does nothing while the season runs)
-    - cron: "4 * * * *"       # hourly race week posting (7 AM to 10 PM Pacific, see pipeline/social/hourly.py)
+    - cron: "4,19,34,49 * * * *"   # posting: 4 tries an hour, GitHub drops some scheduled runs; each hour posts once
   push:
     branches-ignore: [main]
     paths: ["pipeline/social/**", ".github/workflows/instagram.yml"]
@@ -74,7 +74,7 @@ jobs:
           fi
           ARGS=()
           [ "$DRY" = "true" ] && ARGS+=(--dry-run)
-          if [ "$SCHED" = "4 * * * *" ] || [ "$MODE" = "hourly" ]; then
+          if [ "$SCHED" = "4,19,34,49 * * * *" ] || [ "$MODE" = "hourly" ]; then
             [ -n "$ROUND" ] && ARGS+=(--round "$ROUND")
             [ -n "$NOW" ] && ARGS+=(--now "$NOW")
             python -m pipeline.social hourly "${ARGS[@]}"
