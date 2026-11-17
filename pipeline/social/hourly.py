@@ -1,9 +1,16 @@
-"""Hourly posting for race week: one post per hour inside the posting window.
+"""Always on Instagram cadence, for every Grand Prix of every season (rolls into the next season by
+itself). The workflow runs this at minute 4 of every hour.
 
-Fixed feed slots (Pacific time, days counted from qualifying day) take their hour; every other hour
-posts the next story from the week's pool, cycling so nothing repeats until the pool is used up.
-Each hour has its own session id, so a rerun in the same hour never posts twice. Automatic
-qualifying and race posts keep coming from the ingest trigger, on top of this.
+Race week (Monday of the week of qualifying until 3 h after the race start): one post per hour,
+7 AM to 10 PM Pacific. Fixed feed slots (counted in days from qualifying day) take their hour;
+every other hour posts the next story from that GP's pool.
+
+Every other week: one post a day at 9 AM Pacific: a story recapping the last Grand Prix (race,
+then qualifying, from our own data), then teasers for the next one.
+
+Every hour and every day has its own session id, so a rerun never posts twice. The automatic
+qualifying and race posts still follow each ingest, on top of this. Hand checked facts (tyres,
+history, race day) come from gp_facts.py; a GP without them still gets the data posts.
 """
 from __future__ import annotations
 
@@ -18,7 +25,10 @@ from PIL import Image
 log = logging.getLogger(__name__)
 
 TZ = ZoneInfo("America/Los_Angeles")
-WINDOW = range(7, 23)            # 7 AM to 10 PM PT: 16 posts a day (3 PM to 6 AM next day in Europe)
+UTC = ZoneInfo("UTC")
+WINDOW = range(7, 23)            # race week: 7 AM to 10 PM PT, 16 posts a day
+DAILY_HOUR = 9                   # other weeks: one post at 9 AM PT (6 PM in central Europe)
+RACE_OVER_H = 3                  # race week ends 3 h after the race start
 
 # day offset from qualifying day -> {PT hour: preview kind}
 SLOTS = {
@@ -30,10 +40,63 @@ SLOTS = {
 }
 
 
+# ---------------------------------------------------------------- calendar
+
+def calendar(oc, season: int) -> pd.DataFrame:
+    """Qualifying and race start of every round of a season (empty when not published yet)."""
+    from ..__main__ import schedule
+    try:
+        rows = schedule(oc, season)
+    except Exception as e:
+        log.warning("no %s calendar: %s", season, e)
+        return pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df["start"] = pd.to_datetime(df["start_utc"], utc=True)
+    out = []
+    for rnd, g in df.groupby("round"):
+        q = g[g["session_code"] == "Q"]["start"]
+        r = g[g["session_code"] == "R"]["start"]
+        if len(r):
+            out.append({"season": season, "round": int(rnd),
+                        "q": q.iloc[0] if len(q) else r.iloc[0] - pd.Timedelta(days=1), "r": r.iloc[0]})
+    return pd.DataFrame(out).sort_values("r").reset_index(drop=True) if out else pd.DataFrame()
+
+
+def where_are_we(oc, now: datetime, cals: list | None = None) -> dict | None:
+    """The next Grand Prix (this season, else next season), whether `now` is in its race week, the
+    last Grand Prix before it (for recaps) and every round already raced (for the season rewind).
+    round is None when no published calendar has a race ahead. None when there is no calendar at all."""
+    if cals is None:
+        cals = [calendar(oc, now.year - 1), calendar(oc, now.year), calendar(oc, now.year + 1)]
+    cals = [c for c in cals if not c.empty]
+    if not cals:
+        return None
+    cal = pd.concat(cals, ignore_index=True).sort_values("r").reset_index(drop=True)
+    ts = pd.Timestamp(now.astimezone(UTC))
+    done = cal[cal["r"] + pd.Timedelta(hours=RACE_OVER_H) < ts]
+    last = done.iloc[-1] if len(done) else None
+    out = {"season": None, "round": None, "q": None, "race_week": False, "days_to_q": None,
+           "last": (int(last["season"]), int(last["round"])) if last is not None else None,
+           "done": [(int(r["season"]), int(r["round"])) for _, r in done.iterrows()]}
+    ahead = cal[cal["r"] + pd.Timedelta(hours=RACE_OVER_H) >= ts]
+    if ahead.empty:
+        return out
+    nxt = ahead.iloc[0]
+    q_pt = nxt["q"].to_pydatetime().astimezone(TZ)
+    monday = (q_pt - timedelta(days=q_pt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    return out | {"season": int(nxt["season"]), "round": int(nxt["round"]), "q": q_pt, "race_week": now >= monday,
+                  "days_to_q": (q_pt - now).total_seconds() / 86400}
+
+
+# ---------------------------------------------------------------- stories
+
 def storyize(card: Path, out: Path) -> Path:
     """A 4:5 card centred on a 9:16 Paddock Cyan story background, inside the story safe zone."""
     from .preview import Card
     from .render import H_REEL, W
+    out.parent.mkdir(parents=True, exist_ok=True)
     bg = out.with_name(out.stem + "_bg.jpg")
     Card(H_REEL, story=True).save(bg)
     canvas = Image.open(bg).convert("RGB")
@@ -44,18 +107,21 @@ def storyize(card: Path, out: Path) -> Path:
     return out
 
 
-def pool(p) -> list[tuple[str, int]]:
-    """The week's story pool, interleaved by source so consecutive hours differ."""
+def pool(p) -> list[tuple]:
+    """Race week story pool for a GP, interleaved by source so consecutive hours differ.
+    p is None when the circuit has no previous race to draw the lap posts from."""
     from . import brand, history
-    groups = {
-        "preview": 8,
-        "braking": p.stats.get("braking_zones", 0) + 2,
-        "history": (len(history.HISTORY[p.title]["chapters"]) + 2) if history.available(p) else 0,
-        "start": 4,
-        "lap": 1,
-        "gears": 1,
-        "raceday": 1 if p.title in brand.RACE_DAY else 0,
-    }
+    groups = {"start": 4}
+    if p is not None:
+        groups = {
+            "preview": 8,
+            "braking": p.stats.get("braking_zones", 0) + 2,
+            "history": (len(history.HISTORY[p.title]["chapters"]) + 2) if history.available(p) else 0,
+            "start": 4,
+            "lap": 1,
+            "gears": 1,
+            "raceday": 1 if p.title in brand.RACE_DAY else 0,
+        }
     order = []
     for i in range(max(groups.values())):
         for g, n in groups.items():
@@ -64,12 +130,14 @@ def pool(p) -> list[tuple[str, int]]:
     return order
 
 
-def render_story(p, item: tuple[str, int], out: Path) -> Path:
+def render_story(p, item: tuple, out: Path) -> Path:
     from . import brand, history, lapdata, preview
-    g, i = item
+    g, i = item[0], item[1]
     out.mkdir(parents=True, exist_ok=True)
     if g == "preview":
         return preview.stories(p, out)[i]
+    if g == "recap":
+        return storyize(item[2], out / f"story_recap_{i + 1:02d}.jpg")
     if g == "braking":
         card = lapdata.braking_carousel(p, out / "src")[i]
     elif g == "history":
@@ -85,23 +153,22 @@ def render_story(p, item: tuple[str, int], out: Path) -> Path:
     return storyize(card, out / f"story_{g}_{i + 1:02d}.jpg")
 
 
-def next_round(oc, season: int, now_utc: datetime) -> tuple[int, datetime] | None:
-    """Round of the next Grand Prix whose race has not finished, and its qualifying start (PT)."""
-    from ..__main__ import schedule
-    rows = [s for s in schedule(oc, season)]
-    if not rows:
-        return None
-    df = pd.DataFrame(rows)
-    df["start"] = pd.to_datetime(df["start_utc"], utc=True)
-    races = df[df["session_code"] == "R"].sort_values("start")
-    nxt = races[races["start"] + pd.Timedelta(hours=3) >= pd.Timestamp(now_utc)]
-    if nxt.empty:
-        return None
-    rnd = int(nxt.iloc[0]["round"])
-    q = df[(df["round"] == rnd) & (df["session_code"] == "Q")]
-    if q.empty:
-        return None
-    return rnd, q.iloc[0]["start"].to_pydatetime().astimezone(TZ)
+def recap_cards(sb, season: int, rnd: int, out: Path) -> list[Path]:
+    """Race then qualifying carousel slides of a past round, rendered from our own data."""
+    from . import render
+    from .data import load_story
+    cards = []
+    for code in ("R", "Q"):
+        sid = f"{season}_{rnd:02d}_{code}"
+        try:
+            meta, st, rot = load_story(sb, sid)
+            if code == "R":
+                cards += render.race_carousel(st, meta, out / sid)[:-1]          # without the closing slide
+            else:
+                cards += render.quali_carousel(st, meta, rot, out / sid)[:-1]
+        except Exception as e:
+            log.info("no recap from %s: %s", sid, e)
+    return cards
 
 
 def published_count(sb, prefix: str) -> int:
@@ -110,60 +177,135 @@ def published_count(sb, prefix: str) -> int:
     return int(r.count or 0)
 
 
+REWIND_GAP_DAYS = 14             # next qualifying further away than this: daily season rewind instead
+
+
+def due(w: dict | None, now: datetime) -> bool:
+    """Is a post due this hour? Race week: every hour in the window. Otherwise: the daily hour."""
+    if w is None or now.hour not in WINDOW:
+        return False
+    return w["race_week"] or now.hour == DAILY_HOUR
+
+
+def rewinding(w: dict) -> bool:
+    """Off season or a long break: no race ahead, or the next qualifying is more than two weeks away."""
+    return w["round"] is None or (not w["race_week"] and (w["days_to_q"] or 0) > REWIND_GAP_DAYS)
+
+
+def rewind_items(w: dict) -> list[tuple]:
+    """Every race and qualifying of the latest season raced so far, three slides each, in order."""
+    if not w["done"]:
+        return []
+    season = w["done"][-1][0]
+    rounds = [r for s, r in w["done"] if s == season]
+    return [("rewind", n, (season, r, code, i)) for n, (r, code, i) in
+            enumerate((r, code, i) for r in rounds for code in ("R", "Q") for i in range(3))]
+
+
+def render_rewind(sb, item: tuple, out: Path) -> Path | None:
+    from . import render
+    from .data import load_story
+    season, rnd, code, i = item[2]
+    sid = f"{season}_{rnd:02d}_{code}"
+    try:
+        meta, st, rot = load_story(sb, sid)
+    except Exception as e:
+        log.info("no rewind from %s: %s", sid, e)
+        return None
+    slides = (render.race_carousel(st, meta, out / sid) if code == "R"
+              else render.quali_carousel(st, meta, rot, out / sid))[:-1]   # without the closing slide
+    return storyize(slides[min(i, len(slides) - 1)], out / f"story_rewind_{sid}_{i + 1}.jpg")
+
+
+# ---------------------------------------------------------------- command
+
 def cmd_hourly(a) -> int:
     from .. import store
-    from . import preview
-    from .__main__ import connect, finish, preview_jobs, publish_jobs, post_row
     from ..openf1 import OpenF1
+    from . import preview
+    from .__main__ import connect, finish, post_row, preview_jobs, publish_jobs
 
     now = datetime.fromisoformat(a.now).astimezone(TZ) if a.now else datetime.now(TZ)
     if now.hour not in WINDOW:
-        log.info("%s PT is outside the posting window %s to %s: nothing to do", now.strftime("%a %H:%M"),
-                 WINDOW.start, WINDOW.stop)
+        log.info("%s PT is outside the posting window: nothing to do", now.strftime("%a %H:%M"))
         return 0
+    w = where_are_we(OpenF1(), now)
+    if not due(w, now):
+        if w is None:
+            log.info("no F1 calendar published around %s: nothing to do", now.year)
+        else:
+            log.info("%s PT, not race week (next: %s round %s): the daily post is at %s:04",
+                     now.strftime("%a %H:%M"), w["season"], w["round"], DAILY_HOUR)
+        return 0
+
     sb = store.client()
     ig = connect(sb, a.dry_run)
     if ig is not None and not getattr(ig, "sends_files", False):
-        log.error("hourly posts need the Upload-Post publisher")
+        log.error("posts need the Upload-Post publisher")
         return 1
-    oc = OpenF1()
-    if a.round:
-        rnd, qstart = a.round, None
-        found = next_round(oc, a.season, now.astimezone(ZoneInfo("UTC")))
-        if found and found[0] == rnd:
-            qstart = found[1]
-    else:
-        found = next_round(oc, a.season, now.astimezone(ZoneInfo("UTC")))
-        if not found:
-            log.info("no Grand Prix ahead in %s: nothing to do", a.season)
-            return 0
-        rnd, qstart = found
-    p = preview.load(a.season, rnd)
-    sid = f"{a.season}_{rnd:02d}_PREVIEW"
-    checks = p.stats | {"round": rnd, "now_pt": now.isoformat(timespec="minutes")}
-    out = Path(a.out) / sid / f"hourly_{now:%Y%m%d%H}"
+    if rewinding(w):
+        return daily_rewind(sb, ig, w, now, a)
+    season, rnd = w["season"], w["round"]
+    try:
+        p = preview.load(season, rnd)
+    except Exception as e:                       # new circuit, or data not published yet
+        log.warning("no race week data for %s round %s: %s", season, rnd, e)
+        p = None
+    sid = f"{season}_{rnd:02d}_PREVIEW"
+    tag = f"{now:%Y%m%d%H}" if w["race_week"] else f"{now:%Y%m%d}"
+    out = Path(a.out) / sid / f"{'hourly' if w['race_week'] else 'daily'}_{tag}"
+    checks = {"season": season, "round": rnd, "now_pt": now.isoformat(timespec="minutes"), "race_week": w["race_week"],
+              "gp": p.title if p is not None else None}
 
-    slot = None
-    if qstart is not None:
-        off = (now.date() - qstart.date()).days
-        slot = SLOTS.get(off, {}).get(now.hour)
     jobs = None
-    if slot:
-        jobs = preview_jobs(p, sid, [slot], str(out), a.season)
-        if jobs:
-            jsid, kind, _ = jobs[0]
-            row = post_row(sb, jsid, kind, "session") if ig is not None else None
-            if row and row["status"] == "published":
-                log.info("slot %s already published, posting a story this hour instead", slot)
-                jobs = None
+    if w["race_week"] and p is not None:
+        slot = SLOTS.get((now.date() - w["q"].date()).days, {}).get(now.hour)
+        if slot:
+            jobs = preview_jobs(p, sid, [slot], str(out), season)
+            if jobs:
+                jsid, kind, _ = jobs[0]
+                row = post_row(sb, jsid, kind, "session") if ig is not None else None
+                if row and row["status"] == "published":
+                    log.info("slot %s already published: a story this hour instead", slot)
+                    jobs = None
+                else:
+                    checks["slot"] = slot
     if not jobs:
-        items = pool(p)
-        k = published_count(sb, f"{sid}_H") if ig is not None else 0
+        if w["race_week"]:
+            items, prefix = pool(p), f"{sid}_H"
+        else:
+            recap = recap_cards(sb, *w["last"], out / "recap") if w["last"] else []
+            teaser = [x for x in pool(p) if x[0] in ("history", "preview")][:6] if p is not None else []
+            items, prefix = [("recap", i, c) for i, c in enumerate(recap)] + teaser, f"{sid}_D"
+            if not items:
+                items = pool(None)
+        k = published_count(sb, prefix) if ig is not None else 0
         item = items[k % len(items)]
         img = render_story(p, item, out)
-        jobs = [(f"{sid}_H{now:%Y%m%d%H}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
+        jobs = [(f"{prefix}{tag}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
         checks |= {"story": f"{item[0]} {item[1] + 1}", "pool": len(items), "posted_before": k}
-    else:
-        checks |= {"slot": slot}
+    report, failed = publish_jobs(sb, ig, jobs, checks)
+    return finish(report, a.out, failed)
+
+
+def daily_rewind(sb, ig, w: dict, now: datetime, a) -> int:
+    """Off season or long break: one story a day walking back through the season, race by race."""
+    from .__main__ import finish, publish_jobs
+    items = rewind_items(w)
+    season = w["done"][-1][0] if w["done"] else now.year
+    prefix = f"{season}_REWIND_D"
+    out = Path(a.out) / f"{season}_REWIND" / f"daily_{now:%Y%m%d}"
+    k = published_count(sb, prefix) if ig is not None else 0
+    img, item = None, None
+    for j in range(len(items)):                      # skip sessions we have no data for
+        item = items[(k + j) % len(items)]
+        img = render_rewind(sb, item, out)
+        if img is not None:
+            break
+    if img is None:
+        item, img = ("start", 0), render_story(None, ("start", k % 4), out)
+    checks = {"mode": "season rewind", "now_pt": now.isoformat(timespec="minutes"), "next_round": w["round"],
+              "story": str(item[2] if len(item) > 2 else item), "pool": len(items), "posted_before": k}
+    jobs = [(f"{prefix}{now:%Y%m%d}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
     report, failed = publish_jobs(sb, ig, jobs, checks)
     return finish(report, a.out, failed)
