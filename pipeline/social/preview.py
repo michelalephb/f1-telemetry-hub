@@ -19,7 +19,7 @@ import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
 
 from . import style as S
-from .gp_facts import COMPOUND_COLOR, TYRES
+from .gp_facts import COMPOUND_COLOR, TYRES, streak_text, trio
 from .captions import FOOTER, clean, event_tag
 from .render import DPI, FPS, H_POST, H_REEL, W, Reel, lap_time
 
@@ -489,8 +489,8 @@ def facts(p: "Preview") -> list[dict]:
         out += pole_vs_race(p, ly)
     t = TYRES.get(p.title)
     if t:
-        out.append({"kicker": "Tyres", "number": "3", "unit": f"softest of {t['range']}",
-                    "line": f"{t['hard']} {t['medium']} {t['soft']}, for the {ordinal(t['streak'])} year running",
+        out.append({"kicker": "Tyres", "number": "3", "unit": f"{trio(t)} of {t['range']}",
+                    "line": f"{t['hard']} {t['medium']} {t['soft']}, {streak_text(t)}",
                     "source": f"{t['why']}. Source: {t['source']}", "tyres": t,
                     "draw": lambda ax: tyre_row(ax, t)})
     return out
@@ -701,7 +701,7 @@ def reel(p: Preview, out: Path, lap_s: float = 6.0) -> tuple[Path, Path]:
     if t:                                                       # the tyres, so it reads F1 at a glance
         tax = c.fig.add_axes([0.12, 0.175, 0.76, 0.12])
         lbl = c.text(0.5, 0.345, f"TYRES  {t['hard']}  {t['medium']}  {t['soft']}", 18, color=CYAN, weight=600, track=True)
-        sub = c.text(0.5, 0.312, f"SOFTEST 3 OF {t['range']}", 15, color=MUTED, weight=500, track=True)
+        sub = c.text(0.5, 0.312, f"{trio(t).upper()} 3 OF {t['range']}", 15, color=MUTED, weight=500, track=True)
         for i in range(int(1.4 * FPS)):
             a_ = ease(i / (0.3 * FPS))
             tax.clear()
@@ -731,8 +731,8 @@ def caption(p: Preview, kind: str) -> str:
              ]
     t = TYRES.get(p.title)
     if t:
-        lines.append(f"Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft. Pirelli's softest 3 of {t['range']}, "
-                     f"for the {ordinal(t['streak'])} year running. {t['why']}.")
+        lines.append(f"Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft. Pirelli's {trio(t)} 3 of {t['range']}, "
+                     f"{streak_text(t)}. {t['why']}.")
     if ly.get("winner"):
         lines.append(f"Last year: {ly['winner']} won" + (f", {ly['pole']} took pole" if ly.get("pole") else "") + ".")
     lines += ["", f"Quali {q}. Race {r}. Local time.",

@@ -535,3 +535,11 @@ def test_cadence_every_race_and_next_season():
     w = hourly.where_are_we(None, at("2027-03-02T16:04:00-08:00"), [c26, c27])         # 2027 opener race week
     assert (w["season"], w["round"], w["race_week"]) == (2027, 1, True)
     assert hourly.where_are_we(None, at("2027-12-31T09:04:00-08:00"), [])  is None
+
+
+def test_tyre_trio_label():
+    from pipeline.social.gp_facts import streak_text, trio
+    assert trio({"hard": "C3", "medium": "C4", "soft": "C5", "range": 5}) == "softest"
+    assert trio({"hard": "C1", "medium": "C2", "soft": "C3", "range": 5}) == "hardest"
+    assert trio({"hard": "C2", "medium": "C3", "soft": "C4", "range": 5}) == "middle"
+    assert streak_text({"streak": 4}) == "for the 4th year running" and streak_text({"streak": 1}) == "Pirelli's pick this year"
