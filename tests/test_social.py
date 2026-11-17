@@ -496,6 +496,7 @@ def test_hourly_pool_and_window(tmp_path):
     p.country, p.gp = "United States", "Las Vegas GP"
     items = hourly.pool(p)
     assert len(items) == len(set(items)) and items[0][0] != items[1][0]          # no repeats, varied
+    assert hourly.pool(None) == [("start", i) for i in range(4)]                  # new circuit: brand stories
     img = hourly.render_story(p, ("gears", 0), tmp_path)
     from PIL import Image
     with Image.open(img) as im:
@@ -503,3 +504,34 @@ def test_hourly_pool_and_window(tmp_path):
     a = Namespace(now="2026-11-18T03:05:00-08:00", dry_run=True, season=2026, round=21, out=str(tmp_path))
     assert hourly.cmd_hourly(a) == 0                                              # 3 AM PT: outside the window
     assert all(h in hourly.WINDOW for d in hourly.SLOTS.values() for h in d)
+
+
+def test_cadence_every_race_and_next_season():
+    import pandas as pd
+    from datetime import datetime
+    from pipeline.social import hourly
+    TZ = hourly.TZ
+    ts = lambda s: pd.Timestamp(s, tz="UTC")
+    c26 = pd.DataFrame([{"season": 2026, "round": 21, "q": ts("2026-11-21T04:00"), "r": ts("2026-11-22T04:00")},
+                        {"season": 2026, "round": 22, "q": ts("2026-11-28T18:00"), "r": ts("2026-11-29T16:00")},
+                        {"season": 2026, "round": 24, "q": ts("2026-12-05T14:00"), "r": ts("2026-12-06T13:00")}])
+    c27 = pd.DataFrame([{"season": 2027, "round": 1, "q": ts("2027-03-06T05:00"), "r": ts("2027-03-07T04:00")}])
+    at = lambda s: datetime.fromisoformat(s).astimezone(TZ)
+    w = hourly.where_are_we(None, at("2026-11-17T14:04:00-08:00"), [c26, c27])         # Vegas race week, Tuesday
+    assert (w["round"], w["race_week"]) == (21, True) and hourly.due(w, at("2026-11-17T14:04:00-08:00"))
+    w = hourly.where_are_we(None, at("2026-11-22T10:04:00-08:00"), [c26, c27])         # Sunday after Vegas
+    assert w["round"] == 22 and w["last"] == (2026, 21)
+    assert w["race_week"] is False                                                     # Qatar week starts Monday 23
+    assert hourly.due(w, at("2026-11-22T09:04:00-08:00")) and not hourly.due(w, at("2026-11-22T10:04:00-08:00"))
+    assert not hourly.rewinding(w)                                                     # one week gap: recap and teasers
+    w = hourly.where_are_we(None, at("2026-12-20T09:04:00-08:00"), [c26, c27])         # off season: 2027 round 1 next
+    assert (w["season"], w["round"], w["race_week"], w["last"]) == (2027, 1, False, (2026, 24))
+    assert hourly.due(w, at("2026-12-20T09:04:00-08:00")) and not hourly.due(w, at("2026-12-20T15:04:00-08:00"))
+    assert hourly.rewinding(w)                                                         # 2.5 months away: season rewind
+    items = hourly.rewind_items(w)
+    assert len(items) == 3 * 2 * 3 and items[0][2] == (2026, 21, "R", 0)                # 3 rounds raced, R and Q, 3 slides
+    w = hourly.where_are_we(None, at("2026-12-20T09:04:00-08:00"), [c26])               # 2027 calendar not out yet
+    assert w["round"] is None and hourly.rewinding(w) and hourly.due(w, at("2026-12-20T09:04:00-08:00"))
+    w = hourly.where_are_we(None, at("2027-03-02T16:04:00-08:00"), [c26, c27])         # 2027 opener race week
+    assert (w["season"], w["round"], w["race_week"]) == (2027, 1, True)
+    assert hourly.where_are_we(None, at("2027-12-31T09:04:00-08:00"), [])  is None

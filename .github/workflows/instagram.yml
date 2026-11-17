@@ -25,7 +25,8 @@ on:
       dry_run: {description: "Render only, post nothing", type: boolean, default: true}
 
 concurrency:
-  group: instagram
+  # dry runs (pushes, dry dispatches) queue apart, so they can never push a live post out of the queue
+  group: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run)) && 'instagram-dry' || 'instagram' }}
   cancel-in-progress: false
 
 permissions:
