@@ -266,10 +266,9 @@ def cmd_hourly(a) -> int:
                 jsid, kind, _ = jobs[0]
                 row = post_row(sb, jsid, kind, "session") if ig is not None else None
                 if row and row["status"] == "published":
-                    log.info("slot %s already published: a story this hour instead", slot)
-                    jobs = None
-                else:
-                    checks["slot"] = slot
+                    log.info("slot %s already published: nothing more this hour", slot)
+                    return 0
+                checks["slot"] = slot
     if not jobs:
         if w["race_week"]:
             items, prefix = pool(p), f"{sid}_H"
@@ -279,6 +278,9 @@ def cmd_hourly(a) -> int:
             items, prefix = [("recap", i, c) for i, c in enumerate(recap)] + teaser, f"{sid}_D"
             if not items:
                 items = pool(None)
+        if ig is not None and published_count(sb, f"{prefix}{tag}"):
+            log.info("%s%s already published: nothing more this %s", prefix, tag, "hour" if w["race_week"] else "day")
+            return 0
         k = published_count(sb, prefix) if ig is not None else 0
         item = items[k % len(items)]
         img = render_story(p, item, out)
@@ -295,6 +297,9 @@ def daily_rewind(sb, ig, w: dict, now: datetime, a) -> int:
     season = w["done"][-1][0] if w["done"] else now.year
     prefix = f"{season}_REWIND_D"
     out = Path(a.out) / f"{season}_REWIND" / f"daily_{now:%Y%m%d}"
+    if ig is not None and published_count(sb, f"{prefix}{now:%Y%m%d}"):
+        log.info("today's rewind story is already out")
+        return 0
     k = published_count(sb, prefix) if ig is not None else 0
     img, item = None, None
     for j in range(len(items)):                      # skip sessions we have no data for
