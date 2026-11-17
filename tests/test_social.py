@@ -439,3 +439,12 @@ def test_uploadpost_story_is_one_image_as_stories(tmp_path):
     UploadPost("KEY", "f1telemetryhub", session=http).send_story(str(img), "rid-1")
     path, data, files, _ = http.posts[0]
     assert path == "upload_photos" and data["media_type"] == "STORIES" and files == ["photos[]"]
+
+
+def test_logo_and_site_on_every_post():
+    from pipeline.social import style as S
+    img = S.logo_image()
+    assert img.shape[2] == 4 and abs(img.shape[1] / img.shape[0] - S.LOGO_ASPECT) < 0.01
+    assert S.SITE == "f1telemetryhub.com"
+    from pipeline.social import captions
+    assert "f1telemetryhub.com" in captions.FOOTER

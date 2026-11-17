@@ -73,7 +73,9 @@ def flag_image(country: str | None):
 
 HANDLE = "@f1telemetryhub"
 SITE = "f1telemetryhub.com"
-LOGO = Path(__file__).resolve().parents[2] / "web" / "public" / "logo.png"
+# Michel's wordmark (03_logo_black.png), recoloured to TEXT for the dark cards. Every post carries it.
+LOGO = Path(__file__).resolve().parent / "assets" / "f1th_logo_white_20261116_v01.png"
+LOGO_ASPECT = 2190 / 300
 
 HEAD = "DejaVu Sans"
 MONO = "DejaVu Sans Mono"
@@ -101,9 +103,7 @@ def load_fonts() -> None:
 
 
 def logo_image():
-    if LOGO.exists():
-        try:
-            return plt.imread(str(LOGO))
-        except Exception:
-            return None
-    return None
+    """Fails loudly: no post may go out without the logo."""
+    if not LOGO.exists():
+        raise FileNotFoundError(f"brand logo missing: {LOGO}")
+    return plt.imread(str(LOGO))

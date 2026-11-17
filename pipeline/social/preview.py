@@ -270,10 +270,25 @@ class Card:
         t2.set_x(x0 + w1)
         return t1, t2
 
+    def logo(self, x: float, y: float, w: float, ha: str = "left"):
+        """The wordmark, w wide (figure fraction), vertically centred on y."""
+        img = S.logo_image()
+        if img is None:
+            return
+        h = w * W / S.LOGO_ASPECT / self.h
+        x0 = x - w / 2 if ha == "center" else x - w if ha == "right" else x
+        ax = self.fig.add_axes([x0, y - h / 2, w, h])
+        ax.imshow(img, aspect="auto", interpolation="lanczos")
+        ax.axis("off")
+
     def footer(self, right: str | None = None):
-        self.text(0.06, self.bottom, S.HANDLE, 14, color=MUTED, weight=400, ha="left")
+        """Logo left, website centre, optional cue right. On every card, every format."""
+        y = self.bottom
+        self.logo(0.06, y, 0.20)
+        self.text(0.5 if right else 0.94, y, S.SITE.upper(), 13, color=MUTED, weight=500,
+                  ha="center" if right else "right", track=True)
         if right:
-            self.text(0.94, self.bottom, right, 14, color=CYAN, weight=600, ha="right", track=True)
+            self.text(0.94, y, right, 14, color=CYAN, weight=600, ha="right", track=True)
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -448,8 +463,8 @@ def closing(p: "Preview", h: int, story: bool) -> Card:
     c.text(0.5, 0.33, "EVERY SESSION", 34, weight=200, track=True)
     c.text(0.5, 0.285, "DECODED", 34, color=CYAN, weight=300, track=True)
     c.rule(0.45, 0.55, 0.245)
-    c.text(0.5, 0.20, "Follow so you don't miss quali", 22, weight=400)
-    c.footer(S.SITE.upper() if not story else None)
+    c.text(0.5, 0.20, f"Follow {S.HANDLE} so you don't miss quali", 22, weight=400)
+    c.footer()
     return c
 
 
