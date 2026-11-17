@@ -409,7 +409,7 @@ def finish(report: list, out: str, failed: int) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.social")
-    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview", "hourly"])
+    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview", "hourly", "metrics", "optimize"])
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
@@ -425,8 +425,9 @@ def main(argv=None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)   # request URLs can carry the token
     style.load_fonts()
     from .hourly import cmd_hourly
+    from .metrics import cmd_metrics, cmd_optimize
     return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh, "preview": cmd_preview,
-            "hourly": cmd_hourly}[a.cmd](a)
+            "hourly": cmd_hourly, "metrics": cmd_metrics, "optimize": cmd_optimize}[a.cmd](a)
 
 
 if __name__ == "__main__":
