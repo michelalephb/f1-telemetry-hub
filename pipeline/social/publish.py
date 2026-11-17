@@ -163,6 +163,25 @@ class UploadPost:
         ig = next((x for x in body.get("results") or [] if x.get("platform") == "instagram"), None)
         return body.get("status", "pending"), ig
 
+    def post_analytics(self, request_id: str) -> dict | None:
+        """Instagram numbers for a post we published (likes, comments, saves, shares, reach, views)."""
+        r = self.http.get(f"{UP_HOST}/uploadposts/post-analytics/{request_id}", headers=self._headers(),
+                          params={"platform": "instagram"}, timeout=60)
+        if r.status_code == 404:
+            return None
+        if r.status_code >= 400:
+            raise IGError(f"upload-post analytics: HTTP {r.status_code}: {r.text[:200]}")
+        ig = (r.json().get("platforms") or {}).get("instagram") or {}
+        m = ig.get("post_metrics")
+        return dict(m, media_product_type=ig.get("media_product_type")) if m else None
+
+    def profile_analytics(self) -> dict | None:
+        r = self.http.get(f"{UP_HOST}/analytics/{self.user}", headers=self._headers(),
+                          params={"platforms": "instagram"}, timeout=60)
+        if r.status_code >= 400:
+            raise IGError(f"upload-post profile analytics: HTTP {r.status_code}: {r.text[:200]}")
+        return r.json().get("instagram")
+
     def wait(self, request_id: str, max_s: float | None = None) -> dict:
         """Waits for Upload-Post's final word. A failed Instagram result only counts once the request
         is completed (intermediate entries can report success false while still processing)."""

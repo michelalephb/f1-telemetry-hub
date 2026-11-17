@@ -107,7 +107,7 @@ def storyize(card: Path, out: Path) -> Path:
     return out
 
 
-def pool(p) -> list[tuple]:
+def pool(p, weights: dict | None = None) -> list[tuple]:
     """Race week story pool for a GP: only cards that carry data (Michel, 17 Nov: "informative technical or
     historical info people can learn from and save, less marketing"). No brand slides, no title covers,
     no closing cards. Interleaved by source so consecutive hours differ.
@@ -124,11 +124,15 @@ def pool(p) -> list[tuple]:
         "gears": [0],
         "raceday": [0] if p.title in brand.RACE_DAY else [],
     }
-    order = []
-    for i in range(max(len(v) for v in groups.values())):
+    # weekly optimiser: a group with weight w gets w turns per round (more of what people save and share)
+    w = {g: max(1, int((weights or {}).get(g, 1))) for g in groups}
+    order, pos = [], {g: 0 for g in groups}
+    while any(pos[g] < len(idx) for g, idx in groups.items()):
         for g, idx in groups.items():
-            if i < len(idx):
-                order.append((g, idx[i]))
+            for _ in range(w[g]):
+                if pos[g] < len(idx):
+                    order.append((g, idx[pos[g]]))
+                    pos[g] += 1
     return order
 
 
@@ -272,8 +276,9 @@ def cmd_hourly(a) -> int:
                     return 0
                 checks["slot"] = slot
     if not jobs:
+        from .metrics import weights
         if w["race_week"]:
-            items, prefix = pool(p), f"{sid}_H"
+            items, prefix = pool(p, weights(sb)), f"{sid}_H"
         else:
             recap = recap_cards(sb, *w["last"], out / "recap") if w["last"] else []
             teaser = [x for x in pool(p) if x[0] in ("history", "preview")][:6] if p is not None else []
@@ -288,7 +293,13 @@ def cmd_hourly(a) -> int:
         img = render_story(p, item, out)
         jobs = [(f"{prefix}{tag}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
         checks |= {"story": f"{item[0]} {item[1] + 1}", "pool": len(items), "posted_before": k}
+        content = f"{item[0]} {item[1] + 1}"
+    else:
+        content = checks.get("slot")
     report, failed = publish_jobs(sb, ig, jobs, checks)
+    if ig is not None and content:                    # what was shown, for the weekly optimiser
+        for jsid, kind, _ in jobs:
+            sb.table("ig_posts").update({"content": content}).eq("session_id", jsid).eq("kind", kind).execute()
     return finish(report, a.out, failed)
 
 
