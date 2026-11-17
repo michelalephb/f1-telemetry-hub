@@ -496,6 +496,7 @@ def test_hourly_pool_and_window(tmp_path):
     p.country, p.gp = "United States", "Las Vegas GP"
     items = hourly.pool(p)
     assert len(items) == len(set(items)) and items[0][0] != items[1][0]          # no repeats, varied
+    assert not any(g == "start" for g, _ in items) and ("preview", 0) not in items  # data cards only
     assert hourly.pool(None) == [("start", i) for i in range(4)]                  # new circuit: brand stories
     img = hourly.render_story(p, ("gears", 0), tmp_path)
     from PIL import Image

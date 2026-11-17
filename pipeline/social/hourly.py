@@ -108,25 +108,27 @@ def storyize(card: Path, out: Path) -> Path:
 
 
 def pool(p) -> list[tuple]:
-    """Race week story pool for a GP, interleaved by source so consecutive hours differ.
-    p is None when the circuit has no previous race to draw the lap posts from."""
+    """Race week story pool for a GP: only cards that carry data (Michel, 17 Nov: "informative technical or
+    historical info people can learn from and save, less marketing"). No brand slides, no title covers,
+    no closing cards. Interleaved by source so consecutive hours differ.
+    p is None when the circuit has no previous race to draw the lap posts from: brand stories as fallback."""
     from . import brand, history
-    groups = {"start": 4}
-    if p is not None:
-        groups = {
-            "preview": 8,
-            "braking": p.stats.get("braking_zones", 0) + 2,
-            "history": (len(history.HISTORY[p.title]["chapters"]) + 2) if history.available(p) else 0,
-            "start": 4,
-            "lap": 1,
-            "gears": 1,
-            "raceday": 1 if p.title in brand.RACE_DAY else 0,
-        }
+    if p is None:
+        return [("start", i) for i in range(4)]
+    nz = p.stats.get("braking_zones", 0)
+    groups = {
+        "preview": list(range(1, 8)),                                   # facts and session times, not the cover
+        "braking": list(range(0, nz + 2)),                              # zone map, every zone, the table
+        "history": list(range(1, len(history.HISTORY[p.title]["chapters"]) + 1)) if history.available(p) else [],
+        "lap": [0],
+        "gears": [0],
+        "raceday": [0] if p.title in brand.RACE_DAY else [],
+    }
     order = []
-    for i in range(max(groups.values())):
-        for g, n in groups.items():
-            if i < n:
-                order.append((g, i))
+    for i in range(max(len(v) for v in groups.values())):
+        for g, idx in groups.items():
+            if i < len(idx):
+                order.append((g, idx[i]))
     return order
 
 
