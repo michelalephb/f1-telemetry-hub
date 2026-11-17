@@ -58,16 +58,16 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'grand-slams', title: 'Grand slams', file: 'grand_slams', search: ['driver', 'gp', 'team'],
-    note: 'Pole position, win, fastest lap and every lap led, in the same race.',
+    note: 'Pole position, win, fastest lap and every lap led, in the same race. * Documented correction to F1DB: Russell, Azerbaijan 2026 is not flagged in F1DB v2026.20.0; Wikipedia lists it and the lap timing shows him first across the line on every lap.',
     rows: (d) => ((d as { races: Row[] }).races ?? []).slice().reverse(),
     cols: [
       { key: 'year', label: 'Year', num: true }, { key: 'round', label: 'Round', num: true }, { key: 'gp', label: 'Grand Prix' },
-      { key: 'driver', label: 'Driver' }, { key: 'team', label: 'Team' },
+      { key: 'driver', label: 'Driver', fmt: (r) => `${r.driver}${r.corrected ? ' *' : ''}` }, { key: 'team', label: 'Team' },
     ],
   },
   {
     id: 'eras', title: 'Eras', file: 'eras',
-    note: 'Race wins by decade: the three most successful teams and engine makers, share of the decade\'s races.',
+    note: 'Race wins by decade: the three most successful teams and engine makers, share of the decade\'s races. A shared drive (1951, 1956, 1957) counts once.',
     rows: (d) => (d as Row[]).slice().reverse(),
     cols: [
       { key: 'decade', label: 'Decade', fmt: (r) => `${r.decade}s` }, { key: 'races', label: 'Races', num: true },
@@ -77,7 +77,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'circuits', title: 'Circuits', file: 'circuits', search: ['circuit', 'place', 'country', 'top_driver', 'top_team'],
-    note: 'Every circuit that has held a championship race, most recently used first.',
+    note: 'Every circuit that has held a championship race, most recently used first. Ties for most wins list every name (more than three: the count). A shared drive (1951, 1956, 1957) counts once for the race and the team.',
     cols: [
       { key: 'circuit', label: 'Circuit' }, { key: 'country', label: 'Country' }, { key: 'races', label: 'Races', num: true },
       { key: 'first', label: 'Years', fmt: (r) => `${r.first} to ${r.last}` },
