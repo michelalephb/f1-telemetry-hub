@@ -311,6 +311,13 @@ def cmd_preview(a) -> int:
                 return 1
             v, c = history.reel(p, out)
             jobs.append((f"{sid}_HISTORY", "reel", {"video": v, "cover": c, "files": [], "caption": history.caption(p)}))
+        elif kind == "history_carousel":
+            from . import history
+            if not history.available(p):
+                log.error("no checked history facts for %s: add them to gp_facts.HISTORY", p.title)
+                return 1
+            jobs.append((f"{sid}_HISTORY", "carousel", {"video": None, "cover": None, "files": history.carousel(p, out),
+                                                        "caption": history.caption(p)}))
         elif kind == "carousel":
             jobs.append((sid, "carousel", {"video": None, "cover": None, "files": preview.carousel(p, out), "caption": preview.caption(p, kind)}))
         else:
@@ -368,7 +375,7 @@ def main(argv=None) -> int:
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
-    ap.add_argument("--kind", choices=KINDS + ("stories", "history"))
+    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel"))
     ap.add_argument("--story", type=int, help="preview stories: post only story number N (1 = cover)")
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")

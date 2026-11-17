@@ -17,7 +17,7 @@ from . import style as S
 from .captions import FOOTER, clean, event_tag
 from .gp_facts import HISTORY
 from .preview import (CYAN, FONT, GOLD, MUTED, TEXT, Card, Preview, ease, gp_name, set_event, times_text, tyre)
-from .render import FPS, H_REEL, W, Reel
+from .render import FPS, H_POST, H_REEL, W, Reel
 
 HOLD_S = 2.3        # each chapter on screen
 FADE_S = 0.3
@@ -34,9 +34,9 @@ def _years(ch: dict) -> list[int]:
 class Timeline:
     """Years along the bottom, a break for the gap, a soft tyre that travels to the active year."""
 
-    def __init__(self, c: Card, years: list[int], y: float = 0.29):
+    def __init__(self, c: Card, years: list[int], y: float = 0.29, h: float = 0.07):
         self.c, self.years = c, years
-        w, h = 0.86, 0.07
+        w = 0.86
         self.ax = c.fig.add_axes([0.07, y - h / 2, w, h])
         ax = self.ax
         x0, x1 = -0.6, len(years) - 0.4
@@ -149,6 +149,63 @@ def reel(p: Preview, out: Path) -> tuple[Path, Path]:
         r.add(c.fig)
     plt.close(c.fig)
     return r.close(), out / "cover.jpg"
+
+
+def _gold(ch: dict) -> list[int] | None:
+    return [int(y) for y in re.findall(r"\d{4}", ch["line"])] if ch["unit"] == "world titles" else None
+
+
+def carousel(p: Preview, out: Path) -> list[Path]:
+    """Cover, one card per chapter, closing card. 1080x1350, same template as the Reel."""
+    set_event(p)
+    chs = HISTORY[p.title]["chapters"]
+    years = sorted({y for ch in chs for y in _years(ch)} | {p.season})
+    paths = []
+    tl_y, tl_h = 0.27, 0.085
+
+    c = Card(H_POST)
+    c.header(p)
+    c.text(0.5, 0.80, "LAS VEGAS GP" if p.title == "LAS VEGAS" else gp_name(p).upper(), 18, color=CYAN, weight=600, track=True)
+    c.text(0.5, 0.715, "A HISTORY", 70, weight=200, track=True)
+    c.text(0.5, 0.635, "IN NUMBERS", 70, color=CYAN, weight=300, track=True)
+    c.text(0.5, 0.545, f"{len(chs)} facts, {years[0]} to {years[-2]}, every one sourced", 24, color=MUTED, weight=300, style="italic")
+    c.text(0.5, 0.43, "From a hotel car park to the Strip", 26, weight=300)
+    Timeline(c, years, tl_y, tl_h).show(0, years)
+    c.footer("SWIPE  →")
+    paths.append(c.save(out / "slide_01.jpg"))
+
+    for n, ch in enumerate(chs, 1):
+        c = Card(H_POST)
+        c.header(p)
+        c.text(0.94, 0.875, f"{n:02d} / {len(chs):02d}", 13, color=MUTED, weight=400, ha="right")
+        c.text(0.5, 0.86, ch["year"].upper(), 30, color=GOLD, weight=400, track=True)
+        c.text(0.5, 0.795, ch["head"], 30, weight=400)
+        c.number(0.615, ch["number"], ch["unit"] or " ", size=170 if len(ch["number"]) <= 5 else 130)
+        c.fig.text(0.5, 0.545, "\n".join(textwrap.wrap(ch["line"], 44)), ha="center", va="top", fontsize=25, color=TEXT,
+                   family=FONT, weight=300, linespacing=1.4)
+        c.text(0.5, 0.405, f"Source: {ch['source']}", 15, color=MUTED, weight=300)
+        ys, gold = _years(ch), _gold(ch)
+        Timeline(c, years, tl_y, tl_h).show(None if gold else float(years.index(ys[-1])), [] if gold else ys, gold)
+        c.footer("SWIPE  →")
+        paths.append(c.save(out / f"slide_{n + 1:02d}.jpg"))
+
+    q, rr = times_text(p)
+    c = Card(H_POST)
+    c.header(p)
+    c.text(0.5, 0.84, str(p.season), 30, color=GOLD, weight=400, track=True)
+    c.text(0.5, 0.765, "THE NEXT LINE", 60, weight=200, track=True)
+    c.text(0.5, 0.705, "IS WRITTEN THIS WEEK", 32, color=CYAN, weight=300, track=True)
+    for x, k, v in ((0.30, "QUALIFYING", q), (0.70, "RACE", rr)):
+        c.text(x, 0.61, k, 14, color=CYAN, weight=600, track=True)
+        c.text(x, 0.565, v, 38, weight=200)
+    c.fig.add_artist(plt.Line2D([0.5, 0.5], [0.54, 0.63], transform=c.fig.transFigure, color=GOLD, lw=0.6))
+    c.text(0.5, 0.505, "LOCAL TIME", 12, color=MUTED, weight=500, track=True)
+    c.logo(0.5, 0.42, 0.40, ha="center")
+    c.text(0.5, 0.355, f"Follow {S.HANDLE} for every session, decoded", 22, weight=400)
+    Timeline(c, years, tl_y, tl_h).show(float(years.index(p.season)), [p.season])
+    c.footer()
+    paths.append(c.save(out / f"slide_{len(chs) + 2:02d}.jpg"))
+    return paths
 
 
 def caption(p: Preview) -> str:
