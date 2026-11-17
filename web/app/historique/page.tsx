@@ -5,7 +5,7 @@ import ShareButton from '@/components/ShareButton'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { SUPABASE_URL } from '@/lib/api'
 
-// GP Historique: all time numbers from F1DB, tables only (no charts or illustrations, by design).
+// F1 History Analytics (formerly GP Historique): all time numbers from F1DB, tables only (no charts or illustrations, by design).
 type Row = Record<string, unknown>
 type Doc = { generated_at: string; source: string; data: unknown }
 type Col = { key: string; label: string; num?: boolean; fmt?: (r: Row) => string }
@@ -121,11 +121,11 @@ export default function Page() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-widest text-mute">All time · numbers only</p>
-          <h1 className="mt-1 font-head text-3xl font-bold sm:text-4xl">GP Historique</h1>
+          <h1 className="mt-1 font-head text-3xl font-bold sm:text-4xl">F1 History Analytics</h1>
         </div>
-        <ShareButton title={`GP Historique: ${sec.title}`} />
+        <ShareButton title={`F1 History Analytics: ${sec.title}`} />
       </div>
-      <nav aria-label="GP Historique sections" className="flex flex-wrap gap-2">
+      <nav aria-label="F1 History Analytics sections" className="flex flex-wrap gap-2">
         {SECTIONS.map((s) => (
           <a key={s.id} href={`#${s.id}`} onClick={() => setId(s.id)} aria-current={s.id === id ? 'page' : undefined}
             className={`flex min-h-11 items-center rounded-full border px-4 text-sm ${s.id === id ? 'border-cyan text-cyan' : 'border-line text-mute hover:text-ink'}`}>
