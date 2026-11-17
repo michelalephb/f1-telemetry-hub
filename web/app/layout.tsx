@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <nav aria-label="Main" className="flex items-center gap-1 text-sm">
               <Link href="/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">Season</Link>
-              <Link href="/historique/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">GP Historique</Link>
+              <Link href="/historique/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">F1 History Analytics</Link>
             </nav>
             <span className="ml-auto rounded border border-line px-2 py-1 font-mono text-xs text-mute">TEST BUILD · data: OpenF1</span>
           </div>
