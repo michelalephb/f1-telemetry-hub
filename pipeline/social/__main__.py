@@ -351,6 +351,8 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
                                                          "caption": insights.caption(p)}))
         elif kind == "insights":                      # review only: every insight card, one image each
             from . import insights
+            import json as _json
+            print("INSIGHTS_JSON " + _json.dumps(insights.gather(p.season, p.round, p.title), default=str))
             for g, fns in (("strategy", insights.STRATEGY), ("conditions", insights.CONDITIONS)):
                 for i, f in enumerate(insights.available(p, fns)):
                     jobs.append((f"{sid}_REVIEW_{g}_{i + 1}", "story", {"video": None, "cover": None, "caption": "",
