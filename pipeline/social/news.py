@@ -108,7 +108,7 @@ def title_math(p, st: dict, team: bool, place: int = 2, sample: bool = False):
             line = f"{who} must outscore {nxt} by {s['need']} here to seal P{place}"
         else:
             c.number(c.top - 0.215, fmt(s["gap"]), "points ahead", size=150)
-            line = f"Not sealed in {p.title.title()}: {s['left_after']} points still to play after it, {who} leads {nxt} by {fmt(s['gap'])}"
+            line = f"{who} leads {nxt}, but {s['left_after']} points remain after {p.title.title()}: not sealed here"
     c.text(0.5, c.top - 0.265, line, 22, weight=300)
     rows = (st["teams"] if team else st["drivers"])[:5]
     y0 = 0.58
