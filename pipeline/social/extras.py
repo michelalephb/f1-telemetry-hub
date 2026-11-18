@@ -433,7 +433,57 @@ def teammates(p, d, **kw):
     return c
 
 
-CHAMP = [p3_drivers, p3_teams, midfield, wins, teammates]
+def points_per_race(p, d, **kw):
+    st = _std(p)
+    n = st["after_round"]
+    rows = sorted(st["drivers"], key=lambda r: -r["pts"])[:8]
+    if not rows or not n:
+        return None
+    c = I._card(p, "Points per race", f"{rows[0]['pts'] / n:.1f}", "per round",
+                f"{rows[0]['name']}'s average over {n} rounds, sprints included",
+                f"Season points divided by rounds held. Official standings after round {n} (Jolpica)", swipe=False)
+    ax = I._ax(c, [0.20, 0.17, 0.70, 0.40])
+    for y, r in zip(range(len(rows))[::-1], rows):
+        v = r["pts"] / n
+        ax.barh(y, v, color=d.get("colors", {}).get(r["code"], P.CYAN), height=0.6)
+        ax.text(-0.3, y, r["code"], ha="right", va="center", fontsize=15, color=P.TEXT, family=P.FONT, weight=600)
+        ax.text(v + 0.3, y, f"{v:.1f}", va="center", fontsize=15, color=P.TEXT, family=P.FONT, weight=300)
+    ax.set_yticks([]), ax.set_xticks([])
+    ax.set_xlim(0, rows[0]["pts"] / n * 1.18)
+    return c
+
+
+@lru_cache(maxsize=2)
+def _poles_season(season: int, upto: int) -> dict:
+    from .reels_tel import season_quali
+    out: dict = {}
+    for r in season_quali(season, upto):
+        if r["pos"] == 1:
+            out[r["code"]] = out.get(r["code"], 0) + 1
+    return out
+
+
+def poles(p, d, **kw):
+    st = _std(p)
+    pl = sorted(_poles_season(p.season, st["after_round"]).items(), key=lambda x: -x[1])
+    if not pl:
+        return None
+    c = I._card(p, f"{p.season} pole positions", str(pl[0][1]), f"of {st['after_round']} poles",
+                f"for {pl[0][0]}. {len(pl)} different pole sitters so far",
+                f"Final qualifying classification, rounds 1 to {st['after_round']} (Jolpica, official)", swipe=False)
+    ax = I._ax(c, [0.20, 0.17, 0.70, 0.40])
+    for y, (code, v) in zip(range(len(pl))[::-1], pl):
+        ax.barh(y, v, color=d.get("colors", {}).get(code, P.CYAN), height=0.6)
+        ax.text(-0.15, y, code, ha="right", va="center", fontsize=15, color=P.TEXT, family=P.FONT, weight=600)
+        ax.text(v + 0.15, y, str(v), va="center", fontsize=16, color=P.TEXT, family=P.FONT, weight=300)
+    ax.set_yticks([]), ax.set_xticks([])
+    ax.set_xlim(0, pl[0][1] * 1.15)
+    return c
+
+
+# 18 Nov, no replicas: teammate battles left the stories (Teammate wars Reel covers the duel);
+# fastest race laps left the stories (the Who is it? Reels reveal those laps)
+CHAMP = [p3_drivers, p3_teams, midfield, wins, points_per_race, poles]
 
 
 # ---------------------------------------------------------------- circuit history
@@ -488,7 +538,7 @@ def fastest_laps(p, d, **kw):
     return c
 
 
-CIRCUIT = [pole_conversion, winners_grid, fastest_laps]
+CIRCUIT = [pole_conversion, winners_grid]
 
 from .learn import LEARN  # noqa: E402
 

@@ -117,8 +117,14 @@ def race_day(p, out: Path) -> Path:
     c.kicker(top - 0.07, "Race day in numbers")
     q, r = P.times_text(p)
     c.text(0.5, top - 0.115, f"Lights out {r}, local time", 24, weight=300)
+    try:                                                    # 18 Nov: the lap record already ran as a Reel (no replicas)
+        from .news import standings
+        left = standings(p.season)["races_left"] - 1
+        left_tile = (str(left), "RACES LEFT AFTER TONIGHT")
+    except Exception:
+        left_tile = ("", "")
     tiles = [(str(f["laps"]), "LAPS"), (f["lap_km"], "KM A LAP"), (f["race_km"], "KM RACE DISTANCE"),
-             (str(f["corners"]), "CORNERS"), (f["lap_record"], f"LAP RECORD, {f['lap_record_by']}"),
+             (str(f["corners"]), "CORNERS"), left_tile,
              (f"{t['hard']} {t['medium']} {t['soft']}" if t else "",
               f"TYRES, {trio(t).upper()} 3 OF {t['range']}" if t else "TYRES")]
     for k, (v, u) in enumerate(tiles):
@@ -142,7 +148,7 @@ def race_day_caption(p) -> str:
     return clean(paragraphs(
         f"🏁 Race day in {p.title.title()}. Lights out {r}, local time.",
         [f"🔁 {f['laps']} laps of {f['lap_km']} km", f"📏 {f['race_km']} km in all", f"↪️ {f['corners']} corners a lap",
-         f"⏱️ Lap record: {f['lap_record']}, {f['lap_record_by']}"]
+         ]
         + ([f"🛞 Tyres: {t['hard']} hard, {t['medium']} medium, {t['soft']} soft"] if t else []),
         f"📚 Sources: {f['source']}.",
         "🔔 Race decoded here after the flag. Follow so you don't miss it.\n💬 Your winner? Tell us below.",
