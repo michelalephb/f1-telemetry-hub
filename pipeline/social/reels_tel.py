@@ -666,6 +666,16 @@ def _dry_poles(p, oc, ck, rot) -> list[dict]:
     return laps
 
 
+def _colors_now(oc, season: int, fallback: dict) -> dict:
+    """Team colours of this season's latest race (so new drivers and teams get theirs)."""
+    try:
+        rs = oc.frame("sessions", year=season, session_name="Race")
+        sk = int(rs.sort_values("date_start").iloc[-1]["session_key"])
+        return {**fallback, **_codes(oc, sk)[1]}
+    except Exception:
+        return dict(fallback)
+
+
 def _cap(p, *blocks) -> str:
     from .captions import FOOTER, clean, event_tag, paragraphs
     return clean(paragraphs(*blocks, FOOTER, TAGS.format(ev=event_tag(p.event))))
@@ -729,7 +739,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         from . import news
         st = news.standings(p.season)
         rows = season_quali(p.season, st["after_round"])
-        cols = dict(p.colors)
+        cols = _colors_now(oc, p.season, p.colors)
         teammates(p, rows, st["after_round"], video, cols, [t["name"] for t in st["teams"]])
         cap = _cap(p, f"⚔️ Teammate wars: {p.season} qualifying head to head, after round {st['after_round']}.",
                    "📊 Final qualifying classification each round, the rounds both drivers took part in.",
@@ -739,7 +749,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         st = news.standings(p.season)
         pts = season_points(p.season, st["after_round"])
         codes = [r["code"] for r in st["drivers"][1:5]]
-        pointsrace(p, pts, codes, dict(p.colors), video)
+        pointsrace(p, pts, codes, _colors_now(oc, p.season, p.colors), video)
         a, b = st["drivers"][1], st["drivers"][2]
         cap = _cap(p, f"📈 The fight for P2 in {p.season}, round by round.",
                    f"{drv(a['code'], p.colors)} {a['pts']:.0f} pts\n{drv(b['code'], p.colors)} {b['pts']:.0f} pts",
