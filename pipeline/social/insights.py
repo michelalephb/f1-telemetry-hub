@@ -115,13 +115,27 @@ def last_race(oc, ref: int, ck: int, season: int, rnd: int) -> dict:
                     if pd.notna(r["lap_start"]) and pd.notna(r["lap_end"])]
             if c and rows:
                 plan[c] = rows
+    # official pit stops (Jolpica): the stop count, and the only place a stint may end. OpenF1 sometimes
+    # splits one set into two stints (2025 Las Vegas: Russell, one stop, showed as two), so stints are merged
+    # unless an official stop sits at the boundary.
+    ids = {x["Driver"]["driverId"]: x["Driver"].get("code") for x in
+           jolpica._get(f"{ref}/{prev['round']}/results.json?limit=100")["RaceTable"]["Races"][0]["Results"]}
+    pr = jolpica._get(f"{ref}/{prev['round']}/pitstops.json?limit=200")["RaceTable"]["Races"]
+    stop_laps: dict = {}
+    for x in (pr[0].get("PitStops", []) if pr else []):
+        stop_laps.setdefault(ids.get(x["driverId"]), []).append(int(x["lap"]))
+    for c, rows in plan.items():
+        merged = [list(rows[0])]
+        for cpd, a, b in rows[1:]:
+            boundary = merged[-1][2]
+            pitted = any(abs(l - boundary) <= 1 for l in stop_laps.get(c, []))
+            if cpd == merged[-1][0] and not pitted:
+                merged[-1][2] = b
+            else:
+                merged.append([cpd, a, b])
+        plan[c] = [tuple(m) for m in merged]
     out["plan"] = plan
-    fin = [r["code"] for r in out["classified"]]
-    stops = {}
-    for c in fin:
-        if c in plan:
-            stops[c] = len(plan[c]) - 1
-    out["stops"] = stops
+    out["stops"] = {r["code"]: len(stop_laps.get(r["code"], [])) for r in out["classified"]} if stop_laps else {}
 
     # pit lane time (entry to exit), median over all stops of the race
     pit = oc.frame("pit", session_key=sk)
@@ -142,7 +156,10 @@ def last_race(oc, ref: int, ck: int, season: int, rnd: int) -> dict:
     if len(laps) and plan:
         laps = laps[laps["lap_duration"].notna()]
         laps["code"] = laps["driver_number"].map(lambda n: code.get(int(n)))
+        fin = {r["code"] for r in out["classified"]}
         for c, rows in plan.items():
+            if c not in fin:
+                continue
             mine = laps[laps["code"] == c]
             for cpd, a, b in rows:
                 lt = mine[(mine["lap_number"] > max(a, 1)) & (mine["lap_number"] < b)]
@@ -204,10 +221,18 @@ def safety_history(oc, ck: int, upto: int) -> list[dict]:
 def forecast(title: str, location: str, starts: dict) -> dict:
     """Open-Meteo hourly forecast at the circuit for qualifying and the race (first two hours of each)."""
     lat, lon = COORDS.get(title) or geocode(location)
-    r = requests.get("https://api.open-meteo.com/v1/forecast", timeout=30, params={
-        "latitude": lat, "longitude": lon, "timezone": "UTC", "forecast_days": 16,
-        "hourly": "temperature_2m,precipitation_probability,wind_speed_10m"})
-    r.raise_for_status()
+    for attempt in range(3):
+        try:
+            r = requests.get("https://api.open-meteo.com/v1/forecast", timeout=60, params={
+                "latitude": lat, "longitude": lon, "timezone": "UTC", "forecast_days": 16,
+                "hourly": "temperature_2m,precipitation_probability,wind_speed_10m"})
+            r.raise_for_status()
+            break
+        except requests.RequestException:
+            if attempt == 2:
+                raise
+            import time
+            time.sleep(10)
     h = r.json()["hourly"]
     t = pd.to_datetime(h["time"], utc=True)
     out = {"issued": datetime.now(timezone.utc).isoformat(timespec="minutes")}
@@ -277,7 +302,7 @@ def winning_plan(p, d, **kw):
     pits = ", ".join(f"lap {plan[win][i - 1][2]}" for i in range(1, len(plan[win])))
     c = _card(p, f"{d['ref']} winning strategy", str(n), "stop" if n == 1 else "stops",
               f"{win}: {seq}" + (f", pitted {pits}" if pits else ""),
-              f"Top 10 classified, tyre sets by lap. {_src(d)}: OpenF1 stints, official classification", **kw)
+              f"Top 10 classified, tyre sets by lap. {_src(d)}: OpenF1 stints, official pit stops and classification", **kw)
     ax = _ax(c, [0.15, 0.17, 0.78, 0.43])
     total = d.get("laps") or max(x[2] for r in rows for x in plan[r])
     for i, code in enumerate(rows):
@@ -304,7 +329,7 @@ def stop_count(p, d, **kw):
     win = (d.get("classified") or [{}])[0].get("code")
     c = _card(p, "How many stops?", f"{top_n}", f"of {len(stops)} drivers",
               f"{'stopped once' if top_k == 1 else f'made {top_k} stops'} in {d['ref']}. The winner, {win}, made {stops.get(win)} stop{'' if stops.get(win) == 1 else 's'}",
-              f"Classified finishers. {_src(d)}: OpenF1 stints", **kw)
+              f"Classified finishers. {_src(d)}: official pit stops (Jolpica)", **kw)
     ax = _ax(c, [0.18, 0.18, 0.64, 0.40])
     xs = list(range(int(cnt.index.min()), int(cnt.index.max()) + 1))
     vals = [int(cnt.get(x, 0)) for x in xs]
@@ -321,8 +346,8 @@ def pit_cost(p, d, **kw):
     pit = d.get("pit")
     if not pit:
         return None
-    stop = pit.get("stop_s")
-    line = "Entry to exit" + (f", about {stop} s of it standing still" if stop else "")
+    stop = None                      # OpenF1 stationary times not checked against official data: not shown
+    line = "Pit lane entry to exit, the price of every stop"
     c = _card(p, "What a pit stop costs", f"{pit['lane_s']}", "s in the pit lane", line,
               f"Median of {pit['n']} stops, fastest {pit['fastest_lane_s']} s. {_src(d)}: OpenF1 pit data", **kw)
     ax = _ax(c, [0.10, 0.25, 0.80, 0.22])
@@ -346,7 +371,7 @@ def long_run(p, d, **kw):
     b = runs[0]
     c = _card(p, f"{d['ref']} fastest long run", lap_time(round(b["median_s"] * 1000)), "per lap",
               f"{b['code']} on {b['compound'].lower()}s, laps {b['from']} to {b['to']}, median of {b['n']} green laps",
-              f"Best 3 runs of {LONG_RUN_LAPS}+ laps on one set; traffic, SC and VSC laps dropped. {_src(d)}: OpenF1 laps", **kw)
+              f"Classified finishers, runs of {LONG_RUN_LAPS}+ laps on one set; SC, VSC and traffic laps dropped. {_src(d)}: OpenF1 laps", **kw)
     ax = _ax(c, [0.14, 0.17, 0.78, 0.42])
     for r in runs:
         col = team(d, r["code"])
@@ -371,7 +396,8 @@ def climbers(p, d, **kw):
     start = "pit lane" if t["pit_lane"] else f"P{t['grid']}"
     c = _card(p, "Biggest climber", f"+{t['gain']}", "places",
               f"{t['code']}: {start} to P{t['pos']} on {plan_words(t['plan'])}",
-              f"Official grid to official classification. {_src(d)}: Jolpica results, OpenF1 stints", **kw)
+              f"Official grid to official classification" + (f" (after {' and '.join(d['dsq'])} were disqualified)" if d.get("dsq") else "")
+              + f". {_src(d)}: Jolpica", **kw)
     ax = _ax(c, [0.20, 0.16, 0.60, 0.44])
     for x in cl:
         col = team(d, x["code"])
