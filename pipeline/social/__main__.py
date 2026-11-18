@@ -366,10 +366,17 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
                 print("STANDINGS_JSON " + _json.dumps(news.standings(p.season), default=str))
             except Exception as e:
                 log.warning("standings unavailable: %s", e)
-            for g, fns in (("strategy", insights.STRATEGY), ("conditions", insights.CONDITIONS)):
-                for i, f in enumerate(insights.available(p, fns)):
-                    jobs.append((f"{sid}_REVIEW_{g}_{i + 1}", "story", {"video": None, "cover": None, "caption": "",
-                                 "files": [insights.card_path(p, fns, i, out)]}))
+            from . import extras
+            print("CRAFT_JSON " + _json.dumps({k: v for k, v in extras.craft_data(p.season, p.round, p.title).items()
+                                                if k != "positions"}, default=str))
+            print("CIRCUIT_JSON " + _json.dumps(extras.circuit_history(p.season, p.round), default=str))
+            for g, fns in extras.GROUPS.items():
+                for f in fns:
+                    try:
+                        path = extras.card_path(p, f.__name__, out)
+                        jobs.append((f"{sid}_REVIEW_{g}_{f.__name__}", "story", {"video": None, "cover": None, "caption": "", "files": [path]}))
+                    except Exception as e:
+                        log.warning("review card %s: %s", f.__name__, e)
         elif kind == "history_carousel":
             from . import history
             if not history.available(p):
