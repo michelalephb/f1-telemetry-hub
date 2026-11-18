@@ -198,7 +198,7 @@ function Slams({ d, src }: { d: { drivers: Row[] }; src: string }) {
 }
 
 function Teammates({ rows, src }: { rows: Row[]; src: string }) {
-  const last = (s: unknown) => String(s).split(' ').slice(-1)[0]
+  const last = (s: unknown) => String(s).replace(/\s+(Jr\.|Sr\.)$/, '').split(' ').slice(-1)[0]
   const t = rows.slice(0, 8).map((r) => {
     const flip = (r.race2 as number) > (r.race1 as number)
     return {
@@ -213,7 +213,7 @@ function Teammates({ rows, src }: { rows: Row[]; src: string }) {
   const top = t.reduce((m, x) => (x.ra / (x.ra + x.rb || 1) > m.ra / (m.ra + m.rb || 1) ? x : m), t[0])
   return (
     <Card title="Teammate head to head" more="teammates" note={`${src} · classified ahead, retirements count`}
-      legend={<span>solid: ahead more often · light: teammate</span>}
+      legend={<span>solid: ahead more often</span>}
       take={<>Race finishes ahead of the teammate, longest pairings. {top && <>{last(top.a)} beat {last(top.b)} <B>{top.ra} to {top.rb}</B>.</>}</>}
       chart={
         <Svg h={H} label="Teammate race head to head, finishes ahead">
@@ -241,7 +241,7 @@ function Comebacks({ rows, src }: { rows: Row[]; src: string }) {
   const c = rows.slice(0, 10)
   const startTxt = (r: Row) => (r.grid_text === 'PL' ? `PL (${r.starters})` : `P${r.start}`)
   const maxStart = Math.max(30, ...c.map((r) => r.start as number))
-  const W = 640, H = 310, L = 210, rh = (H - 28) / c.length, X = (p: number) => L + ((W - L - 24) * (p - 1)) / (maxStart - 1)
+  const W = 640, H = 310, L = 250, rh = (H - 28) / c.length, X = (p: number) => L + ((W - L - 24) * (p - 1)) / (maxStart - 1)
   const win = c.find((r) => r.finish === 1)
   return (
     <Card title="Comebacks" more="comebacks" note={`${src} · Indy 500 and shared drives excluded · pit lane start counts as last`}
@@ -255,7 +255,7 @@ function Comebacks({ rows, src }: { rows: Row[]; src: string }) {
             return (
               <g key={i}>
                 <T x={8} y={y + 4} fill={INK} weight={600} mono={false}>{String(r.driver).split(' ').slice(-1)[0]}</T>
-                <T x={100} y={y + 4} size={10}>{`${r.year} ${String(r.gp).slice(0, 14)}`}</T>
+                <T x={96} y={y + 4} size={10}>{`${r.year} ${String(r.gp).slice(0, 20)}`}</T>
                 <line x1={X(f)} x2={X(s)} y1={y} y2={y} stroke={OLD} strokeWidth={3} />
                 <circle cx={X(s)} cy={y} r={5} fill={BG} stroke={OLD} strokeWidth={2} />
                 {r.grid_text === 'PL' && <T x={X(s) + 9} y={y + 4} size={10}>PL</T>}
