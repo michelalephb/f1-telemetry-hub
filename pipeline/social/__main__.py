@@ -470,7 +470,7 @@ def finish(report: list, out: str, failed: int) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.social")
-    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview", "hourly", "metrics", "optimize"])
+    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview", "hourly", "metrics", "optimize", "reel"])
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
@@ -481,6 +481,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="ig_out")
     ap.add_argument("--dump", help="preview: also save the lap data (pickle) for design work")
     ap.add_argument("--now", help="hourly: pretend it is this time (ISO), for testing")
+    ap.add_argument("--reel", help="reel: post this telemetry Reel now (a reels_tel.REEL_SLOTS kind); its slot then stays done")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)   # request URLs can carry the token
@@ -488,7 +489,34 @@ def main(argv=None) -> int:
     from .hourly import cmd_hourly
     from .metrics import cmd_metrics, cmd_optimize
     return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh, "preview": cmd_preview,
-            "hourly": cmd_hourly, "metrics": cmd_metrics, "optimize": cmd_optimize}[a.cmd](a)
+            "hourly": cmd_hourly, "metrics": cmd_metrics, "optimize": cmd_optimize, "reel": cmd_reel}[a.cmd](a)
+
+
+def cmd_reel(a) -> int:
+    """Post one telemetry Reel now, outside its slot (Michel asked, 17 Nov). Same id as the slot, so it never
+    posts twice. Nothing else is posted by this command."""
+    from . import preview, reels_tel
+    from .hourly import TZ, where_are_we
+    from ..openf1 import OpenF1
+    sb = store.client()
+    ig = connect(sb, a.dry_run)
+    w = where_are_we(OpenF1(), datetime.now(TZ))
+    p = preview.load(w["season"], w["round"])
+    sid = f"{w['season']}_{w['round']:02d}_PREVIEW_REEL_{a.reel.upper()}"
+    row = post_row(sb, sid, "reel", "session") if ig is not None else None
+    if row and row["status"] == "published":
+        log.info("reel %s already published", a.reel)
+        return 0
+    built = reels_tel.build(p, a.reel, Path(a.out) / f"reel_{a.reel}")
+    if built is None:
+        log.error("reel %s: data not in", a.reel)
+        return 1
+    video, cap = built
+    jobs = [(sid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
+    report, failed = publish_jobs(sb, ig, jobs, {"reel": a.reel, "manual": True})
+    if ig is not None:
+        sb.table("ig_posts").update({"content": f"reel {a.reel}"}).eq("session_id", sid).eq("kind", "reel").execute()
+    return finish(report, a.out, failed)
 
 
 if __name__ == "__main__":
