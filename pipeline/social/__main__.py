@@ -360,7 +360,10 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
         elif kind == "reels_data":                    # review only: the data the telemetry Reels need, as JSON in the log
             from . import reels_tel
             import json as _json
-            print("REELS_JSON " + _json.dumps(reels_tel.gather(p), default=str))
+            blob = _json.dumps(reels_tel.gather(p), default=str)
+            print(f"REELS_SIZE {len(blob)}", flush=True)
+            for k in range(0, len(blob), 20000):                    # GitHub drops very long log lines
+                print(f"REELS_PART {k // 20000:04d} {blob[k:k + 20000]}", flush=True)
             print("PREVIEW_JSON " + _json.dumps({"title": p.title, "event": p.event, "season": p.season, "round": p.round,
                                                  "ref_year": p.ref_year, "driver": p.driver, "lap_s": p.lap_s,
                                                  "sessions": p.sessions, "country": p.country, "gp": p.gp, "colors": p.colors,
