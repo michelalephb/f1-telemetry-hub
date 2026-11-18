@@ -353,6 +353,11 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
             from . import insights
             import json as _json
             print("INSIGHTS_JSON " + _json.dumps(insights.gather(p.season, p.round, p.title), default=str))
+            from . import news
+            try:
+                print("STANDINGS_JSON " + _json.dumps(news.standings(p.season), default=str))
+            except Exception as e:
+                log.warning("standings unavailable: %s", e)
             for g, fns in (("strategy", insights.STRATEGY), ("conditions", insights.CONDITIONS)):
                 for i, f in enumerate(insights.available(p, fns)):
                     jobs.append((f"{sid}_REVIEW_{g}_{i + 1}", "story", {"video": None, "cover": None, "caption": "",
