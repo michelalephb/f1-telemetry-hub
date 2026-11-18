@@ -16,7 +16,7 @@ on:
     paths: ["pipeline/social/**", ".github/workflows/instagram.yml"]
   workflow_dispatch:
     inputs:
-      mode: {description: "run, rewind, preview, hourly, metrics or optimize", default: "run"}
+      mode: {description: "run, rewind, preview, hourly, metrics, optimize or reel (kind = reel kind)", default: "run"}
       now: {description: "hourly: pretend it is this time (ISO, e.g. 2026-11-18T09:05-08:00)", default: ""}
       round: {description: "preview: round of the coming Grand Prix", default: ""}
       session: {description: "Session id, e.g. 2026_20_Q (empty = sessions from the last 72 h)", default: ""}
@@ -74,7 +74,9 @@ jobs:
           fi
           ARGS=()
           [ "$DRY" = "true" ] && ARGS+=(--dry-run)
-          if [ "$MODE" = "metrics" ] || [ "$MODE" = "optimize" ]; then
+          if [ "$MODE" = "reel" ]; then
+            python -m pipeline.social reel --reel "$KIND" "${ARGS[@]}"
+          elif [ "$MODE" = "metrics" ] || [ "$MODE" = "optimize" ]; then
             python -m pipeline.social "$MODE"
           elif [ "$SCHED" = "4,19,34,49 * * * *" ] || [ "$MODE" = "hourly" ]; then
             [ -n "$ROUND" ] && ARGS+=(--round "$ROUND")
