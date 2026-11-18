@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import ShareButton from '@/components/ShareButton'
 import { Failed, Loading, useAsync } from '@/components/useAsync'
 import { SUPABASE_URL } from '@/lib/api'
+import HistoryCharts from '@/components/HistoryCharts'
 
-// F1 History Analytics (formerly GP Historique): all time numbers from F1DB, tables only (no charts or illustrations, by design).
+// F1 History Analytics (formerly GP Historique): all time numbers from F1DB. Overview = charts, each with its
+// data underneath; the tabs hold the full sortable tables.
 type Row = Record<string, unknown>
 type Doc = { generated_at: string; source: string; data: unknown }
 type Col = { key: string; label: string; num?: boolean; fmt?: (r: Row) => string }
@@ -50,9 +52,10 @@ const SECTIONS: Section[] = [
   },
   {
     id: 'comebacks', title: 'Comebacks', file: 'climbs', search: ['driver', 'gp', 'team'],
-    note: 'Podium finishes from 12th on the grid or lower, lowest grid slot first. Indianapolis 500 excluded.',
+    note: 'Podium finishes ranked by places gained (start minus finish), 10 or more. A pit lane start (PL) counts as starting last of the cars that took the start. Indianapolis 500 and shared drives excluded.',
     cols: [
-      { key: 'grid', label: 'Grid', num: true }, { key: 'finish', label: 'Finish', num: true }, { key: 'driver', label: 'Driver' },
+      { key: 'gained', label: 'Gained', num: true }, { key: 'start', label: 'Start', num: true, fmt: (r) => (r.grid_text === 'PL' ? `PL (${r.starters})` : `P${r.start}`) },
+      { key: 'finish', label: 'Finish', num: true, fmt: (r) => `P${r.finish}` }, { key: 'driver', label: 'Driver' },
       { key: 'team', label: 'Team' }, { key: 'gp', label: 'Grand Prix' }, { key: 'year', label: 'Year', num: true },
     ],
   },
@@ -108,32 +111,32 @@ const SECTIONS: Section[] = [
 ]
 
 export default function Page() {
-  const [id, setId] = useState('grid')
+  const [id, setId] = useState('overview')
   useEffect(() => {
-    const read = () => { const h = window.location.hash.slice(1); if (SECTIONS.some((s) => s.id === h)) setId(h) }
+    const read = () => { const h = window.location.hash.slice(1); if (h === 'overview' || SECTIONS.some((s) => s.id === h)) setId(h) }
     read()
     window.addEventListener('hashchange', read)
     return () => window.removeEventListener('hashchange', read)
   }, [])
-  const sec = SECTIONS.find((s) => s.id === id)!
+  const sec = SECTIONS.find((s) => s.id === id)
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-widest text-mute">All time · numbers only</p>
+          <p className="text-xs uppercase tracking-widest text-mute">All time · charts and full data</p>
           <h1 className="mt-1 font-head text-3xl font-bold sm:text-4xl">F1 History Analytics</h1>
         </div>
-        <ShareButton title={`F1 History Analytics: ${sec.title}`} />
+        <ShareButton title={`F1 History Analytics: ${sec?.title ?? 'Overview'}`} />
       </div>
       <nav aria-label="F1 History Analytics sections" className="flex flex-wrap gap-2">
-        {SECTIONS.map((s) => (
+        {[{ id: 'overview', title: 'Overview' }, ...SECTIONS].map((s) => (
           <a key={s.id} href={`#${s.id}`} onClick={() => setId(s.id)} aria-current={s.id === id ? 'page' : undefined}
             className={`flex min-h-11 items-center rounded-full border px-4 text-sm ${s.id === id ? 'border-cyan text-cyan' : 'border-line text-mute hover:text-ink'}`}>
             {s.title}
           </a>
         ))}
       </nav>
-      <Table key={sec.id} sec={sec} />
+      {sec ? <Table key={sec.id} sec={sec} /> : <HistoryCharts load={load} />}
     </div>
   )
 }
