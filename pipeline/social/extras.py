@@ -339,7 +339,8 @@ def unclassified(p, d, **kw):
         why = "DISQUALIFIED" if r["pos_text"] == "D" else (r["status"] or "").upper()
         c.text(0.18, y, r["code"], 22, weight=500, ha="left", color=I.team(d, r["code"]))
         c.text(0.32, y, r["team"], 16, color=P.MUTED, weight=300, ha="left")
-        c.text(0.86, y, why + (f", LAP {r['laps']}" if r["pos_text"] != "D" else ""), 14, color="#EF4444" if r["pos_text"] == "D" else "#FFC107",
+        out_on = f", OUT ON LAP {r['laps'] + 1}" if r["pos_text"] != "D" else ""
+        c.text(0.86, y, why + out_on, 14, color="#EF4444" if r["pos_text"] == "D" else "#FFC107",
                weight=600, ha="right", track=False)
     if not out:
         c.text(0.5, 0.45, "EVERY CAR FINISHED", 26, color=P.CYAN, weight=600, track=True)
