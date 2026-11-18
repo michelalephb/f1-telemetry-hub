@@ -5,7 +5,9 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'F1 Telemetry Hub',
   description: 'Every lap, every corner. F1 telemetry analysis.',
-  robots: { index: false, follow: false },
+  // Launch switch: search engines may index the site only when it is served from its own domain
+  // (Pages base path ""), i.e. f1telemetryhub.com. The github.io test build stays noindex.
+  robots: process.env.NEXT_PUBLIC_BASE_PATH === '' ? { index: true, follow: true } : { index: false, follow: false },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
