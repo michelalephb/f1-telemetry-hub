@@ -448,8 +448,7 @@ def rain(p, d, **kw):
         return None
     issued = pd.Timestamp(f["issued"]).tz_convert(PT)
     hi = max(q["rain_pct"], r["rain_pct"])
-    wet_ly = (p.last_year or {}).get("quali_wet")
-    line = "Peak chance of rain in quali or the race" + (f" ({p.ref_year} quali was wet)" if wet_ly else "")
+    line = "Peak chance of rain in quali or the race, this weekend's forecast"
     c = _card(p, "Could it rain?", f"{hi}", "% chance", line,
               f"Open-Meteo forecast at the circuit, first 2 h of each session. Issued {issued:%a %-I:%M %p} PT and updated hourly",
               **kw)
@@ -487,7 +486,7 @@ def track_temp(p, d, **kw):
 CAROUSEL = [winning_plan, stop_count, long_run, pit_cost, climbers, safety]
 # story groups
 STRATEGY = [winning_plan, stop_count, long_run, climbers]
-CONDITIONS = [rain, track_temp, pit_cost, safety]
+CONDITIONS = [rain, pit_cost, safety]           # Michel, 17 Nov: this year's weather only, no 2025 temperatures
 
 
 _AVAIL: dict = {}

@@ -210,3 +210,61 @@ def upgrades(p, teams: list[dict], sample: bool = False):
     if sample:
         watermark(c)
     return c
+
+
+# ---------------------------------------------------------------- weekend news from checked facts
+
+def facts(p) -> dict:
+    from .gp_facts import NEWS
+    return NEWS.get(p.title, {}).get(p.season, {})
+
+
+def available(p) -> list[str]:
+    """News cards whose facts are in (gp_facts.NEWS[title][season]), in a stable order."""
+    f = facts(p)
+    return [k for k in ("upgrades", "pu", "penalties") if f.get(k)]
+
+
+def card_path(p, i: int, out: Path) -> Path:
+    P.set_event(p)
+    f = facts(p)
+    k = available(p)[i]
+    if k == "upgrades":
+        c = upgrades(p, f["upgrades"])
+    elif k == "pu":
+        c = pu_usage(p, f["pu"]["rows"], f["pu"]["allowance"])
+    else:
+        c = penalties(p, f["penalties"])
+    return c.save(out / f"news_{k}.jpg")
+
+
+def title_carousel(p, out: Path) -> list[Path]:
+    P.set_event(p)
+    st = standings(p.season)
+    return [title_math(p, st, False).save(out / "slide_01.jpg"), title_math(p, st, True).save(out / "slide_02.jpg")]
+
+
+def title_caption(p) -> str:
+    from .captions import FOOTER, clean, event_tag, paragraphs
+    st = standings(p.season)
+    rows = []
+    for team in (False, True):
+        s = seal(st, team)
+        who = s["holder"]["name"] if team else s["holder"]["code"]
+        nxt = s["next"]["name"] if team else s["next"]["code"]
+        margin = s["gap"] - s["left_after"]
+        head = "🏆 Constructors" if team else "🏎️ Drivers"
+        if s["sealed"]:
+            rows.append(f"{head}: {who} has P2 sealed")
+        elif margin > 0:
+            rows.append(f"{head}: {who} seals P2 in {p.title.title()} unless {nxt} outscores them by {fmt(margin)} or more")
+        else:
+            rows.append(f"{head}: {who} leads {nxt} by {fmt(s['gap'])}, P2 cannot be sealed in {p.title.title()}")
+    left = f"{st['races_left']} races" + (f" and {st['sprints_left']} sprints" if st["sprints_left"] else "")
+    return clean(paragraphs(
+        "🧮 The fight for P2: what it takes",
+        rows,
+        f"📅 {left} to go. A race win is worth 25, a team 1 2 is worth 43.",
+        f"ℹ️ Official standings after round {st['after_round']}. Ties go to countback.",
+        "💾 Save this and check it after every race.\n💬 Who finishes second? Tell us below.",
+        FOOTER, " ".join(["#F1", "#Formula1", event_tag(p.event), "#F1Standings", "#RaceWeek"])))

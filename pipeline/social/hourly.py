@@ -33,7 +33,7 @@ RACE_OVER_H = 3                  # race week ends 3 h after the race start
 # day offset from qualifying day -> {PT hour: preview kind}
 SLOTS = {
     -3: {9: "history_carousel", 12: "starthere", 18: "history"},
-    -2: {9: "carousel", 18: "strategy"},        # was braking: its zones already run as stories (17 Nov)
+    -2: {9: "titlemath", 18: "strategy"},       # 17 Nov: championship math and the strategy file (no duplicates)
     -1: {9: "reel", 18: "lap"},
     0: {9: "gears"},
     1: {9: "raceday"},
@@ -137,6 +137,33 @@ def pool(p, weights: dict | None = None) -> list[tuple]:
     return order
 
 
+# Michel, 17 Nov: "no duplicates are allowed". In race week every story is a card not posted before that
+# week, as a story or inside a feed post. Feed posts this week carry the lap facts (Preview reel), the
+# history (History reel), last year's strategy (Strategy file), championship math, Lap in data, Gear map and
+# Race day numbers, so those never run as stories. Stories get what is left: every braking zone, a fresh
+# forecast once a day (new numbers each day), and the FIA news cards as their facts are checked.
+# When nothing new is left, the hour gets no story rather than a repeat.
+
+def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> list[tuple]:
+    """Unposted story cards, in posting order: (group, index, content key)."""
+    from . import insights, news
+    if p is None:
+        return []
+    rows = sb.table("ig_posts").select("content").like("session_id", f"{sid}_H%").eq("status", "published").execute().data
+    used = {r["content"] for r in rows if r.get("content")}
+    out = []
+    day = f"{now:%Y-%m-%d}"
+    fc_days = {(q + timedelta(days=k)).date() for k in (-2, 0, 1)} if q is not None else set()   # Wed, quali day, race day
+    if now.date() in fc_days and f"rain {day}" not in used and insights.available(p, [insights.rain]):
+        out.append(("rain", 0, f"rain {day}"))                      # first story of the day: today's forecast
+    nz = p.stats.get("braking_zones", 0)
+    brk = [("braking", i, f"braking {i + 1}") for i in range(nz + 2) if f"braking {i + 1}" not in used]
+    nws = [("news", i, f"news {name}") for i, name in enumerate(news.available(p)) if f"news {name}" not in used]
+    for i in range(max(len(brk), len(nws))):                         # news and zones alternate
+        out += nws[i:i + 1] + brk[i:i + 1]
+    return out
+
+
 def render_story(p, item: tuple, out: Path) -> Path:
     from . import brand, history, lapdata, preview
     g, i = item[0], item[1]
@@ -145,6 +172,12 @@ def render_story(p, item: tuple, out: Path) -> Path:
         return preview.stories(p, out)[i]
     if g == "recap":
         return storyize(item[2], out / f"story_recap_{i + 1:02d}.jpg")
+    if g == "rain":
+        from . import insights
+        return storyize(insights.card_path(p, [insights.rain], 0, out / "src"), out / "story_rain.jpg")
+    if g == "news":
+        from . import news
+        return storyize(news.card_path(p, i, out / "src"), out / f"story_news_{i + 1:02d}.jpg")
     if g in ("strategy", "conditions"):
         from . import insights
         fns = insights.STRATEGY if g == "strategy" else insights.CONDITIONS
@@ -283,7 +316,10 @@ def cmd_hourly(a) -> int:
     if not jobs:
         from .metrics import weights
         if w["race_week"]:
-            items, prefix = pool(p, weights(sb)), f"{sid}_H"
+            items, prefix = story_units(sb, p, sid, now, w["q"]), f"{sid}_H"
+            if not items:
+                log.info("no story this hour: every card of the week is already out (no duplicates)")
+                return 0
         else:
             recap = recap_cards(sb, *w["last"], out / "recap") if w["last"] else []
             teaser = [x for x in pool(p) if x[0] in ("history", "preview")][:6] if p is not None else []
@@ -294,11 +330,11 @@ def cmd_hourly(a) -> int:
             log.info("%s%s already published: nothing more this %s", prefix, tag, "hour" if w["race_week"] else "day")
             return 0
         k = published_count(sb, f"{prefix}20") if ig is not None else 0   # only hourly or daily ids (prefix + date),
-        item = items[k % len(items)]                                      # not _HISTORY and the like
+        item = items[0] if w["race_week"] else items[k % len(items)]       # not _HISTORY and the like
         img = render_story(p, item, out)
         jobs = [(f"{prefix}{tag}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
         checks |= {"story": f"{item[0]} {item[1] + 1}", "pool": len(items), "posted_before": k}
-        content = f"{item[0]} {item[1] + 1}"
+        content = item[2] if w["race_week"] and len(item) > 2 and isinstance(item[2], str) else f"{item[0]} {item[1] + 1}"
     else:
         content = checks.get("slot")
     report, failed = publish_jobs(sb, ig, jobs, checks)

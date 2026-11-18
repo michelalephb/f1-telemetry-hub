@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
 
-GROUPS = ("preview", "strategy", "braking", "conditions", "history", "lap", "gears", "raceday")
+GROUPS = ("preview", "strategy", "braking", "conditions", "history", "lap", "gears", "raceday", "rain", "news")
 
 
 def score(m: dict) -> float | None:
