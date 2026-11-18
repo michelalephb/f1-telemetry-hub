@@ -302,7 +302,7 @@ def margin(p, d, **kw):
     gaps = []
     for r in res:
         t = r.get("time")
-        if t and t.startswith("+") and str(r["pos_text"]).isdigit():
+        if t and t.startswith("+") and str(r["pos_text"]).isdigit() and r.get("status") == "Finished":
             try:
                 gaps.append((r["code"], float(t.strip("+").rstrip("s"))))
             except ValueError:
