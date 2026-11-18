@@ -490,9 +490,20 @@ STRATEGY = [winning_plan, stop_count, long_run, climbers]
 CONDITIONS = [rain, track_temp, pit_cost, safety]
 
 
+_AVAIL: dict = {}
+
+
 def available(p, fns) -> list:
+    """The cards of fns that have data (each drawn once per run to check)."""
     d = gather(p.season, p.round, p.title)
-    return [f for f in fns if _try(f, p, d) is not None]
+    out = []
+    for f in fns:
+        k = (p.season, p.round, f.__name__)
+        if k not in _AVAIL:
+            _AVAIL[k] = _try(f, p, d) is not None
+        if _AVAIL[k]:
+            out.append(f)
+    return out
 
 
 def _try(f, p, d):
