@@ -369,6 +369,16 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
                     print(f"LAPS_PART {k // 20000:04d} {lj[k:k + 20000]}", flush=True)
             except Exception as e:
                 log.warning("laps dump: %s", e)
+            try:
+                from . import news as _news
+                _st = _news.standings(p.season)
+                oc_, ck_, rot_ = reels_tel._ctx(p)
+                print("TEAMS_JSON " + _json.dumps({"points": reels_tel.season_points_teams(p.season, _st["after_round"]),
+                                                    "standings": _st, "colors": reels_tel._colors_now(oc_, p.season, {})}, default=str), flush=True)
+            except Exception as e:
+                log.warning("teams dump: %s", e)
+            if a.story == 1:                                   # teams only
+                return 0
             blob = _json.dumps(reels_tel.gather(p), default=str)
             print(f"REELS_SIZE {len(blob)}", flush=True)
             for k in range(0, len(blob), 20000):                    # GitHub drops very long log lines
