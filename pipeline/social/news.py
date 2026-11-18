@@ -99,9 +99,16 @@ def title_math(p, st: dict, team: bool, place: int = 2, sample: bool = False):
         c.number(c.top - 0.215, "SEALED", "", size=120)
         line = f"{who} cannot drop below P{place}"
     else:
-        c.number(c.top - 0.215, f"+{s['need']}", "points", size=150)
-        line = (f"{who} must outscore {nxt} by {s['need']} here to seal P{place}" if s["possible_now"]
-                else f"{who} cannot seal P{place} in {p.title.title()}: {s['need']} points needed, more than one weekend gives")
+        margin = s["gap"] - s["left_after"]                       # > 0: P{place} sealed unless the next one gains this much or more
+        if margin > 0:
+            c.number(c.top - 0.215, fmt(margin - 1), "points of slack", size=150)
+            line = f"{who} seals P{place} here unless {nxt} outscores them by {fmt(margin)} or more"
+        elif s["possible_now"]:
+            c.number(c.top - 0.215, f"+{s['need']}", "points", size=150)
+            line = f"{who} must outscore {nxt} by {s['need']} here to seal P{place}"
+        else:
+            c.number(c.top - 0.215, fmt(s["gap"]), "points ahead", size=150)
+            line = f"Not sealed in {p.title.title()}: {s['left_after']} points still to play after it, {who} leads {nxt} by {fmt(s['gap'])}"
     c.text(0.5, c.top - 0.265, line, 22, weight=300)
     rows = (st["teams"] if team else st["drivers"])[:5]
     y0 = 0.58

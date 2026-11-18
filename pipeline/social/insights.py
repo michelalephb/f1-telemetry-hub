@@ -127,8 +127,8 @@ def last_race(oc, ref: int, ck: int, season: int, rnd: int) -> dict:
     for c, rows in plan.items():
         merged = [list(rows[0])]
         for cpd, a, b in rows[1:]:
-            boundary = merged[-1][2]
-            pitted = any(abs(l - boundary) <= 1 for l in stop_laps.get(c, []))
+            boundary = merged[-1][2]                  # last lap of the previous stint = the in lap of a stop
+            pitted = boundary in stop_laps.get(c, [])
             if cpd == merged[-1][0] and not pitted:
                 merged[-1][2] = b
             else:
@@ -518,10 +518,30 @@ def _try(f, p, d):
 
 
 def card_path(p, fns, i: int, out: Path) -> Path:
+    """Card i of the group; if its data is missing this run (say the forecast service is slow), the next
+    card of the group that works, so the hour still gets a data card."""
     P.set_event(p)
     d = gather(p.season, p.round, p.title)
-    f = available(p, fns)[i]
-    return f(p, d, swipe=False).save(out / f"insight_{f.__name__}.jpg")
+    for f in fns[i:] + fns[:i]:
+        c = _try_keep(f, p, d)
+        if c is not None:
+            return c.save(out / f"insight_{f.__name__}.jpg")
+    raise ValueError("no insight card has data")
+
+
+def _try_keep(f, p, d):
+    try:
+        return f(p, d, swipe=False)
+    except Exception as e:
+        log.warning("insight card %s failed: %s", f.__name__, e)
+        return None
+
+
+def group_size(p, fns) -> int:
+    """Fixed size of a story group: every card, as long as last year's race data loaded (the rotation must
+    not shift from one hour to the next because one service was slow)."""
+    d = gather(p.season, p.round, p.title)
+    return len(fns) if d.get("classified") else len(available(p, fns))
 
 
 def cover(p, d, n: int):

@@ -120,9 +120,9 @@ def pool(p, weights: dict | None = None) -> list[tuple]:
     # Lap in data, Gear map and Race day numbers are feed posts this week: not repeated as stories (17 Nov)
     groups = {
         "preview": list(range(1, 8)),                                   # facts and session times, not the cover
-        "strategy": list(range(len(insights.available(p, insights.STRATEGY)))),     # last year's race craft
+        "strategy": list(range(insights.group_size(p, insights.STRATEGY))),     # last year's race craft
         "braking": list(range(0, nz + 2)),                              # zone map, every zone, the table
-        "conditions": list(range(len(insights.available(p, insights.CONDITIONS)))), # forecast, track temp, pits, SC
+        "conditions": list(range(insights.group_size(p, insights.CONDITIONS))), # forecast, track temp, pits, SC
         "history": list(range(1, len(history.HISTORY[p.title]["chapters"]) + 1)) if history.available(p) else [],
     }
     # weekly optimiser: a group with weight w gets w turns per round (more of what people save and share)
