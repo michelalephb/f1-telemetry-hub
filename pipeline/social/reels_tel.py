@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 LOW_CONF_M = 20.0
 SRC_TEL = "Telemetry: OpenF1. Times: official timing"
 NOTICE = "Unofficial project, not associated with Formula 1 companies"
+NICK = {"LAS VEGAS": "at the end of the Strip"}
 COMP_COLOR = {"SOFT": "#FF3333", "MEDIUM": "#FFF200", "HARD": "#F2F4F7", "INTERMEDIATE": "#39B54A", "WET": "#00AEEF"}
 
 
@@ -132,6 +133,59 @@ def brake_rows(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, float], 
     return sorted(out, key=lambda r: r["m"])
 
 
+def brake_rows_race(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, float]) -> list[dict]:
+    """Brake point into one corner, every green lap of the race: median per driver, with the standard error.
+    One lap at about 4 samples a second is too coarse (most rows low confidence); 20+ laps per driver are not,
+    because the sample timing falls at a different place on every lap."""
+    sk = _session(oc, year, ck, "Race")
+    laps = oc.frame("laps", session_key=sk)
+    codes, cols = _codes(oc, sk)
+    laps = laps[laps["lap_duration"].notna() & (laps["lap_number"] > 1) & ~laps["is_pit_out_lap"].fillna(False).astype(bool)]
+    a = math.radians(rot)
+    out = []
+    for num, g in laps.groupby("driver_number"):
+        med = g["lap_duration"].median()
+        g = g[g["lap_duration"] <= med * 1.03]                    # green laps only (no SC, VSC, in laps)
+        if len(g) < 8:
+            continue
+        car = oc.frame("car_data", session_key=sk, driver_number=int(num))
+        loc = oc.frame("location", session_key=sk, driver_number=int(num))
+        if car.empty or loc.empty:
+            continue
+        ct = pd.to_datetime(car["date"], format="ISO8601", utc=True)
+        lt = pd.to_datetime(loc["date"], format="ISO8601", utc=True)
+        c0 = ct.iloc[0]
+        cs = (ct - c0).dt.total_seconds().to_numpy()
+        ls = (lt - c0).dt.total_seconds().to_numpy()
+        lx = loc["x"].to_numpy(float) * math.cos(a) - loc["y"].to_numpy(float) * math.sin(a)
+        ly = loc["x"].to_numpy(float) * math.sin(a) + loc["y"].to_numpy(float) * math.cos(a)
+        x, y = np.interp(cs, ls, lx), np.interp(cs, ls, ly)
+        sp, br = car["speed"].to_numpy(float), car["brake"].to_numpy(float)
+        vals = []
+        for _, lap in g.iterrows():
+            t0 = (pd.Timestamp(lap["date_start"]) - c0).total_seconds()
+            idx = np.where((cs >= t0) & (cs <= t0 + float(lap["lap_duration"])))[0]
+            if len(idx) < 50:
+                continue
+            xi, yi = x[idx], y[idx]
+            ap = int(np.argmin(np.hypot(xi - ref_xy[0], yi - ref_xy[1])))
+            if np.hypot(xi[ap] - ref_xy[0], yi[ap] - ref_xy[1]) > 300:
+                continue
+            d = np.concatenate([[0.0], np.cumsum(np.diff(cs[idx]) * (sp[idx][1:] + sp[idx][:-1]) / 2 / 3.6)])
+            b = br[idx]
+            for i in range(ap, max(ap - 60, 1), -1):
+                if b[i] > 0 and b[i - 1] == 0:
+                    vals.append(float(d[ap] - (d[i] + d[i - 1]) / 2))
+                    break
+                if d[ap] - d[i] > 450:
+                    break
+        if len(vals) >= 8:
+            v = np.array(vals)
+            out.append({"code": codes.get(int(num)), "color": cols.get(codes.get(int(num))), "m": round(float(np.median(v)), 1),
+                        "err": round(float(v.std(ddof=1) / math.sqrt(len(v))), 1), "n": len(v)})
+    return sorted(out, key=lambda r: r["m"])
+
+
 def season_quali(season: int, upto: int) -> list[dict]:
     from .. import jolpica
     rows = []
@@ -198,7 +252,7 @@ def gather(p) -> dict:
         zs = zones(p)
         z = max(zs, key=lambda z: z["entry"])
         d["zone"] = {"turn": z["turn"], "entry": z["entry"], "xy": [float(p.x[z["imin"]]), float(p.y[z["imin"]])]}
-        d["braker"] = brake_rows(oc, p.ref_year, ck, rot, tuple(d["zone"]["xy"]))
+        d["braker"] = brake_rows_race(oc, p.ref_year, ck, rot, tuple(d["zone"]["xy"]))
     except Exception as e:
         log.warning("braker: %s", e)
     done = int(jolpica._get(f"{p.season}/driverStandings.json?limit=1")["StandingsTable"]["StandingsLists"][0]["round"])
@@ -313,11 +367,12 @@ def pedal(p, lap: dict, out: Path, hook: list[str], sub: str, src: str = SRC_TEL
 def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
     P.set_event(p)
     rows = sorted(rows, key=lambda r: r["m"])[:14]
-    low = [r["err"] * 2 > LOW_CONF_M for r in rows]
+    multi = "n" in rows[0] if rows else False
+    low = [(r.get("n", 99) < 10 or r["err"] > 10) if multi else r["err"] * 2 > LOW_CONF_M for r in rows]
     lead = next((r for r, l in zip(rows, low) if not l), None)
     c = _card(p)
-    turn = zone.get("turn") or "the fastest braking zone"
-    _hook(c, ["Who brakes latest", f"into {turn}?"], f"{year} race, each driver's fastest lap, {zone['entry']} km/h on entry")
+    where = NICK.get(p.title) or f"into {zone.get('turn') or 'the fastest braking zone'}"
+    _hook(c, ["Who brakes latest", f"{where}?"], f"{year} race, {zone['entry']} km/h on entry" + (", every green lap" if multi else ", fastest lap"))
     ax = c.fig.add_axes([0.20, 0.25, 0.72, 0.44])
     ax.set_facecolor("none")
     for s in ax.spines.values():
@@ -334,8 +389,9 @@ def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
     bars = ax.barh(range(len(rows)), np.zeros(len(rows)), color=cols, height=0.62)
     labels = [ax.text(0, k, "", va="center", fontsize=13, color=P.TEXT, family=P.FONT) for k in range(len(rows))]
     verdict = c.text(0.5, 0.215, "", 22, color=P.GOLD, weight=500)
-    c.text(0.5, 0.195, "Grey: telemetry samples more than 20 m apart, low confidence", 12, color=P.MUTED, weight=300)
-    _foot(c, f"{year} race. Brake onset between two telemetry samples; error bar = half their spacing. OpenF1")
+    c.text(0.5, 0.195, ("Median of each driver's green laps, ± standard error. Grey: fewer than 10 laps or ±10 m or more" if multi
+                         else "Grey: telemetry samples more than 20 m apart, low confidence"), 12, color=P.MUTED, weight=300)
+    _foot(c, f"{year} race. Brake onset taken between two telemetry samples. OpenF1")
     if lead is not None:
         n_tie = sum(1 for r, l in zip(rows, low) if not l and r is not lead and r["m"] - r["err"] <= lead["m"] + lead["err"])
         vtxt = (f"{lead['code']} leads, but {n_tie} others are within the data's error" if n_tie
