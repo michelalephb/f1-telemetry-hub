@@ -133,11 +133,12 @@ def brake_rows(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, float], 
     return sorted(out, key=lambda r: r["m"])
 
 
-def brake_rows_race(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, float]) -> list[dict]:
+def brake_rows_race(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, float], session_name: str = "Race",
+                    min_laps: int = 8) -> list[dict]:
     """Brake point into one corner, every green lap of the race: median per driver, with the standard error.
     One lap at about 4 samples a second is too coarse (most rows low confidence); 20+ laps per driver are not,
     because the sample timing falls at a different place on every lap."""
-    sk = _session(oc, year, ck, "Race")
+    sk = _session(oc, year, ck, session_name)
     laps = oc.frame("laps", session_key=sk)
     codes, cols = _codes(oc, sk)
     laps = laps[laps["lap_duration"].notna() & (laps["lap_number"] > 1) & ~laps["is_pit_out_lap"].fillna(False).astype(bool)]
@@ -146,7 +147,7 @@ def brake_rows_race(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, flo
     for num, g in laps.groupby("driver_number"):
         med = g["lap_duration"].median()
         g = g[g["lap_duration"] <= med * 1.03]                    # green laps only (no SC, VSC, in laps)
-        if len(g) < 8:
+        if len(g) < min_laps:
             continue
         car = oc.frame("car_data", session_key=sk, driver_number=int(num))
         loc = oc.frame("location", session_key=sk, driver_number=int(num))
@@ -179,7 +180,7 @@ def brake_rows_race(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, flo
                     break
                 if d[ap] - d[i] > 450:
                     break
-        if len(vals) >= 8:
+        if len(vals) >= min_laps:
             v = np.array(vals)
             out.append({"code": codes.get(int(num)), "color": cols.get(codes.get(int(num))), "m": round(float(np.median(v)), 1),
                         "err": round(float(v.std(ddof=1) / math.sqrt(len(v))), 1), "n": len(v)})
@@ -371,7 +372,7 @@ def pedal(p, lap: dict, out: Path, hook: list[str], sub: str, src: str = SRC_TEL
     return r.close()
 
 
-def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
+def braker(p, rows: list[dict], zone: dict, out: Path, year: int, label: str = "race") -> Path:
     P.set_event(p)
     rows = sorted(rows, key=lambda r: r["m"])[:20]
     multi = "n" in rows[0] if rows else False
@@ -379,7 +380,7 @@ def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
     lead = next((r for r, l in zip(rows, low) if not l), None)
     c = _card(p)
     where = NICK.get(p.title) or f"into {zone.get('turn') or 'the fastest braking zone'}"
-    _hook(c, ["Who brakes latest", f"{where}?"], f"{year} race, {zone['entry']} km/h on entry" + (", every green lap" if multi else ", fastest lap"))
+    _hook(c, ["Who brakes latest", f"{where}?"], f"{year} {label}, {zone['entry']} km/h on entry" + (", every green lap" if multi else ", fastest lap"))
     ax = c.fig.add_axes([0.20, 0.25, 0.72, 0.44])
     ax.set_facecolor("none")
     for s in ax.spines.values():
@@ -392,13 +393,17 @@ def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
     ax.set_yticks(range(len(rows)), names, fontsize=14 if len(rows) > 14 else 16, color=P.TEXT)
     ax.set_xlim(0, vals.max() * 1.35)
     ax.set_xlabel("metres before the apex where the brake goes on (shorter = later)", color=P.MUTED, fontsize=12)
-    cols = ["#3A4252" if l else (P.GOLD if r is lead else P.CYAN) for r, l in zip(rows, low)]
-    bars = ax.barh(range(len(rows)), np.zeros(len(rows)), color=cols, height=0.62)
-    labels = [ax.text(0, k, "", va="center", fontsize=13, color=P.TEXT, family=P.FONT) for k in range(len(rows))]
+    cols = ["#3A4252" if l else (r.get("color") or P.CYAN) for r, l in zip(rows, low)]   # team colours (Michel, 17 Nov)
+    bars = ax.barh(range(len(rows)), np.zeros(len(rows)), color=cols, height=0.62,
+                   edgecolor=[P.GOLD if r is lead else "none" for r in rows], linewidth=2.5)
+    for k, r in enumerate(rows):
+        ax.get_yticklabels()[k].set_color(P.GOLD if r is lead else P.TEXT)
+    labels = [ax.text(0, k, "", va="center", fontsize=13, color=P.GOLD if rows[k] is lead else P.TEXT, family=P.FONT)
+              for k in range(len(rows))]
     verdict = c.text(0.5, 0.215, "", 22, color=P.GOLD, weight=500)
     c.text(0.5, 0.195, ("Median of each driver's green laps, ± standard error. Grey: fewer than 10 laps or ±10 m or more" if multi
                          else "Grey: telemetry samples more than 20 m apart, low confidence"), 12, color=P.MUTED, weight=300)
-    _foot(c, f"{year} race. Brake onset taken between two telemetry samples. OpenF1")
+    _foot(c, f"{year} {label}. Brake onset taken between two telemetry samples. OpenF1")
     if lead is not None:
         n_tie = sum(1 for r, l in zip(rows, low) if not l and r is not lead and r["m"] - r["err"] <= lead["m"] + lead["err"])
         vtxt = (f"{lead['code']} leads, but {n_tie} others are within the data's error" if n_tie
@@ -421,11 +426,11 @@ def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
     return r.close()
 
 
-def guess(p, lap: dict, out: Path) -> Path:
+def guess(p, lap: dict, out: Path, what: str | None = None) -> Path:
     P.set_event(p)
     L = {k: np.array(v, float) if isinstance(v, list) else v for k, v in lap.items()}
     c = _card(p)
-    hook = _hook(c, ["Who is it?", "Comment your guess"], f"fastest lap of the {L['year']} race here")
+    hook = _hook(c, ["Who is it?", "Comment your guess"], what or f"fastest lap of the {L['year']} race here")
     ax = c.fig.add_axes([0.12, 0.38, 0.80, 0.28])
     ax.set_facecolor("none")
     for s in ax.spines.values():
@@ -491,7 +496,7 @@ def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict, or
         y = 0.68 - i * 0.041
         c.text(0.08, y, t, 13, color=P.MUTED, weight=400, ha="left")
         la = c.text(0.44, y, "", 18, weight=600, ha="right")
-        lb = c.text(0.92, y, "", 18, weight=300, ha="right")
+        lb = c.text(0.92, y, "", 18, weight=600, ha="right")
         bar_a = plt.Rectangle((0.46, y - 0.008), 0, 0.016, transform=c.fig.transFigure, color=colors.get(a, P.CYAN))
         bar_b = plt.Rectangle((0.46, y - 0.008), 0, 0.016, transform=c.fig.transFigure, color="#2A3242")
         c.fig.add_artist(bar_b)
@@ -605,3 +610,178 @@ def ghost(p, a: dict, b: dict, out: Path, hook: list[str]) -> Path:
     r.add(c.fig, int(3.5 * FPS))
     plt.close(c.fig)
     return r.close()
+
+
+# ---------------------------------------------------------------- production (Michel, 17 Nov: approved, post at half past)
+
+# day offset from qualifying day -> {hour PT: kind}; posted at HH:30, between the hourly stories
+REEL_SLOTS = {
+    -2: {12: "pedal_record", 15: "braker", 21: "guess"},
+    -1: {12: "teammates", 15: "points"},
+    0: {11: "guess_fp2", 12: "ghost", 15: "pedal_pole"},
+    1: {12: "pedal_q", 15: "braker_fp2"},
+}
+TAGS = "#F1 #Formula1 {ev} #F1Telemetry #RaceWeek"
+
+
+def _ctx(p):
+    from ..__main__ import schedule
+    from ..ingest import corner_markers
+    from ..openf1 import OpenF1
+    oc = OpenF1()
+    sess = [s for s in schedule(oc, p.season) if s["round"] == p.round]
+    ck = int(sess[0]["circuit_key"])
+    mk = corner_markers(p.season - 1, ck)
+    return oc, ck, (mk.attrs.get("rotation", 0.0) if len(mk) else 0.0)
+
+
+def _poles(p) -> dict:
+    from .. import jolpica
+    cid = next(e["circuit_id"] for e in jolpica.events(p.season) if e["round"] == p.round)
+    out = {}
+    for y in range(p.season - 3, p.season):
+        ev = next((e for e in jolpica.events(y) if e["circuit_id"] == cid), None)
+        if not ev:
+            continue
+        q = jolpica._get(f"{y}/{ev['round']}/qualifying.json?limit=3")["RaceTable"]["Races"]
+        if q and q[0].get("QualifyingResults"):
+            x = q[0]["QualifyingResults"][0]
+            t = x.get("Q3") or x.get("Q2") or x.get("Q1")
+            m_, _, sec = t.rpartition(":")
+            out[y] = {"code": x["Driver"].get("code"), "time": t, "ms": (int(m_ or 0) * 60 + float(sec)) * 1000}
+    return out
+
+
+def _dry_poles(p, oc, ck, rot) -> list[dict]:
+    laps = []
+    for y, v in sorted(_poles(p).items(), reverse=True):
+        try:
+            lap = lap_of(oc, y, ck, "Qualifying", rot, v["code"], v["ms"])
+        except Exception as e:
+            log.warning("pole lap %s: %s", y, e)
+            continue
+        if (lap.get("compound") or "").upper() in ("SOFT", "MEDIUM", "HARD"):
+            lap["official"] = v["time"]
+            laps.append(lap)
+    return laps
+
+
+def _cap(p, *blocks) -> str:
+    from .captions import FOOTER, clean, event_tag, paragraphs
+    return clean(paragraphs(*blocks, FOOTER, TAGS.format(ev=event_tag(p.event))))
+
+
+def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
+    """Render one Reel for the hourly pipeline: (video, caption), or None when its data is not in."""
+    import subprocess
+    from .captions import drv
+    from .extras import circuit_history
+    out.mkdir(parents=True, exist_ok=True)
+    video = out / f"reel_{kind}.mp4"
+    oc, ck, rot = _ctx(p)
+    name = p.title.title()
+    if kind == "pedal_record":
+        h = [x for x in circuit_history(p.season, p.round) if x["year"] == p.ref_year]
+        if not h or h[0]["fl_code"] != p.driver:
+            return None
+        from .insights import gather as ig
+        plan = ig(p.season, p.round, p.title).get("plan", {}).get(p.driver, [])
+        cpd = next((c_ for c_, a_, b_ in plan if a_ <= h[0]["fl_lap"] <= b_), None)
+        lap = {"t": p.t.tolist(), "dist": p.dist.tolist(), "speed": p.speed.tolist(), "throttle": p.throttle.tolist(),
+               "brake": p.brake.tolist(), "gear": p.gear.tolist(), "x": p.x.tolist(), "y": p.y.tolist(), "lap_s": p.lap_s,
+               "compound": cpd, "lap": h[0]["fl_lap"]}
+        pedal(p, lap, video, ["Inside the", "race lap record"], f"{p.driver}, {p.ref_year}, lap {h[0]['fl_lap']}, {h[0]['fl_time']}")
+        cap = _cap(p, f"🎥 Inside the {name} race lap record: {drv(p.driver, p.colors)}, {p.ref_year}, {h[0]['fl_time']} on lap {h[0]['fl_lap']}",
+                   "👀 Throttle, brake, gear and speed, live on the map, shown faster than real time.",
+                   f"🏁 Top speed {p.stats['top_speed']} km/h, {p.stats['flat_pct']}% of the lap flat out.",
+                   "💾 Save it.\n💬 Where would you lift? Tell us below.")
+    elif kind in ("braker", "braker_fp2"):
+        from .lapdata import zones
+        z = max(zones(p), key=lambda z: z["entry"])
+        zone = {"turn": z["turn"], "entry": z["entry"], "xy": [float(p.x[z["imin"]]), float(p.y[z["imin"]])]}
+        if kind == "braker":
+            rows, year, label = brake_rows_race(oc, p.ref_year, ck, rot, tuple(zone["xy"])), p.ref_year, "race"
+        else:
+            rows, year, label = brake_rows_race(oc, p.season, ck, rot, tuple(zone["xy"]), "Practice 2", 5), p.season, "FP2"
+        if len(rows) < 8:
+            return None
+        braker(p, rows, zone, video, year, label)
+        good = [r for r in rows if r.get("n", 0) >= 10 and r["err"] <= 10] or rows
+        lead = good[0]
+        cap = _cap(p, f"🛑 Who brakes latest {NICK.get(p.title, 'into the fastest braking zone')}? {year} {label}, every green lap.",
+                   f"🥇 {drv(lead['code'], p.colors)} leads at {lead['m']:.0f} m before the apex (±{lead['err']:.0f} m).",
+                   "ℹ️ Median of each driver's green laps; the ± is the standard error. Telemetry: OpenF1.",
+                   "💬 Who did you expect at the top? Tell us below.")
+    elif kind in ("guess", "guess_fp2"):
+        if kind == "guess":
+            lap = lap_of(oc, p.season - 2, ck, "Race", rot)
+            what = f"fastest lap of the {lap['year']} race here"
+        else:
+            try:
+                lap = lap_of(oc, p.season, ck, "Practice 2", rot)
+            except Exception:
+                return None
+            what = f"fastest lap of FP2, {name} {p.season}"
+        guess(p, lap, video, what)
+        cap = _cap(p, f"🕵️ Who is it? The {what}.", "👀 One speed trace, no names. Watch to the end for the answer.",
+                   "💬 Comment your guess before the reveal!", "ℹ️ Lap time: official timing. Telemetry: OpenF1.")
+    elif kind == "teammates":
+        from . import news
+        st = news.standings(p.season)
+        rows = season_quali(p.season, st["after_round"])
+        cols = dict(p.colors)
+        teammates(p, rows, st["after_round"], video, cols, [t["name"] for t in st["teams"]])
+        cap = _cap(p, f"⚔️ Teammate wars: {p.season} qualifying head to head, after round {st['after_round']}.",
+                   "📊 Final qualifying classification each round, the rounds both drivers took part in.",
+                   "💬 Which duel surprises you most? Tell us below.")
+    elif kind == "points":
+        from . import news
+        st = news.standings(p.season)
+        pts = season_points(p.season, st["after_round"])
+        codes = [r["code"] for r in st["drivers"][1:5]]
+        pointsrace(p, pts, codes, dict(p.colors), video)
+        a, b = st["drivers"][1], st["drivers"][2]
+        cap = _cap(p, f"📈 The fight for P2 in {p.season}, round by round.",
+                   f"{drv(a['code'], p.colors)} {a['pts']:.0f} pts\n{drv(b['code'], p.colors)} {b['pts']:.0f} pts",
+                   f"ℹ️ Official standings after round {st['after_round']}.", "💬 Who finishes second? Tell us below.")
+    elif kind in ("ghost", "pedal_pole"):
+        laps = _dry_poles(p, oc, ck, rot)
+        if kind == "ghost":
+            if len(laps) < 2:
+                return None
+            a, b = sorted(laps[:2], key=lambda l: l["year"])
+            ghost(p, a, b, video, ["Two poles,", "one Strip" if p.title == "LAS VEGAS" else "one track"])
+            fast = a if a["lap_s"] < b["lap_s"] else b
+            cap = _cap(p, f"👻 Two {name} poles on one map: {drv(a['code'], p.colors)} {a['year']} {a['official']} vs {drv(b['code'], p.colors)} {b['year']} {b['official']}.",
+                       f"⏱️ {fast['code']} {fast['year']} quicker by {abs(a['lap_s'] - b['lap_s']):.3f} s (official pole times).",
+                       "💬 Which year would you take? Tell us below.")
+        else:
+            if not laps:
+                return None
+            lap = laps[0]
+            pedal(p, lap, video, ["Inside the", f"{lap['year']} pole lap"], f"{lap['code']}, {lap['year']} qualifying, {lap['official']}")
+            cap = _cap(p, f"🎥 Inside the {lap['year']} {name} pole lap: {drv(lap['code'], p.colors)}, {lap['official']}.",
+                       "👀 Throttle, brake, gear and speed on the map, shown faster than real time.",
+                       "💾 Save it.\n💬 Where is the lap won? Tell us below.")
+    elif kind == "pedal_q":
+        from .live import _q_results
+        res = _q_results(p)
+        pole = res[0] if res else None
+        try:
+            ms = None
+            if pole:
+                t = pole["q3"] or pole["q2"] or pole["q1"]
+                m_, _, sec = t.rpartition(":")
+                ms = (int(m_ or 0) * 60 + float(sec)) * 1000
+            lap = lap_of(oc, p.season, ck, "Qualifying", rot, pole["code"] if pole else None, ms)
+        except Exception:
+            return None
+        official = (pole["q3"] or pole["q2"]) if pole else _clock(lap["lap_s"])
+        pedal(p, lap, video, ["Inside the", "pole lap"], f"{lap['code']}, {name} {p.season}, {official}")
+        cap = _cap(p, f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}.",
+                   "👀 Every input on the lap, live on the map, shown faster than real time.",
+                   "💾 Save it.\n💬 Who beats it in the race? Tell us below.")
+    else:
+        return None
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-1", "-i", str(video), "-frames:v", "1", str(out / "cover.jpg")], check=True)
+    return video, cap

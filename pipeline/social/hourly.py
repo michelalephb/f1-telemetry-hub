@@ -326,6 +326,30 @@ def cmd_hourly(a) -> int:
     checks = {"season": season, "round": rnd, "now_pt": now.isoformat(timespec="minutes"), "race_week": w["race_week"],
               "gp": p.title if p is not None else None}
 
+    # Telemetry Reels at half past the hour, between the stories (Michel, 17 Nov)
+    if w["race_week"] and p is not None and now.minute >= 25:
+        from . import reels_tel
+        rk = reels_tel.REEL_SLOTS.get((now.date() - w["q"].date()).days, {}).get(now.hour)
+        if rk:
+            rsid = f"{sid}_REEL_{rk.upper()}"
+            row = post_row(sb, rsid, "reel", "session") if ig is not None else None
+            if not (row and row["status"] == "published"):
+                try:
+                    built = reels_tel.build(p, rk, out / f"reel_{rk}")
+                except Exception as e:
+                    log.error("reel %s failed: %s", rk, e)
+                    built = None
+                if built is None:
+                    log.warning("reel %s: data not in yet, skipped this run", rk)
+                else:
+                    video, cap = built
+                    jobs = [(rsid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
+                    checks |= {"reel": rk}
+                    report, failed = publish_jobs(sb, ig, jobs, checks)
+                    if ig is not None:
+                        sb.table("ig_posts").update({"content": f"reel {rk}"}).eq("session_id", rsid).eq("kind", "reel").execute()
+                    return finish(report, a.out, failed)
+
     jobs = None
     if w["race_week"] and p is not None:
         slot = SLOTS.get((now.date() - w["q"].date()).days, {}).get(now.hour)
