@@ -156,11 +156,30 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     fc_days = {(q + timedelta(days=k)).date() for k in (-2, 0, 1)} if q is not None else set()   # Wed, quali day, race day
     if now.date() in fc_days and f"rain {day}" not in used and insights.available(p, [insights.rain]):
         out.append(("rain", 0, f"rain {day}"))                      # first story of the day: today's forecast
+    from . import extras
     nz = p.stats.get("braking_zones", 0)
-    brk = [("braking", i, f"braking {i + 1}") for i in range(nz + 2) if f"braking {i + 1}" not in used]
-    nws = [("news", i, f"news {name}") for i, name in enumerate(news.available(p)) if f"news {name}" not in used]
-    for i in range(max(len(brk), len(nws))):                         # news and zones alternate
-        out += nws[i:i + 1] + brk[i:i + 1]
+    from . import live
+    try:
+        fresh = [("live", name, f"live {name}") for name, _ in live.available(p) if f"live {name}" not in used]
+    except Exception as e:
+        log.warning("live practice cards unavailable: %s", e)
+        fresh = []
+    out += fresh                                                      # fresh practice data goes first
+    lanes = [
+        [("news", i, f"news {name}") for i, name in enumerate(news.available(p)) if f"news {name}" not in used],
+        [("braking", i, f"braking {i + 1}") for i in range(nz + 2) if f"braking {i + 1}" not in used],
+    ]
+    for g, fns in extras.GROUPS.items():                              # 17 Nov: more cards, each once
+        lanes.append([(g, f.__name__, f"{g} {f.__name__}") for f in insights.available(p, fns)
+                      if f"{g} {f.__name__}" not in used])
+    news_lane, other = lanes[0], [x for x in lanes[1:] if x]
+    if other:                                                         # rotate so consecutive hours change topic
+        r = len(used) % len(other)
+        other = other[r:] + other[:r]
+    out += news_lane
+    for i in range(max((len(x) for x in other), default=0)):
+        for lane in other:
+            out += lane[i:i + 1]
     return out
 
 
@@ -175,6 +194,12 @@ def render_story(p, item: tuple, out: Path) -> Path:
     if g == "rain":
         from . import insights
         return storyize(insights.card_path(p, [insights.rain], 0, out / "src"), out / "story_rain.jpg")
+    if g == "live":
+        from . import live
+        return storyize(live.card_path(p, i, out / "src"), out / f"story_live_{i}.jpg")
+    if g in ("craft", "champ", "circuit", "learn"):
+        from . import extras
+        return storyize(extras.card_path(p, i, out / "src"), out / f"story_{g}_{i}.jpg")
     if g == "news":
         from . import news
         return storyize(news.card_path(p, i, out / "src"), out / f"story_news_{i + 1:02d}.jpg")
@@ -333,8 +358,8 @@ def cmd_hourly(a) -> int:
         item = items[0] if w["race_week"] else items[k % len(items)]       # not _HISTORY and the like
         img = render_story(p, item, out)
         jobs = [(f"{prefix}{tag}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
-        checks |= {"story": f"{item[0]} {item[1] + 1}", "pool": len(items), "posted_before": k}
         content = item[2] if w["race_week"] and len(item) > 2 and isinstance(item[2], str) else f"{item[0]} {item[1] + 1}"
+        checks |= {"story": content, "pool": len(items), "posted_before": k}
     else:
         content = checks.get("slot")
     report, failed = publish_jobs(sb, ig, jobs, checks)
