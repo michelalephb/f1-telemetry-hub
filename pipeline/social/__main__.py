@@ -357,6 +357,18 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
                 return None
             jobs.append((f"{sid}_STRATEGY", "carousel", {"video": None, "cover": None, "files": files,
                                                          "caption": insights.caption(p)}))
+        elif kind == "reels_data":                    # review only: the data the telemetry Reels need, as JSON in the log
+            from . import reels_tel
+            import json as _json
+            blob = _json.dumps(reels_tel.gather(p), default=str)
+            print(f"REELS_SIZE {len(blob)}", flush=True)
+            for k in range(0, len(blob), 20000):                    # GitHub drops very long log lines
+                print(f"REELS_PART {k // 20000:04d} {blob[k:k + 20000]}", flush=True)
+            print("PREVIEW_JSON " + _json.dumps({"title": p.title, "event": p.event, "season": p.season, "round": p.round,
+                                                 "ref_year": p.ref_year, "driver": p.driver, "lap_s": p.lap_s,
+                                                 "sessions": p.sessions, "country": p.country, "gp": p.gp, "colors": p.colors,
+                                                 "corners": p.corners, "stats": {k: (list(v) if isinstance(v, tuple) else v) for k, v in p.stats.items()}},
+                                                default=str))
         elif kind == "insights":                      # review only: every insight card, one image each
             from . import insights
             import json as _json
@@ -412,7 +424,7 @@ def cmd_preview(a) -> int:
     if ig is not None and not getattr(ig, "sends_files", False):
         log.error("preview posts need the Upload-Post publisher")
         return 1
-    if a.kind == "insights" and not a.dry_run:
+    if a.kind in ("insights", "reels_data") and not a.dry_run:
         log.error("kind insights is for review only: run it as a dry run")
         return 1
     p = preview.load(a.season, a.round)
@@ -462,7 +474,7 @@ def main(argv=None) -> int:
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
-    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel", "braking", "lap", "gears", "raceday", "starthere", "strategy", "insights", "titlemath"))
+    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel", "braking", "lap", "gears", "raceday", "starthere", "strategy", "insights", "titlemath", "reels_data"))
     ap.add_argument("--story", type=int, help="preview stories: post only story number N (1 = cover)")
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")
