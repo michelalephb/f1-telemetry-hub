@@ -158,6 +158,13 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
         out.append(("rain", 0, f"rain {day}"))                      # first story of the day: today's forecast
     from . import extras
     nz = p.stats.get("braking_zones", 0)
+    from . import live
+    try:
+        fresh = [("live", name, f"live {name}") for name, _ in live.available(p) if f"live {name}" not in used]
+    except Exception as e:
+        log.warning("live practice cards unavailable: %s", e)
+        fresh = []
+    out += fresh                                                      # fresh practice data goes first
     lanes = [
         [("news", i, f"news {name}") for i, name in enumerate(news.available(p)) if f"news {name}" not in used],
         [("braking", i, f"braking {i + 1}") for i in range(nz + 2) if f"braking {i + 1}" not in used],
@@ -182,6 +189,9 @@ def render_story(p, item: tuple, out: Path) -> Path:
     if g == "rain":
         from . import insights
         return storyize(insights.card_path(p, [insights.rain], 0, out / "src"), out / "story_rain.jpg")
+    if g == "live":
+        from . import live
+        return storyize(live.card_path(p, i, out / "src"), out / f"story_live_{i}.jpg")
     if g in ("craft", "champ", "circuit", "learn"):
         from . import extras
         return storyize(extras.card_path(p, i, out / "src"), out / f"story_{g}_{i}.jpg")

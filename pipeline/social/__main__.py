@@ -370,6 +370,15 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
             print("CRAFT_JSON " + _json.dumps({k: v for k, v in extras.craft_data(p.season, p.round, p.title).items()
                                                 if k != "positions"}, default=str))
             print("CIRCUIT_JSON " + _json.dumps(extras.circuit_history(p.season, p.round), default=str))
+            from . import live
+            import dataclasses as _dc
+            prev = _dc.replace(p, round=p.round - 1)          # live cards tested on the previous round's practice
+            for name, _ in live.available(prev):
+                try:
+                    jobs.append((f"{sid}_REVIEW_live_{name}", "story", {"video": None, "cover": None, "caption": "",
+                                 "files": [live.card_path(prev, name, out)]}))
+                except Exception as e:
+                    log.warning("review live %s: %s", name, e)
             for g, fns in extras.GROUPS.items():
                 for f in fns:
                     try:
