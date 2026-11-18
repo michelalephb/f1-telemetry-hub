@@ -38,3 +38,24 @@ def test_count_mismatch_fails(tmp_path):
         assert "F1DB has" in str(e)
     else:
         raise AssertionError("a short write must fail the load")
+
+
+def test_send_splits_on_timeout():
+    from pipeline import f1db
+    calls = []
+
+    def call(t, rows, wipe):
+        calls.append((len(rows), wipe))
+        if len(rows) > 100:
+            raise RuntimeError("{'message': 'canceling statement due to statement timeout', 'code': '57014'}")
+        return len(rows)
+
+    assert f1db._send(call, "race_data", list(range(400)), True) == 400
+    assert [w for n, w in calls if n <= 100] == [True, False, False, False]  # wipe only once, on the first piece
+
+
+def test_send_other_errors_raise():
+    import pytest
+    from pipeline import f1db
+    with pytest.raises(RuntimeError):
+        f1db._send(lambda t, r, w: (_ for _ in ()).throw(RuntimeError("boom")), "x", [1, 2], True)

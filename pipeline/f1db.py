@@ -20,7 +20,7 @@ import requests
 log = logging.getLogger(__name__)
 RELEASE_API = "https://api.github.com/repos/f1db/f1db/releases/latest"
 ASSET = "f1db-sqlite.zip"
-CHUNK = 1000
+CHUNK = 500
 
 
 def latest_release(token: str | None = None) -> dict:
@@ -67,6 +67,19 @@ def tables(con: sqlite3.Connection) -> list[str]:
     return [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
 
 
+def _send(call, t: str, rows: list, wipe: bool) -> int:
+    """One batch; on a statement timeout, split it in two and retry (down to 25 rows). Only the
+    first half carries the wipe, so a table is never emptied twice."""
+    try:
+        return call(t, rows, wipe)
+    except Exception as e:  # postgrest APIError: canceling statement due to statement timeout (57014)
+        if "57014" not in str(e) or len(rows) <= 25:
+            raise
+        log.warning("f1db.%s: timeout on %d rows, splitting", t, len(rows))
+        h = len(rows) // 2
+        return _send(call, t, rows[:h], wipe) + _send(call, t, rows[h:], False)
+
+
 def load(db_path: str, call) -> dict[str, int]:
     """call(table, rows, wipe) inserts rows and returns how many were written."""
     con = sqlite3.connect(db_path)
@@ -76,10 +89,10 @@ def load(db_path: str, call) -> dict[str, int]:
         for row in table_rows(con, t):
             batch.append(row)
             if len(batch) >= CHUNK:
-                n += call(t, batch, first)
+                n += _send(call, t, batch, first)
                 batch, first = [], False
         if batch or first:
-            n += call(t, batch, first)
+            n += _send(call, t, batch, first)
         expected = con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
         if n != expected:
             raise RuntimeError(f"{t}: wrote {n} rows, F1DB has {expected}")
