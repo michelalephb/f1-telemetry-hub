@@ -172,8 +172,13 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     for g, fns in extras.GROUPS.items():                              # 17 Nov: more cards, each once
         lanes.append([(g, f.__name__, f"{g} {f.__name__}") for f in insights.available(p, fns)
                       if f"{g} {f.__name__}" not in used])
-    for i in range(max(len(x) for x in lanes)):                       # news first, then the lanes take turns
-        for lane in lanes:
+    news_lane, other = lanes[0], [x for x in lanes[1:] if x]
+    if other:                                                         # rotate so consecutive hours change topic
+        r = len(used) % len(other)
+        other = other[r:] + other[:r]
+    out += news_lane
+    for i in range(max((len(x) for x in other), default=0)):
+        for lane in other:
             out += lane[i:i + 1]
     return out
 
