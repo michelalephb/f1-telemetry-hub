@@ -33,7 +33,7 @@ RACE_OVER_H = 3                  # race week ends 3 h after the race start
 # day offset from qualifying day -> {PT hour: preview kind}
 SLOTS = {
     -3: {9: "history_carousel", 12: "starthere", 18: "history"},
-    -2: {9: "carousel", 18: "braking"},
+    -2: {9: "carousel", 18: "strategy"},        # was braking: its zones already run as stories (17 Nov)
     -1: {9: "reel", 18: "lap"},
     0: {9: "gears"},
     1: {9: "raceday"},
@@ -116,13 +116,14 @@ def pool(p, weights: dict | None = None) -> list[tuple]:
     if p is None:
         return [("start", i) for i in range(4)]
     nz = p.stats.get("braking_zones", 0)
+    from . import insights
+    # Lap in data, Gear map and Race day numbers are feed posts this week: not repeated as stories (17 Nov)
     groups = {
         "preview": list(range(1, 8)),                                   # facts and session times, not the cover
+        "strategy": list(range(len(insights.available(p, insights.STRATEGY)))),     # last year's race craft
         "braking": list(range(0, nz + 2)),                              # zone map, every zone, the table
+        "conditions": list(range(len(insights.available(p, insights.CONDITIONS)))), # forecast, track temp, pits, SC
         "history": list(range(1, len(history.HISTORY[p.title]["chapters"]) + 1)) if history.available(p) else [],
-        "lap": [0],
-        "gears": [0],
-        "raceday": [0] if p.title in brand.RACE_DAY else [],
     }
     # weekly optimiser: a group with weight w gets w turns per round (more of what people save and share)
     w = {g: max(1, int((weights or {}).get(g, 1))) for g in groups}
@@ -144,6 +145,10 @@ def render_story(p, item: tuple, out: Path) -> Path:
         return preview.stories(p, out)[i]
     if g == "recap":
         return storyize(item[2], out / f"story_recap_{i + 1:02d}.jpg")
+    if g in ("strategy", "conditions"):
+        from . import insights
+        fns = insights.STRATEGY if g == "strategy" else insights.CONDITIONS
+        return storyize(insights.card_path(p, fns, i, out / "src"), out / f"story_{g}_{i + 1:02d}.jpg")
     if g == "braking":
         card = lapdata.braking_carousel(p, out / "src")[i]
     elif g == "history":
