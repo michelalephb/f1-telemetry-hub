@@ -172,6 +172,7 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     for g, fns in extras.GROUPS.items():                              # 17 Nov: more cards, each once
         lanes.append([(g, f.__name__, f"{g} {f.__name__}") for f in insights.available(p, fns)
                       if f"{g} {f.__name__}" not in used])
+    pins = _pins().get(f"{now:%Y-%m-%d %H}")                         # the order Michel approved in advance
     news_lane, other = lanes[0], [x for x in lanes[1:] if x]
     if other:                                                         # rotate so consecutive hours change topic
         r = len(used) % len(other)
@@ -180,7 +181,24 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     for i in range(max((len(x) for x in other), default=0)):
         for lane in other:
             out += lane[i:i + 1]
+    if pins:
+        hit = [u for u in out if u[2] == pins]
+        if hit:
+            out = hit + [u for u in out if u[2] != pins]
+        else:
+            log.warning("pinned card %s not available this hour: next new card instead", pins)
     return out
+
+
+def _pins() -> dict:
+    """Approved story order for a day: pins.json {"YYYY-MM-DD HH": content key} (optional)."""
+    import json
+    f = Path(__file__).with_name("pins.json")
+    try:
+        return json.loads(f.read_text()) if f.exists() else {}
+    except Exception as e:
+        log.warning("pins.json unreadable: %s", e)
+        return {}
 
 
 def render_story(p, item: tuple, out: Path) -> Path:
@@ -208,7 +226,7 @@ def render_story(p, item: tuple, out: Path) -> Path:
         fns = insights.STRATEGY if g == "strategy" else insights.CONDITIONS
         return storyize(insights.card_path(p, fns, i, out / "src"), out / f"story_{g}_{i + 1:02d}.jpg")
     if g == "braking":
-        card = lapdata.braking_carousel(p, out / "src")[i]
+        card = lapdata.braking_carousel(p, out / "src", story=True)[i]
     elif g == "history":
         card = history.carousel(p, out / "src")[i]
     elif g == "start":
