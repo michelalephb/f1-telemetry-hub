@@ -92,7 +92,7 @@ def zone_map(ax, p, z: dict, n: int):
     P.dot(ax, p.x[z["imin"]], p.y[z["imin"]], ms=12)
 
 
-def braking_carousel(p, out: Path) -> list[Path]:
+def braking_carousel(p, out: Path, story: bool = False) -> list[Path]:
     P.set_event(p)
     zs = zones(p)
     paths = []
@@ -105,7 +105,7 @@ def braking_carousel(p, out: Path) -> list[Path]:
     c.text(0.5, t - 0.285, "Every stop on the lap, from full speed to the apex", 24, weight=300)
     P.brake_map(P.track_ax(c, [0.10, 0.16, 0.80, 0.42], p), p)
     c.text(0.5, 0.115, f"Measured on the {lap_src(p)}", 14, color=P.MUTED, weight=300)
-    c.footer("SWIPE  →")
+    c.footer(None if story else "SWIPE  →")
     paths.append(c.save(out / "slide_01.jpg"))
 
     for n, z in enumerate(zs, 1):
@@ -120,7 +120,7 @@ def braking_carousel(p, out: Path) -> list[Path]:
         tax = c.fig.add_axes([0.58, 0.24, 0.36, 0.26])
         zone_trace(tax, p, z)
         c.text(0.5, 0.135, f"{Lap_src(p)}. {SAMPLING}: slowest point within about 10 km/h", 13, color=P.MUTED, weight=300)
-        c.footer("SWIPE  →")
+        c.footer(None if story else "SWIPE  →")
         paths.append(c.save(out / f"slide_{n + 1:02d}.jpg"))
 
     # summary table

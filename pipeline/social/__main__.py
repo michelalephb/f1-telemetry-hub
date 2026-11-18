@@ -360,6 +360,15 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
         elif kind == "reels_data":                    # review only: the data the telemetry Reels need, as JSON in the log
             from . import reels_tel
             import json as _json
+            from . import learn as _learn
+            try:
+                lp = _learn.laps_data(p.season, p.round)[["code", "lap_number", "st_speed", "lap_duration", "duration_sector_1",
+                                                          "duration_sector_2", "duration_sector_3"]]
+                lj = lp.to_json(orient="records")
+                for k in range(0, len(lj), 20000):
+                    print(f"LAPS_PART {k // 20000:04d} {lj[k:k + 20000]}", flush=True)
+            except Exception as e:
+                log.warning("laps dump: %s", e)
             blob = _json.dumps(reels_tel.gather(p), default=str)
             print(f"REELS_SIZE {len(blob)}", flush=True)
             for k in range(0, len(blob), 20000):                    # GitHub drops very long log lines
