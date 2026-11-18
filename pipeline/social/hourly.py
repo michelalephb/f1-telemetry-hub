@@ -182,7 +182,7 @@ def render_story(p, item: tuple, out: Path) -> Path:
     if g == "rain":
         from . import insights
         return storyize(insights.card_path(p, [insights.rain], 0, out / "src"), out / "story_rain.jpg")
-    if g in ("craft", "champ", "circuit"):
+    if g in ("craft", "champ", "circuit", "learn"):
         from . import extras
         return storyize(extras.card_path(p, i, out / "src"), out / f"story_{g}_{i}.jpg")
     if g == "news":

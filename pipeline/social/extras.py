@@ -489,7 +489,9 @@ def fastest_laps(p, d, **kw):
 
 CIRCUIT = [pole_conversion, winners_grid, fastest_laps]
 
-GROUPS = {"craft": CRAFT, "champ": CHAMP, "circuit": CIRCUIT}
+from .learn import LEARN  # noqa: E402
+
+GROUPS = {"craft": CRAFT, "champ": CHAMP, "circuit": CIRCUIT, "learn": LEARN}
 
 
 def by_name(name: str):
