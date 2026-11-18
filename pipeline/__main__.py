@@ -45,7 +45,18 @@ def official_rounds(season: int) -> dict:
         return {}
 
 
+_SCHEDULE_CACHE: dict = {}
+
+
 def schedule(oc: OpenF1, season: int, rounds_by_date: dict | None = None) -> list[dict]:
+    """Cached per process (the social cards ask for it many times in one run)."""
+    key = (season, tuple(sorted((str(k), v) for k, v in rounds_by_date.items())) if rounds_by_date else None)
+    if key not in _SCHEDULE_CACHE:
+        _SCHEDULE_CACHE[key] = _schedule(oc, season, rounds_by_date)
+    return [dict(x) for x in _SCHEDULE_CACHE[key]]
+
+
+def _schedule(oc: OpenF1, season: int, rounds_by_date: dict | None = None) -> list[dict]:
     """Every championship session of the season from OpenF1, numbered with the official rounds.
 
     A meeting gets the official round whose race date is within one day of its Race session

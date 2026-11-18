@@ -364,6 +364,9 @@ def cmd_hourly(a) -> int:
                 checks["slot"] = slot
     if not jobs:
         from .metrics import weights
+        if w["race_week"] and ig is not None and published_count(sb, f"{sid}_H{tag}"):
+            log.info("%s_H%s already published: nothing more this hour", sid, tag)    # before the heavy card checks
+            return 0
         if w["race_week"]:
             items, prefix = story_units(sb, p, sid, now, w["q"]), f"{sid}_H"
             if not items:
