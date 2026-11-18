@@ -340,6 +340,36 @@ def preview_jobs(p, sid: str, kinds: list[str], out_dir: str, season: int, story
             else:
                 jobs.append((f"{season}_BRAND_START", "carousel", {"video": None, "cover": None, "files": brand.start_here(out),
                                                                      "caption": brand.start_here_caption()}))
+        elif kind == "titlemath":
+            from . import news
+            try:
+                files = news.title_carousel(p, out)
+            except Exception as e:
+                log.error("no championship math for %s: %s", p.title, e)
+                return None
+            jobs.append((f"{sid}_TITLE", "carousel", {"video": None, "cover": None, "files": files, "caption": news.title_caption(p)}))
+        elif kind == "strategy":
+            from . import insights
+            try:
+                files = insights.carousel(p, out)
+            except Exception as e:
+                log.error("no strategy carousel for %s: %s", p.title, e)
+                return None
+            jobs.append((f"{sid}_STRATEGY", "carousel", {"video": None, "cover": None, "files": files,
+                                                         "caption": insights.caption(p)}))
+        elif kind == "insights":                      # review only: every insight card, one image each
+            from . import insights
+            import json as _json
+            print("INSIGHTS_JSON " + _json.dumps(insights.gather(p.season, p.round, p.title), default=str))
+            from . import news
+            try:
+                print("STANDINGS_JSON " + _json.dumps(news.standings(p.season), default=str))
+            except Exception as e:
+                log.warning("standings unavailable: %s", e)
+            for g, fns in (("strategy", insights.STRATEGY), ("conditions", insights.CONDITIONS)):
+                for i, f in enumerate(insights.available(p, fns)):
+                    jobs.append((f"{sid}_REVIEW_{g}_{i + 1}", "story", {"video": None, "cover": None, "caption": "",
+                                 "files": [insights.card_path(p, fns, i, out)]}))
         elif kind == "history_carousel":
             from . import history
             if not history.available(p):
@@ -365,6 +395,9 @@ def cmd_preview(a) -> int:
     ig = connect(sb, a.dry_run)
     if ig is not None and not getattr(ig, "sends_files", False):
         log.error("preview posts need the Upload-Post publisher")
+        return 1
+    if a.kind == "insights" and not a.dry_run:
+        log.error("kind insights is for review only: run it as a dry run")
         return 1
     p = preview.load(a.season, a.round)
     if a.dump:
@@ -413,7 +446,7 @@ def main(argv=None) -> int:
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
-    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel", "braking", "lap", "gears", "raceday", "starthere"))
+    ap.add_argument("--kind", choices=KINDS + ("stories", "history", "history_carousel", "braking", "lap", "gears", "raceday", "starthere", "strategy", "insights", "titlemath"))
     ap.add_argument("--story", type=int, help="preview stories: post only story number N (1 = cover)")
     ap.add_argument("--dry-run", action="store_true", help="render only: no uploads, no rows, no posts")
     ap.add_argument("--force", action="store_true", help="rewind even while the season is running")

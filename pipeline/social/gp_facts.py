@@ -223,3 +223,11 @@ HISTORY_ON_HOLD = {
         ],
     },
 }
+
+
+# Weekend news from the FIA documents of the event, filled by the race week research task with a source per
+# item, then checked. {title: {season: {"upgrades": [{team, color, items: [(area, what)]}],
+#   "pu": {"rows": [{driver, counts: {ICE: n, ...}}], "allowance": {ICE: n, ...}},
+#   "penalties": [{driver, team, places, reason, source}]}}}
+# A card is drawn only when its list is filled; nothing is guessed.
+NEWS: dict = {}
