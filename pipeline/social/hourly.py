@@ -34,8 +34,9 @@ RACE_OVER_H = 3                  # race week ends 3 h after the race start
 SLOTS = {
     -3: {9: "history_carousel", 12: "starthere", 18: "history"},
     -2: {9: "titlemath", 18: "strategy"},       # 17 Nov: championship math and the strategy file (no duplicates)
-    -1: {9: "reel", 18: "lap"},
-    0: {9: "gears"},
+    # 18 Nov, no replicas: the Preview Reel, Lap in data and Gear map repeated Tuesday's stories; new Reels instead
+    -1: {9: "reeltel:pedal_wet", 18: "reeltel:braker_z2"},
+    0: {9: "reeltel:teammates_race"},
     1: {9: "raceday"},
 }
 
@@ -371,6 +372,29 @@ def cmd_hourly(a) -> int:
     jobs = None
     if w["race_week"] and p is not None:
         slot = SLOTS.get((now.date() - w["q"].date()).days, {}).get(now.hour)
+        if slot and slot.startswith("reeltel:"):
+            from . import reels_tel
+            rk = slot.split(":", 1)[1]
+            rsid = f"{sid}_REEL_{rk.upper()}"
+            row = post_row(sb, rsid, "reel", "session") if ig is not None else None
+            if row and row["status"] == "published":
+                log.info("slot %s already published: nothing more this hour", slot)
+                return 0
+            try:
+                built = reels_tel.build(p, rk, out / f"reel_{rk}")
+            except Exception as e:
+                log.error("reel %s failed: %s", rk, e)
+                built = None
+            if built is not None:
+                video, cap = built
+                jobs = [(rsid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
+                checks["slot"] = slot
+                report, failed = publish_jobs(sb, ig, jobs, checks)
+                if ig is not None:
+                    sb.table("ig_posts").update({"content": f"reel {rk}"}).eq("session_id", rsid).eq("kind", "reel").execute()
+                return finish(report, a.out, failed)
+            log.warning("slot reel %s not built: a story this hour instead", rk)
+            slot = None
         if slot:
             jobs = preview_jobs(p, sid, [slot], str(out), season)
             if jobs:

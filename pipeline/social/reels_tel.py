@@ -207,6 +207,30 @@ def season_points(season: int, upto: int) -> list[dict]:
     return out
 
 
+def season_points_teams(season: int, upto: int) -> list[dict]:
+    from .. import jolpica
+    out = []
+    for rnd in range(1, upto + 1):
+        cs = jolpica._get(f"{season}/{rnd}/constructorStandings.json?limit=12")["StandingsTable"]["StandingsLists"]
+        if not cs:
+            continue
+        out.append({"round": rnd, "pts": {x["Constructor"]["name"]: float(x["points"]) for x in cs[0]["ConstructorStandings"]}})
+    return out
+
+
+def season_race_h2h(season: int, upto: int) -> list[dict]:
+    """Race classification per round (finishing order, retirements count as behind), for teammate race duels."""
+    from .. import jolpica
+    rows = []
+    for rnd in range(1, upto + 1):
+        rr = jolpica._get(f"{season}/{rnd}/results.json?limit=100")["RaceTable"]["Races"]
+        if not rr:
+            continue
+        for x in rr[0]["Results"]:
+            rows.append({"round": rnd, "code": x["Driver"].get("code"), "team": x["Constructor"]["name"], "pos": int(x["position"])})
+    return rows
+
+
 def gather(p) -> dict:
     """Everything the week's Reels need, as plain JSON."""
     from .. import jolpica
@@ -461,7 +485,8 @@ def guess(p, lap: dict, out: Path, what: str | None = None) -> Path:
     return r.close()
 
 
-def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict, order: list[str] | None = None) -> Path:
+def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict, order: list[str] | None = None,
+              what: str = "qualifying") -> Path:
     P.set_event(p)
     df = pd.DataFrame(rows)
     teams = []
@@ -486,7 +511,7 @@ def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict, or
         teams.sort(key=lambda x: rank.get(x[0], 99))
     teams = teams[:11]
     c = _card(p)
-    _hook(c, ["Teammate wars", f"{p.season} qualifying"], f"head to head, after round {after_round}")
+    _hook(c, ["Teammate wars", f"{p.season} {what}"], f"head to head, after round {after_round}")
     rows_t = []
     for i, (t, a, b, tally) in enumerate(teams):
         y = 0.68 - i * 0.041
@@ -499,7 +524,7 @@ def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict, or
         c.fig.add_artist(bar_a)
         rows_t.append((a, b, tally, la, lb, bar_a, bar_b))
     rnd_lbl = c.text(0.5, 0.20, "", 18, color=P.CYAN, weight=600, track=True)
-    _foot(c, "Final qualifying classification each round (Jolpica, official)")
+    _foot(c, f"Final {what} classification each round (Jolpica, official)")
     r = Reel(out)
     n_rounds = max(len(x[2]) for x in rows_t)
     per = int(0.45 * FPS)
@@ -519,10 +544,11 @@ def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict, or
     return r.close()
 
 
-def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path) -> Path:
+def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path, teams: bool = False) -> Path:
     P.set_event(p)
     c = _card(p)
-    _hook(c, ["The fight for P2", "round by round"], f"{p.season} drivers championship, after round {points[-1]['round']}")
+    _hook(c, ["The fight for P2", "round by round"],
+          f"{p.season} {'constructors' if teams else 'drivers'} championship, after round {points[-1]['round']}")
     ax = c.fig.add_axes([0.12, 0.25, 0.70, 0.42])
     ax.set_facecolor("none")
     for s in ax.spines.values():
@@ -539,6 +565,7 @@ def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path)
     tags = {cd: ax.text(0, 0, "", color=colors.get(cd, P.CYAN), fontsize=15, family=P.FONT, weight=700, va="center") for cd in codes}
     gap = c.text(0.5, 0.21, "", 24, color=P.GOLD, weight=500)
     _foot(c, "Official standings after each round (Jolpica)")
+    short = (lambda q: q.replace(" F1 Team", "").replace(" Racing", "")) if teams else (lambda q: q)
     r = Reel(out)
     n = int(10 * FPS)
     for i in range(n + 1):
@@ -559,11 +586,12 @@ def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path)
                     yv = py - span
             placed.append(yv)
             tags[cd].set_position((ends[cd][0] + 0.3, yv))
-            tags[cd].set_text(f"{cd} {ends[cd][1]:.0f}")
+            tags[cd].set_text(f"{short(cd)} {ends[cd][1]:.0f}")
         r.add(c.fig)
     last = {cd: series[cd][-1] for cd in codes}
     order = sorted(codes, key=lambda cd: -last[cd])
-    gap.set_text(f"{order[0]} leads {order[1]} by {last[order[0]] - last[order[1]]:.0f}, {order[2]} {last[order[1]] - last[order[2]]:.0f} further back")
+    gap.set_text(f"{short(order[0])} leads {short(order[1])} by {last[order[0]] - last[order[1]]:.0f}, "
+                 f"{short(order[2])} {last[order[1]] - last[order[2]]:.0f} further back")
     r.add(c.fig, int(3.5 * FPS))
     plt.close(c.fig)
     return r.close()
@@ -612,9 +640,9 @@ def ghost(p, a: dict, b: dict, out: Path, hook: list[str]) -> Path:
 
 # day offset from qualifying day -> {hour PT: kind}; posted at HH:30, between the hourly stories
 REEL_SLOTS = {
-    -2: {12: "pedal_record", 15: "braker", 21: "guess"},
+    -2: {12: "points_teams", 15: "braker", 21: "guess"},       # pedal_record posted early (17 Nov, 10:42 PM)
     -1: {12: "teammates", 15: "points"},
-    0: {11: "guess_fp2", 12: "ghost", 15: "pedal_pole"},
+    0: {11: "guess2023", 12: "ghost", 15: "pedal_pole"},        # guess_fp2 dropped: the FP2 story reveals that driver
     1: {12: "pedal_q", 15: "braker_fp2"},
 }
 TAGS = "#F1 #Formula1 {ev} #F1Telemetry #RaceWeek"
@@ -788,6 +816,74 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         cap = _cap(p, f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}.",
                    "👀 Every input on the lap, live on the map, shown faster than real time.",
                    "💾 Save it.\n💬 Who beats it in the race? Tell us below.")
+    elif kind == "points_teams":
+        from . import news
+        st = news.standings(p.season)
+        pts = season_points_teams(p.season, st["after_round"])
+        names = [t["name"] for t in st["teams"][1:5]]
+        cols = _colors_now(oc, p.season, {})
+        drv_team = {}
+        for r in news.standings(p.season)["drivers"]:
+            drv_team.setdefault(r["team"], r["code"])
+        tcol = {t: cols.get(drv_team.get(t), P.CYAN) for t in names}
+        pointsrace(p, pts, names, tcol, video, teams=True)
+        a, b = st["teams"][1], st["teams"][2]
+        cap = _cap(p, f"📈 The constructors fight for P2 in {p.season}, round by round.",
+                   f"🏎️ {a['name']} {a['pts']:.0f} pts\n🏎️ {b['name']} {b['pts']:.0f} pts",
+                   f"ℹ️ Official standings after round {st['after_round']}.", "💬 Who keeps second? Tell us below.")
+    elif kind == "pedal_wet":
+        pol = _poles(p)
+        wet = [(y, v) for y, v in sorted(pol.items(), reverse=True)]
+        lap = None
+        for y, v in wet:
+            try:
+                l_ = lap_of(oc, y, ck, "Qualifying", rot, v["code"], v["ms"])
+            except Exception:
+                continue
+            if (l_.get("compound") or "").upper() in ("INTERMEDIATE", "WET"):
+                lap, lap["official"] = l_, v["time"]
+                break
+        if lap is None:
+            return None
+        pedal(p, lap, video, ["Inside the", "wet pole lap"], f"{lap['code']}, {lap['year']} qualifying, {lap['official']}")
+        cap = _cap(p, f"🌧️ Inside the wet {name} pole lap: {drv(lap['code'], p.colors)}, {lap['year']}, {lap['official']} on {lap['compound'].lower()}s.",
+                   "👀 Every input on a cold, wet track, shown faster than real time.",
+                   "💾 Save it.\n💬 Could it rain again this year? Tell us below.")
+    elif kind == "braker_z2":
+        from .lapdata import zones
+        zs = sorted(zones(p), key=lambda z: -z["entry"])
+        if len(zs) < 2:
+            return None
+        z = zs[1]
+        zone = {"turn": z["turn"], "entry": z["entry"], "xy": [float(p.x[z["imin"]]), float(p.y[z["imin"]])]}
+        rows = brake_rows_race(oc, p.ref_year, ck, rot, tuple(zone["xy"]), ref_frac=float(p.dist[z["imin"]] / p.dist[-1]))
+        if len(rows) < 8:
+            return None
+        saved = NICK.pop(p.title, None)                      # this is not the end of the Strip: use the turn name
+        try:
+            braker(p, rows, zone, video, p.ref_year, "race")
+        finally:
+            if saved:
+                NICK[p.title] = saved
+        good = [r for r in rows if r.get("n", 0) >= 10 and r["err"] <= 10] or rows
+        cap = _cap(p, f"🛑 Who brakes latest into {zone['turn']}? {p.ref_year} race, every green lap.",
+                   f"🥇 {drv(good[0]['code'], p.colors)} leads: brakes {good[0]['m']:.0f} m before the slowest point (±{good[0]['err']:.0f} m).",
+                   "ℹ️ Median of each driver's green laps; the ± is the standard error. Telemetry: OpenF1.",
+                   "💬 Surprised? Tell us below.")
+    elif kind == "teammates_race":
+        from . import news
+        st = news.standings(p.season)
+        rows = season_race_h2h(p.season, st["after_round"])
+        teammates(p, rows, st["after_round"], video, _colors_now(oc, p.season, p.colors), [t["name"] for t in st["teams"]], "races")
+        cap = _cap(p, f"⚔️ Teammate wars, race edition: {p.season} race head to head, after round {st['after_round']}.",
+                   "📊 Official race classification each round, the rounds both drivers started.",
+                   "💬 Quali pace or race craft: which matters more? Tell us below.")
+    elif kind == "guess2023":
+        lap = lap_of(oc, p.season - 3, ck, "Race", rot)
+        what = f"fastest lap of the {lap['year']} race here"
+        guess(p, lap, video, what)
+        cap = _cap(p, f"🕵️ Who is it? The {what}.", "👀 One speed trace, no names. Watch to the end for the answer.",
+                   "💬 Comment your guess before the reveal!", "ℹ️ Lap time: official timing. Telemetry: OpenF1.")
     else:
         return None
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-1", "-i", str(video), "-frames:v", "1", str(out / "cover.jpg")], check=True)
