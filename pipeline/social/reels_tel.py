@@ -306,11 +306,18 @@ def _track(c, rect, xs, ys, lw=7):
 
 
 def _tyre_chip(c, x, y, compound: str | None):
+    """A small tyre glyph in the compound colour with its name, centred at (x, y) in figure units."""
     if not compound:
         return
-    col = COMP_COLOR.get(compound, "#888")
-    c.fig.add_artist(plt.Circle((x, y), 0.012, transform=c.fig.transFigure, fc="#14171D", ec=col, lw=4))
-    c.text(x + 0.022, y, compound.lower(), 15, color=col, weight=600, ha="left")
+    cp = "INTER" if compound.startswith("INTER") else compound
+    code = {"SOFT": "S", "MEDIUM": "M", "HARD": "H", "INTER": "I", "WET": "W"}.get(cp, "?")
+    h = 0.03
+    w = h * H_REEL / 1080
+    ax = c.fig.add_axes([x - w / 2, y - h / 2, w, h])
+    ax.set_xlim(-1.1, 1.1), ax.set_ylim(-1.1, 1.1), ax.set_aspect("equal"), ax.axis("off")
+    if cp in P.COMPOUND_COLOR:
+        P.tyre(ax, 0, 0, 1.0, cp, code, label=False)
+    c.text(x + w / 2 + 0.01, y, cp.lower() + "s", 16, color=P.COMPOUND_COLOR.get(cp, P.TEXT), weight=600, ha="left")
 
 
 # ---------------------------------------------------------------- renderers
@@ -339,7 +346,7 @@ def pedal(p, lap: dict, out: Path, hook: list[str], sub: str, src: str = SRC_TEL
     spd = c.text(0.73, 0.285, "", 46, color=P.CYAN, weight=300)
     c.text(0.73, 0.255, "KM/H", 13, color=P.MUTED, weight=600, track=True)
     clock = c.text(0.73, 0.225, "", 24, weight=300)
-    _tyre_chip(c, 0.40, 0.475, L.get("compound"))
+    _tyre_chip(c, 0.66, 0.475, L.get("compound"))
     _foot(c, src)
     r = Reel(out)
     T = L["t"]
@@ -366,7 +373,7 @@ def pedal(p, lap: dict, out: Path, hook: list[str], sub: str, src: str = SRC_TEL
 
 def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
     P.set_event(p)
-    rows = sorted(rows, key=lambda r: r["m"])[:14]
+    rows = sorted(rows, key=lambda r: r["m"])[:20]
     multi = "n" in rows[0] if rows else False
     low = [(r.get("n", 99) < 10 or r["err"] > 10) if multi else r["err"] * 2 > LOW_CONF_M for r in rows]
     lead = next((r for r, l in zip(rows, low) if not l), None)
@@ -382,7 +389,7 @@ def braker(p, rows: list[dict], zone: dict, out: Path, year: int) -> Path:
     names = [r["code"] for r in rows]
     vals = np.array([r["m"] for r in rows])
     errs = np.array([r["err"] for r in rows])
-    ax.set_yticks(range(len(rows)), names, fontsize=16, color=P.TEXT)
+    ax.set_yticks(range(len(rows)), names, fontsize=14 if len(rows) > 14 else 16, color=P.TEXT)
     ax.set_xlim(0, vals.max() * 1.35)
     ax.set_xlabel("metres before the apex where the brake goes on (shorter = later)", color=P.MUTED, fontsize=12)
     cols = ["#3A4252" if l else (P.GOLD if r is lead else P.CYAN) for r, l in zip(rows, low)]
@@ -419,7 +426,7 @@ def guess(p, lap: dict, out: Path) -> Path:
     L = {k: np.array(v, float) if isinstance(v, list) else v for k, v in lap.items()}
     c = _card(p)
     hook = _hook(c, ["Who is it?", "Comment your guess"], f"fastest lap of the {L['year']} race here")
-    ax = c.fig.add_axes([0.10, 0.36, 0.82, 0.24])
+    ax = c.fig.add_axes([0.12, 0.38, 0.80, 0.28])
     ax.set_facecolor("none")
     for s in ax.spines.values():
         s.set_visible(False)
@@ -430,8 +437,6 @@ def guess(p, lap: dict, out: Path) -> Path:
     ax.set_ylabel("km/h", color=P.MUTED, fontsize=12)
     ax.grid(axis="y", color="#1E2533", lw=0.6)
     line, = ax.plot([], [], color=P.CYAN, lw=3)
-    tax = _track(c, [0.30, 0.62, 0.40, 0.10], L["x"], L["y"], lw=4)
-    dot, = tax.plot([], [], "o", ms=10, color=P.CYAN, zorder=3)
     hints = c.text(0.5, 0.31, "", 20, weight=300)
     reveal = c.text(0.5, 0.26, "", 60, weight=200)
     sub = c.text(0.5, 0.215, "", 18, color=P.CYAN, weight=600, track=True)
@@ -441,7 +446,6 @@ def guess(p, lap: dict, out: Path) -> Path:
     for i in range(n):
         k = int((len(L["dist"]) - 1) * _ease(i / n))
         line.set_data(L["dist"][:k + 1] / 1000, L["speed"][:k + 1])
-        dot.set_data([L["x"][k]], [L["y"][k]])
         if i == int(0.4 * n):
             hints.set_text(f"top speed {max(L['speed']):.0f} km/h, {L['compound'].lower() if L.get('compound') else 'tyre unknown'}s")
         r.add(c.fig)
@@ -456,7 +460,7 @@ def guess(p, lap: dict, out: Path) -> Path:
     return r.close()
 
 
-def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict) -> Path:
+def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict, order: list[str] | None = None) -> Path:
     P.set_event(p)
     df = pd.DataFrame(rows)
     teams = []
@@ -476,13 +480,15 @@ def teammates(p, rows: list[dict], after_round: int, out: Path, colors: dict) ->
                     tb += 1
             tally.append((rnd, ta, tb))
         teams.append((t, a, b, tally))
-    teams.sort(key=lambda x: -max(x[3][-1][1], x[3][-1][2]) + min(x[3][-1][1], x[3][-1][2]))
-    teams = teams[:10]
+    if order:                                                       # constructors standings order
+        rank = {t: i for i, t in enumerate(order)}
+        teams.sort(key=lambda x: rank.get(x[0], 99))
+    teams = teams[:11]
     c = _card(p)
     _hook(c, ["Teammate wars", f"{p.season} qualifying"], f"head to head, after round {after_round}")
     rows_t = []
     for i, (t, a, b, tally) in enumerate(teams):
-        y = 0.67 - i * 0.047
+        y = 0.68 - i * 0.041
         c.text(0.08, y, t, 13, color=P.MUTED, weight=400, ha="left")
         la = c.text(0.44, y, "", 18, weight=600, ha="right")
         lb = c.text(0.92, y, "", 18, weight=300, ha="right")
@@ -527,6 +533,7 @@ def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path)
     ax.set_xlim(1, rounds[-1] + 0.5)
     ax.set_ylim(0, max(max(v) for v in series.values()) * 1.1)
     ax.set_xlabel("round", color=P.MUTED, fontsize=12)
+    ax.set_xticks([1, 5, 10, 15, 20][: len([t for t in (1, 5, 10, 15, 20) if t <= rounds[-1]])])
     lines = {cd: ax.plot([], [], color=colors.get(cd, P.CYAN), lw=3.4)[0] for cd in codes}
     tags = {cd: ax.text(0, 0, "", color=colors.get(cd, P.CYAN), fontsize=15, family=P.FONT, weight=700, va="center") for cd in codes}
     gap = c.text(0.5, 0.21, "", 24, color=P.GOLD, weight=500)
@@ -536,12 +543,22 @@ def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path)
     for i in range(n + 1):
         u = 1 + (len(rounds) - 1) * _ease(i / n)
         k = int(u)
+        ends = {}
         for cd in codes:
             xs = rounds[:k] + ([u] if k < len(rounds) else [])
             ys = series[cd][:k] + ([np.interp(u, rounds, series[cd])] if k < len(rounds) else [])
             lines[cd].set_data(xs, ys)
-            tags[cd].set_position((xs[-1] + 0.3, ys[-1]))
-            tags[cd].set_text(f"{cd} {ys[-1]:.0f}")
+            ends[cd] = (xs[-1], ys[-1])
+        span = ax.get_ylim()[1] * 0.045                              # keep the labels apart
+        placed = []
+        for cd in sorted(codes, key=lambda q: -ends[q][1]):
+            yv = ends[cd][1]
+            for py in placed:
+                if abs(yv - py) < span:
+                    yv = py - span
+            placed.append(yv)
+            tags[cd].set_position((ends[cd][0] + 0.3, yv))
+            tags[cd].set_text(f"{cd} {ends[cd][1]:.0f}")
         r.add(c.fig)
     last = {cd: series[cd][-1] for cd in codes}
     order = sorted(codes, key=lambda cd: -last[cd])
