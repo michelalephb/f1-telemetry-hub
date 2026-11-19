@@ -1,6 +1,7 @@
 """Brand: @f1telemetryhub dark theme (project spec section 4) and fonts."""
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -84,9 +85,11 @@ MONO = "DejaVu Sans Mono"
 def load_fonts() -> None:
     """Space Grotesk and JetBrains Mono from $SOCIAL_FONTS (the workflow downloads them), else Inter, else DejaVu."""
     global HEAD, MONO
-    d = os.environ.get("SOCIAL_FONTS")
+    # Inter ships in the repo (assets/fonts, OFL): no package mirror needed at post time (18 Nov: the mirror
+    # stalled 9 to 19 min on several runs and made posts late).
+    d = os.environ.get("SOCIAL_FONTS") or str(Path(__file__).resolve().parents[2] / "assets" / "fonts")
     if d and Path(d).is_dir():
-        for f in Path(d).glob("*.ttf"):
+        for f in sorted(Path(d).glob("*.ttf")) + sorted(Path(d).glob("*.otf")):
             try:
                 font_manager.fontManager.addfont(str(f))
             except Exception:
@@ -95,6 +98,11 @@ def load_fonts() -> None:
     # Paddock Cyan (template v01): Inter everywhere, thin numbers; charts sit on the card gradient.
     HEAD = next((n for n in ("Inter", "Space Grotesk", "DejaVu Sans") if n in names), "DejaVu Sans")
     MONO = next((n for n in ("Inter", "JetBrains Mono", "DejaVu Sans Mono") if n in names), "DejaVu Sans Mono")
+    try:
+        logging.getLogger(__name__).info("fonts: %s, weight 200 from %s", HEAD, font_manager.findfont(
+            font_manager.FontProperties(family=HEAD, weight=200), fallback_to_default=False))
+    except Exception:
+        logging.getLogger(__name__).warning("fonts: %s (Inter not found)", HEAD)
     plt.rcParams.update({
         "font.family": HEAD, "text.color": TEXT, "axes.labelcolor": MUTED, "xtick.color": MUTED, "ytick.color": MUTED,
         "axes.edgecolor": "#3A4458", "axes.facecolor": "none", "figure.facecolor": BG, "savefig.facecolor": BG,
