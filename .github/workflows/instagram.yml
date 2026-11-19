@@ -51,9 +51,19 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: ffmpeg and fonts (Inter, JetBrains Mono)
+        # The package mirror stalls now and then (14 to 19 min on 3 of 14 runs, 18 Nov): fetching normally takes
+        # 15 s, so a fetch over 2 min is cut and retried on a fresh connection. Installing is never cut.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-inter fonts-jetbrains-mono || sudo apt-get install -y -qq ffmpeg
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          PKGS="ffmpeg fonts-inter fonts-jetbrains-mono"
+          for i in 1 2 3 4; do
+            if sudo timeout 90 apt-get $APT update -qq && sudo timeout 120 apt-get $APT install -y -qq --download-only $PKGS; then
+              break
+            fi
+            echo "package fetch stalled (attempt $i), retrying"
+            sleep 3
+          done
+          sudo apt-get install -y -qq $PKGS || sudo apt-get install -y -qq ffmpeg
           ffmpeg -version | head -n 1
       - name: Post (or dry run)
         env:
