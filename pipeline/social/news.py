@@ -222,7 +222,48 @@ def facts(p) -> dict:
 def available(p) -> list[str]:
     """News cards whose facts are in (gp_facts.NEWS[title][season]), in a stable order."""
     f = facts(p)
-    return [k for k in ("upgrades", "pu", "penalties") if f.get(k)]
+    return [k for k in ("upgrades", "pu", "penalties") if (_list_penalties(f) if k == "penalties" else f.get(k))]
+
+
+def _list_penalties(f: dict) -> list[dict]:
+    """Penalties still to show on the list card: a driver who already had his own story (story: True) is left
+    out, under any spelling of the same entry, so the list never repeats him."""
+    told = {it["driver"].upper() for it in f.get("penalties", []) if it.get("story")}
+    return [it for it in f.get("penalties", []) if it["driver"].upper() not in told]
+
+
+def penalty_story(p, it: dict):
+    """One grid penalty explained, native 9:16 story: what happened, the rule, what it means on the grid.
+    it: driver, team, color, places, why [(label, line)], engines {used, limit}, source."""
+    from .render import H_REEL
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    c.kicker(c.top - 0.05, "Grid penalty")
+    c.number(c.top - 0.15, f"+{it['places']}", "grid places", size=150, color="#EF4444")
+    c.text(0.5, c.top - 0.205, it["driver"].upper(), 34, weight=600, track=True)
+    c.text(0.5, c.top - 0.233, it["team"].upper(), 16, color=it.get("color", P.CYAN), weight=600, track=True)
+    e = it.get("engines")
+    if e:                                       # one block per combustion engine of the season, the extra one in red
+        n, lim = e["used"], e["limit"]
+        w, gap, y = 0.11, 0.025, c.top - 0.31
+        x0 = 0.5 - (n * w + (n - 1) * gap) / 2
+        for k in range(n):
+            x = x0 + k * (w + gap)
+            over = k >= lim
+            col = "#EF4444" if over else P.CYAN
+            c.fig.add_artist(plt.Rectangle((x, y), w, 0.045, transform=c.fig.transFigure, fill=over,
+                                           facecolor=col if over else "none", edgecolor=col, lw=1.6, alpha=0.9))
+            c.text(x + w / 2, y + 0.0225, f"ICE {k + 1}", 15, color="#0B0E14" if over else P.CYAN, weight=700)
+        c.text(0.5, y - 0.022, f"Limit {lim} per driver per season", 14, color=P.MUTED, weight=400)
+    y = c.top - 0.395
+    for label, line in it["why"][:5]:
+        c.text(0.10, y, label.upper(), 13, color=P.CYAN, weight=600, ha="left", track=True)
+        c.text(0.10, y - 0.022, line, 19, color=P.TEXT, weight=300, ha="left")
+        c.rule(0.10, 0.90, y - 0.04, color="#1E2533", lw=0.6)
+        y -= 0.062
+    c.text(0.5, c.bottom + 0.035, it["source"], 11, color=P.MUTED, weight=300)
+    c.footer()
+    return c
 
 
 def card_path(p, i: int, out: Path) -> Path:
@@ -234,7 +275,7 @@ def card_path(p, i: int, out: Path) -> Path:
     elif k == "pu":
         c = pu_usage(p, f["pu"]["rows"], f["pu"]["allowance"])
     else:
-        c = penalties(p, f["penalties"])
+        c = penalties(p, _list_penalties(f))
     return c.save(out / f"news_{k}.jpg")
 
 

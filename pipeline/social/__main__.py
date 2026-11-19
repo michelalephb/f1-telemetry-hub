@@ -479,7 +479,7 @@ def finish(report: list, out: str, failed: int) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.social")
-    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview", "hourly", "metrics", "optimize", "reel"])
+    ap.add_argument("cmd", choices=["run", "rewind", "refresh", "preview", "hourly", "metrics", "optimize", "reel", "news"])
     ap.add_argument("--season", type=int, default=datetime.now(timezone.utc).year)
     ap.add_argument("--round", type=int, help="preview: round of the coming Grand Prix")
     ap.add_argument("--session", help="one session id, e.g. 2026_20_Q (default: ingested sessions from the last 72 h)")
@@ -490,6 +490,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default="ig_out")
     ap.add_argument("--dump", help="preview: also save the lap data (pickle) for design work")
     ap.add_argument("--now", help="hourly: pretend it is this time (ISO), for testing")
+    ap.add_argument("--news", help="news: post the grid penalty story of this driver code (gp_facts.NEWS, story: True) now")
     ap.add_argument("--reel", help="reel: post this telemetry Reel now (a reels_tel.REEL_SLOTS kind); its slot then stays done")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -498,7 +499,7 @@ def main(argv=None) -> int:
     from .hourly import cmd_hourly
     from .metrics import cmd_metrics, cmd_optimize
     return {"run": cmd_run, "rewind": cmd_rewind, "refresh": cmd_refresh, "preview": cmd_preview,
-            "hourly": cmd_hourly, "metrics": cmd_metrics, "optimize": cmd_optimize, "reel": cmd_reel}[a.cmd](a)
+            "hourly": cmd_hourly, "metrics": cmd_metrics, "optimize": cmd_optimize, "reel": cmd_reel, "news": cmd_news}[a.cmd](a)
 
 
 def cmd_reel(a) -> int:
@@ -525,6 +526,36 @@ def cmd_reel(a) -> int:
     report, failed = publish_jobs(sb, ig, jobs, {"reel": a.reel, "manual": True})
     if ig is not None:
         sb.table("ig_posts").update({"content": f"reel {a.reel}"}).eq("session_id", sid).eq("kind", "reel").execute()
+    return finish(report, a.out, failed)
+
+
+
+def cmd_news(a) -> int:
+    """Post one breaking news story now (Michel, 18 Nov: Piastri's grid penalty). One id per driver, so it never
+    posts twice; its content key keeps the hourly news lane from showing him again."""
+    from . import news, preview
+    from .hourly import TZ, where_are_we
+    from ..openf1 import OpenF1
+    sb = store.client()
+    ig = connect(sb, a.dry_run)
+    w = where_are_we(OpenF1(), datetime.now(TZ))
+    p = preview.load(w["season"], w["round"])
+    preview.set_event(p)
+    code = a.news.upper()
+    it = next((x for x in news.facts(p).get("penalties", []) if x.get("code") == code and x.get("story")), None)
+    if it is None:
+        log.error("no checked penalty story for %s", code)
+        return 1
+    sid = f"{w['season']}_{w['round']:02d}_PREVIEW_NEWS_PEN_{code}"
+    row = post_row(sb, sid, "story", "session") if ig is not None else None
+    if row and row["status"] == "published":
+        log.info("penalty story %s already published", code)
+        return 0
+    img = news.penalty_story(p, it).save(Path(a.out) / f"news_penalty_{code}.jpg")
+    jobs = [(sid, "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
+    report, failed = publish_jobs(sb, ig, jobs, {"news": f"penalty {code}", "manual": True})
+    if ig is not None:
+        sb.table("ig_posts").update({"content": f"news penalty {code}"}).eq("session_id", sid).eq("kind", "story").execute()
     return finish(report, a.out, failed)
 
 

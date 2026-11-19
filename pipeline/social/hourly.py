@@ -151,6 +151,7 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     if p is None:
         return []
     rows = sb.table("ig_posts").select("content").like("session_id", f"{sid}_H%").eq("status", "published").execute().data
+    rows += sb.table("ig_posts").select("content").like("session_id", f"{sid}_NEWS%").eq("status", "published").execute().data
     used = {r["content"] for r in rows if r.get("content")}
     out = []
     day = f"{now:%Y-%m-%d}"
