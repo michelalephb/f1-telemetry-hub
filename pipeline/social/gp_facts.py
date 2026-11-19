@@ -230,4 +230,31 @@ HISTORY_ON_HOLD = {
 #   "pu": {"rows": [{driver, counts: {ICE: n, ...}}], "allowance": {ICE: n, ...}},
 #   "penalties": [{driver, team, places, reason, source}]}}}
 # A card is drawn only when its list is filled; nothing is guessed.
-NEWS: dict = {}
+# A penalty with story: True already had its own story (social __main__ mode news): the list card leaves that
+# driver out, so do not add him again from the FIA documents.
+NEWS: dict = {
+    "LAS VEGAS": {
+        2026: {
+            "penalties": [
+                {
+                    "driver": "Oscar Piastri", "code": "PIA", "team": "McLaren", "color": "#FF8000",
+                    "places": 10, "reason": "5th ICE of the season", "story": True,
+                    "engines": {"used": 5, "limit": 4},
+                    "why": [
+                        ("What happened", "New combustion engine after a reliability issue"),
+                        ("The rule", "4 ICEs per driver per season. This is his 5th"),
+                        ("The price", "First extra ICE of the year: 10 places back"),
+                        ("On the grid", "Even pole in qualifying means P11 on Saturday"),
+                        ("McLaren's view", "A good chance to recover places by overtaking"),
+                    ],
+                    "source": "Source: McLaren Las Vegas GP preview, 17 Nov 2026 (Motorsport.com, Sky Sports)",
+                    "sources": [
+                        "https://www.motorsport.com/f1/news/oscar-piastri-set-for-grid-penalty-at-f1-las-vegas-gp/10875180/",
+                        "https://www.skysports.com/f1/news/13613606/oscar-piastri-to-serve-grid-penalty-at-las-vegas-gp-as-mclaren-confirm-addition-of-more-upgrades-to-mcl40",
+                        "https://f1i.com/news/578148-piastri-hit-with-10-place-grid-penalty-for-las-vegas-gp.html",
+                    ],
+                },
+            ],
+        },
+    },
+}
