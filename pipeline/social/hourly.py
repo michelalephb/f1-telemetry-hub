@@ -189,7 +189,17 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
             out = hit + [u for u in out if u[2] != pins]
         else:
             log.warning("pinned card %s not available this hour: next new card instead", pins)
-    return out
+    # Session reports from the news come before everything, pins included: the hours after a session are
+    # about that session, data or not (Michel, 19 Nov)
+    try:
+        from .gp_facts import SESSION_NEWS
+        sess = [("session", f"{code}:{i}", f"news {code} {i}")
+                for code, items in SESSION_NEWS.get(p.title, {}).get(q.year if q is not None else now.year, {}).items()
+                for i in range(1, len(items) + 1) if f"news {code} {i}" not in used]
+    except Exception as e:
+        log.error("session reports unavailable: %s", e)
+        sess = []
+    return sess + out
 
 
 def _pins() -> dict:
@@ -220,6 +230,13 @@ def render_story(p, item: tuple, out: Path) -> Path:
     if g in ("craft", "champ", "circuit", "learn"):
         from . import extras
         return storyize(extras.card_path(p, i, out / "src"), out / f"story_{g}_{i}.jpg")
+    if g == "session":
+        from . import news
+        from .gp_facts import SESSION_NEWS
+        code, k = i.split(":")
+        it = SESSION_NEWS[p.title][next(iter(y for y in SESSION_NEWS[p.title] if code in SESSION_NEWS[p.title][y]))][code][int(k) - 1]
+        out.mkdir(parents=True, exist_ok=True)
+        return news.session_story(p, it).save(out / f"story_session_{code}_{k}.jpg")
     if g == "news":
         from . import news
         return storyize(news.card_path(p, i, out / "src"), out / f"story_news_{i + 1:02d}.jpg")
@@ -426,7 +443,14 @@ def cmd_hourly(a) -> int:
             return 0
         k = published_count(sb, f"{prefix}20") if ig is not None else 0   # only hourly or daily ids (prefix + date),
         item = items[0] if w["race_week"] else items[k % len(items)]       # not _HISTORY and the like
-        img = render_story(p, item, out)
+        try:
+            img = render_story(p, item, out)
+        except Exception as e:                    # never lose the hour to one card: take the next one
+            if not w["race_week"] or len(items) < 2:
+                raise
+            log.error("story %s failed (%s): next card instead", item[2] if len(item) > 2 else item, e)
+            item = items[1]
+            img = render_story(p, item, out)
         jobs = [(f"{prefix}{tag}", "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
         content = item[2] if w["race_week"] and len(item) > 2 and isinstance(item[2], str) else f"{item[0]} {item[1] + 1}"
         checks |= {"story": content, "pool": len(items), "posted_before": k}
