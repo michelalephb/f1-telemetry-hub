@@ -86,7 +86,7 @@ class OpenF1:
                 return
             CACHE.mkdir(parents=True, exist_ok=True)
             f.write_text(body)
-            DIRTY.touch()
+            DIRTY.write_text("1")
         except Exception as e:  # the cache must never break a post
             log.warning("OpenF1 cache write failed: %s", e)
 

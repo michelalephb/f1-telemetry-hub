@@ -108,8 +108,15 @@ jobs:
             [ -n "$KIND" ] && ARGS+=(--kind "$KIND")
             python -m pipeline.social run "${ARGS[@]}"
           fi
+      - name: Any new OpenF1 answers?
+        id: of1
+        if: always()
+        run: |
+          n=$(ls .openf1_cache 2>/dev/null | wc -l)
+          echo "OpenF1 answers kept: $n"
+          if [ -f openf1_cache_dirty ]; then echo "dirty=1" >> "$GITHUB_OUTPUT"; fi
       - name: Keep the new OpenF1 answers for the next runs
-        if: always() && hashFiles('openf1_cache_dirty') != ''
+        if: always() && steps.of1.outputs.dirty == '1'
         uses: actions/cache/save@v4
         with:
           path: .openf1_cache
