@@ -542,6 +542,24 @@ def cmd_news(a) -> int:
     p = preview.load(w["season"], w["round"])
     preview.set_event(p)
     code = a.news.upper()
+    from .gp_facts import SESSION_NEWS
+    reports = SESSION_NEWS.get(p.title, {}).get(w["season"], {}).get(code)
+    if reports:                                  # session report stories: FP1, FP2, FP3, Q, R
+        report, failed = [], 0
+        for i, it in enumerate(reports, 1):
+            sid = f"{w['season']}_{w['round']:02d}_PREVIEW_NEWS_{code}_{i}"
+            row = post_row(sb, sid, "story", "session") if ig is not None else None
+            if row and row["status"] == "published":
+                log.info("%s report %s already published", code, i)
+                continue
+            img = news.session_story(p, it).save(Path(a.out) / f"news_{code}_{i}.jpg")
+            jobs = [(sid, "story", {"video": None, "cover": None, "files": [img], "caption": ""})]
+            r, f = publish_jobs(sb, ig, jobs, {"news": f"{code} {i}", "manual": True})
+            report += r
+            failed += f
+            if ig is not None:
+                sb.table("ig_posts").update({"content": f"news {code} {i}"}).eq("session_id", sid).eq("kind", "story").execute()
+        return finish(report, a.out, failed)
     it = next((x for x in news.facts(p).get("penalties", []) if x.get("code") == code and x.get("story")), None)
     if it is None:
         log.error("no checked penalty story for %s", code)

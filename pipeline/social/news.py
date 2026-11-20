@@ -266,6 +266,29 @@ def penalty_story(p, it: dict):
     return c
 
 
+def session_story(p, it: dict):
+    """A session report from the news, native 9:16 story, posted within the hour after a session even when
+    no timing data is out yet (Michel, 19 Nov: FP1 in the rain). it: kicker, big, big_label, color, title,
+    subtitle, why [(label, line)], source. Every line is a fact checked in at least two outlets."""
+    from .render import H_REEL
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    c.kicker(c.top - 0.05, it["kicker"])
+    c.number(c.top - 0.15, it["big"], it["big_label"], size=150, color=it.get("color", P.CYAN))
+    c.text(0.5, c.top - 0.205, it["title"].upper(), 30, weight=600, track=True)
+    if it.get("subtitle"):
+        c.text(0.5, c.top - 0.233, it["subtitle"].upper(), 16, color=P.CYAN, weight=600, track=True)
+    y = c.top - 0.30
+    for label, line in it["why"][:6]:
+        c.text(0.10, y, label.upper(), 13, color=P.CYAN, weight=600, ha="left", track=True)
+        c.text(0.10, y - 0.022, line, 19, color=P.TEXT, weight=300, ha="left")
+        c.rule(0.10, 0.90, y - 0.04, color="#1E2533", lw=0.6)
+        y -= 0.062
+    c.text(0.5, c.bottom + 0.035, it["source"], 11, color=P.MUTED, weight=300)
+    c.footer()
+    return c
+
+
 def card_path(p, i: int, out: Path) -> Path:
     P.set_event(p)
     f = facts(p)

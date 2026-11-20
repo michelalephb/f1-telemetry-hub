@@ -258,3 +258,35 @@ NEWS: dict = {
         },
     },
 }
+
+
+# Session reports from the news, posted within the hour after each session even before timing data is out
+# (Michel, 19 Nov). SESSION_NEWS[gp][season][session code] = list of stories (news.session_story). Each line is
+# a fact found in at least two outlets; posted once each by social __main__ mode news, kind = session code.
+SESSION_NEWS: dict = {
+    "LAS VEGAS": {
+        2026: {
+            "FP1": [
+                {
+                    "kicker": "FP1 report", "big": "0", "big_label": "timed laps", "color": "#00AEEF",
+                    "title": "Washed out", "subtitle": "Rain and standing water on the Strip",
+                    "why": [
+                        ("The track", "Heavy rain, standing water, aquaplaning"),
+                        ("Top of the sheet", "Perez, Cadillac: first car out, no time"),
+                        ("Stayed in", "Norris, Piastri, Stroll, Lawson, Lindblad"),
+                        ("Last minute", "Both Alpines out for practice starts"),
+                        ("Next", "FP2 at 8 PM PT, drier conditions expected"),
+                    ],
+                    "source": "Sources: PlanetF1, Crash.net, RacingNews365, GrandPrix247, 19 Nov 2026",
+                    "sources": [
+                        "https://www.planetf1.com/news/2026-las-vegas-grand-prix-fp1-report",
+                        "https://www.crash.net/f1/results/1110235/1/2026-f1-las-vegas-grand-prix-friday-practice-results",
+                        "https://racingnews365.com/2026-f1-las-vegas-grand-prix-free-practice-1-results",
+                        "https://www.grandprix247.com/formula-1-news/las-vegas-grand-prix-fp1-nothing-to-report-actually-just-rain",
+                        "https://autoindiadaily.in/motorsport/2026-f1-las-vegas-gp-fp1-results/",
+                    ],
+                },
+            ],
+        },
+    },
+}
