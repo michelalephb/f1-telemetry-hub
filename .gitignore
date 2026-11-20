@@ -4,3 +4,5 @@ __pycache__/
 .fastf1_cache/
 .env
 .venv/
+.openf1_cache/
+openf1_cache_dirty
