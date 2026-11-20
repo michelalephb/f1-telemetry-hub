@@ -60,6 +60,7 @@ class OpenF1:
                 self._keep(url, [])
                 return []
             if r.status_code in (401, 403):  # live session lockout: no point retrying
+                log.warning("OpenF1 %s on %s: %s", r.status_code, path, r.text[:300].replace("\n", " "))
                 break
             if r.status_code in (429, 500, 502, 503, 504):
                 back = 10 * (attempt + 1)
