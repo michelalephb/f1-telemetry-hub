@@ -266,30 +266,39 @@ def penalty_story(p, it: dict):
     return c
 
 
-def session_story(p, it: dict):
+def session_story(p, it: dict, story: bool = True):
     """A session report, native 9:16 story, posted within the hour after a session even when no timing
     data is out yet (Michel, 19 Nov). With "standings" it is the v2 layout Michel asked for on 19 Nov: the
     session named clearly, then the order as CODE + car number in team colour with times, then what
     happened in a few short lines. Without it, the first layout (FP1 washout)."""
-    if not it.get("standings"):
+    if not it.get("standings") and not it.get("times"):
         return _session_story_v1(p, it)
     from .gp_facts import DRIVERS
     from .render import H_REEL
-    c = P.Card(H_REEL, story=True)
+    c = P.Card(H_REEL, story=True) if story else P.Card(H_POST)
+    k_ = 1.0 if story else 1.2                      # a little more room per line on the 4:5 feed card
     c.header(p)
-    y = c.top - 0.065
+    y = c.top - 0.065 * k_
     c.text(0.06, y, it["session"], 64, color=P.CYAN, weight=700, ha="left")
-    c.text(0.33, y + 0.012, it["session_name"].upper(), 20, weight=600, ha="left", track=True)
-    c.text(0.33, y - 0.014, it["when"].upper(), 14, color=P.MUTED, weight=400, ha="left", track=True)
-    y -= 0.06
+    c.text(0.33, y + 0.012 * k_, it["session_name"].upper(), 20, weight=600, ha="left", track=True)
+    c.text(0.33, y - 0.014 * k_, it["when"].upper(), 14, color=P.MUTED, weight=400, ha="left", track=True)
+    y -= 0.06 * k_
     c.text(0.06, y, it["title"], 34, weight=600, ha="left")
     if it.get("subtitle"):
-        c.text(0.06, y - 0.03, it["subtitle"], 18, color=P.MUTED, weight=300, ha="left")
-    y -= 0.07
-    c.rule(0.06, 0.94, y + 0.012, color="#232D3F", lw=0.8)
-    rows = it["standings"][:10]
-    step = min(0.034, 0.36 / max(len(rows), 1))
-    for k, (code, t) in enumerate(rows):
+        c.text(0.06, y - 0.03 * k_, it["subtitle"], 18, color=P.MUTED, weight=300, ha="left")
+    y -= 0.07 * k_
+    c.rule(0.06, 0.94, y + 0.012 * k_, color="#232D3F", lw=0.8)
+    if it.get("times"):                       # a timetable: zone left, time right
+        step = 0.05 * k_
+        for k, (zone, t) in enumerate(it["times"][:6]):
+            yy = y - step * k - step / 2
+            c.text(0.06, yy, zone, 22, weight=600, ha="left")
+            c.text(0.94, yy, t, 22, color=P.CYAN if k == 0 else P.TEXT, weight=600 if k == 0 else 400, ha="right")
+        rows = it["times"][:6]
+    else:
+        rows = it["standings"][:10]
+        step = min(0.034 if story else 0.04, (0.36 if story else 0.40) / max(len(rows), 1))
+    for k, (code, t) in enumerate(rows if not it.get("times") else []):
         num, team, col = DRIVERS.get(code, ("", "", "9AA1AC"))
         yy = y - step * k - step / 2
         c.text(0.085, yy, str(k + 1), 17, color=P.MUTED, weight=400, ha="center")
@@ -299,13 +308,13 @@ def session_story(p, it: dict):
         c.text(0.255, yy, str(num), 21, color="#" + col, weight=700, ha="left")
         c.text(0.34, yy, team.upper(), 12, color=P.MUTED, weight=500, ha="left", track=True)
         c.text(0.94, yy, t, 19, color=P.TEXT if k == 0 else P.MUTED, weight=600 if k == 0 else 400, ha="right")
-    y -= step * len(rows) + 0.022
-    c.rule(0.06, 0.94, y + 0.012, color="#232D3F", lw=0.8)
-    c.text(0.06, y - 0.012, "WHAT HAPPENED", 13, color=P.CYAN, weight=600, ha="left", track=True)
+    y -= step * len(rows) + 0.022 * k_
+    c.rule(0.06, 0.94, y + 0.012 * k_, color="#232D3F", lw=0.8)
+    c.text(0.06, y - 0.012 * k_, it.get("notes_label", "WHAT HAPPENED"), 13, color=P.CYAN, weight=600, ha="left", track=True)
     for line in it.get("notes", [])[:3]:
-        y -= 0.029
-        c.text(0.06, y - 0.012, line, 18, weight=300, ha="left")
-    c.text(0.5, c.bottom + 0.035, it["source"], 11, color=P.MUTED, weight=300)
+        y -= 0.029 * k_
+        c.text(0.06, y - 0.012 * k_, line, 18, weight=300, ha="left")
+    c.text(0.5, c.bottom + 0.035 * k_, it["source"], 11, color=P.MUTED, weight=300)
     c.footer()
     return c
 

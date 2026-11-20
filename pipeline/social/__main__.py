@@ -543,6 +543,25 @@ def cmd_news(a) -> int:
     preview.set_event(p)
     code = a.news.upper()
     from .gp_facts import SESSION_NEWS
+    if code.startswith("FEED:"):                 # a feed carousel of session cards, e.g. FEED:FP2.2+QPRE.1
+        from .captions import dot
+        from .gp_facts import DRIVERS, SESSION_FEEDS
+        g = SESSION_NEWS.get(p.title, {}).get(w["season"], {})
+        parts = [(x.split(".")[0], int(x.split(".")[1])) for x in code[5:].split("+")]
+        sid = f"{w['season']}_{w['round']:02d}_PREVIEW_FEED_" + "_".join(f"{c}{i}" for c, i in parts)
+        row = post_row(sb, sid, "carousel", "session") if ig is not None else None
+        if row and row["status"] == "published":
+            log.info("feed %s already published", code)
+            return 0
+        files = [news.session_story(p, g[c][i - 1], story=False).save(Path(a.out) / f"feed_{c}_{i}.jpg") for c, i in parts]
+        cap = SESSION_FEEDS[p.title][w["season"]][code[5:]]
+        cap = cap.replace("{dot:", "\x00").split("\x00")
+        caption = cap[0] + "".join(dot(DRIVERS[x[:3]][2]) + x[4:] for x in cap[1:])
+        jobs = [(sid, "carousel", {"video": None, "cover": None, "files": files, "caption": caption})]
+        report, failed = publish_jobs(sb, ig, jobs, {"feed": code[5:], "manual": True})
+        if ig is not None:
+            sb.table("ig_posts").update({"content": f"feed {code[5:]}"}).eq("session_id", sid).eq("kind", "carousel").execute()
+        return finish(report, a.out, failed)
     reports = SESSION_NEWS.get(p.title, {}).get(w["season"], {}).get(code)
     if reports:                                  # session report stories: FP1, FP2, FP3, Q, R
         report, failed = [], 0

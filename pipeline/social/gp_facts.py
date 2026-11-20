@@ -308,6 +308,25 @@ SESSION_NEWS: dict = {
                     ],
                 },
             ],
+            "QPRE": [
+                {
+                    "session": "Q", "session_name": "Qualifying", "when": "Tonight, Fri 20 Nov, Las Vegas",
+                    "title": "Grid set tonight", "subtitle": "One hour, three parts, 22 cars",
+                    "times": [["Las Vegas (PT)", "Fri 8:00 PM"], ["New York (ET)", "Fri 11:00 PM"],
+                              ["London (GMT)", "Sat 4:00 AM"], ["Paris (CET)", "Sat 5:00 AM"]],
+                    "notes_label": "BEFORE QUALIFYING",
+                    "notes": ["FP3 today at 4:30 PM PT", "Russell fastest in FP2, 1:47.272",
+                              "Piastri starts 10 places down"],
+                    "source": "Sources: formula1.com, The Race, GPblog, RacingNews365, GPFans, 20 Nov 2026",
+                    "sources": [
+                        "https://www.formula1.com/en/latest/article/what-time-is-the-formula-1-2026-las-vegas-grand-prix-and-how-can-i-watch-it.5klYngWOQMjROxZ3nEp5Pr",
+                        "https://www.the-race.com/formula-1/what-time-is-f1s-2026-las-vegas-grand-prix-full-weekend-schedule/",
+                        "https://www.gpblog.com/en/news/formula-1-las-vegas-gp-2026-all-session-times-and-full-weekend-schedule",
+                        "https://racingnews365.com/2026-f1-las-vegas-grand-prix-time-schedule",
+                        "https://www.gpfans.com/en/f1-news/1092915/f1-las-vegas-grand-prix-2026-schedule-uk-start-times-how-to-watch-on-tv/",
+                    ],
+                },
+            ],
             "FP2": [
                 {
                     "kicker": "FP2 report", "big": "1:47.272", "big_label": "Russell, Mercedes", "color": "#27F4D2",
@@ -381,4 +400,31 @@ DRIVERS: dict = {
     "ALB": (23, "Williams", "1868DB"), "SAI": (55, "Williams", "1868DB"),
     "LAW": (30, "Racing Bulls", "6C98FF"), "LIN": (41, "Racing Bulls", "6C98FF"),
     "BEA": (87, "Haas", "9C9FA2"), "CAM": (51, "Haas", "9C9FA2"),
+}
+
+
+# Feed carousels of session cards (Michel, 20 Nov: report FP2 and post the qualifying times). Key: the
+# card list after "FEED:" in social __main__ mode news. "{dot:CODE}" becomes the team colour dot.
+SESSION_FEEDS: dict = {
+    "LAS VEGAS": {
+        2026: {
+            "FP2.2+QPRE.1": """🏁 FP2 in Las Vegas: Russell on top, late
+
+{dot:RUS} George Russell, Mercedes: 1:47.272
+{dot:GAS} Pierre Gasly, Alpine: +0.071
+{dot:LEC} Charles Leclerc, Ferrari: +0.333
+
+🌧️ Full wets first, then intermediates as the track dried. A red flag late on for plastic debris. Verstappen P13, 2.869s off.
+
+⏱️ Qualifying tonight: 8 PM PT, 11 PM ET, 4 AM GMT and 5 AM CET on Saturday. Swipe for the times ➡️
+
+⚠️ {dot:PIA} Piastri starts 10 places down after his fifth combustion engine of 2026.
+
+Who takes pole on the Strip? Drop your pick below 👇
+
+Sources: GPblog, PlanetF1, Crash.net, RacingNews365, formula1.com, The Race, McLaren
+
+#F1 #LasVegasGP #Formula1 #F1Telemetry #Qualifying""",
+        },
+    },
 }
