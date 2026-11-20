@@ -559,6 +559,7 @@ def cmd_news(a) -> int:
             failed += f
             if ig is not None:
                 sb.table("ig_posts").update({"content": f"news {code} {i}"}).eq("session_id", sid).eq("kind", "story").execute()
+            break                                # one now; the hourly posts the rest, one an hour, first in line
         return finish(report, a.out, failed)
     it = next((x for x in news.facts(p).get("penalties", []) if x.get("code") == code and x.get("story")), None)
     if it is None:
