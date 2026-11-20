@@ -308,6 +308,46 @@ SESSION_NEWS: dict = {
                     ],
                 },
             ],
+            "FP2": [
+                {
+                    "kicker": "FP2 report", "big": "1:47.272", "big_label": "Russell, Mercedes", "color": "#27F4D2",
+                    "title": "Russell on top", "subtitle": "A late lap in damp FP2",
+                    "why": [
+                        ("Second", "Gasly, Alpine, 0.071s behind"),
+                        ("Third", "Leclerc, Ferrari, top until late"),
+                        ("P4 to P8", "Hadjar, Piastri, Hamilton, Norris, Antonelli"),
+                        ("Red flag", "Plastic debris on track, late stop"),
+                        ("Verstappen", "Late to set a time, P13"),
+                    ],
+                    "source": "Sources: GPblog, RacingNews365, Autosport, Pit Debrief, 19 Nov 2026",
+                    "sources": [
+                        "https://www.gpblog.com/en/breaking-news/russell-strikes-late-to-deny-dominant-leclerc-top-spot-in-las-vegas-fp2",
+                        "https://racingnews365.com/2026-f1-las-vegas-grand-prix-free-practice-2-results",
+                        "https://www.autosport.com/f1/live-text/f1-las-vegas-gp-follow-fp2-from-las-vegas-with-live-timing/1128340/",
+                        "https://www.pitdebrief.com/post/2026-f1-las-vegas-gp-fp2-results/",
+                    ],
+                },
+                {
+                    "kicker": "FP2: who lost out", "big": "0.333", "big_label": "seconds, Leclerc off the top", "color": "#E8002D",
+                    "title": "Pipped late", "subtitle": "Leclerc led most of FP2",
+                    "why": [
+                        ("Benchmark", "Leclerc led with a 1:47.605"),
+                        ("Then", "Red flag for plastic debris"),
+                        ("Final laps", "Russell and Gasly both went quicker"),
+                        ("Hamilton", "P6 in the other Ferrari"),
+                        ("Tyres", "Full wets first, then intermediates"),
+                        ("The track", "Cold, windy, still damp in places"),
+                    ],
+                    "source": "Sources: GPblog, RacingNews365, Autosport, Pit Debrief, Motorsport.com, 19 Nov 2026",
+                    "sources": [
+                        "https://www.gpblog.com/en/breaking-news/russell-strikes-late-to-deny-dominant-leclerc-top-spot-in-las-vegas-fp2",
+                        "https://racingnews365.com/2026-f1-las-vegas-grand-prix-free-practice-2-results",
+                        "https://www.autosport.com/f1/live-text/f1-las-vegas-gp-follow-fp2-from-las-vegas-with-live-timing/1128340/",
+                        "https://www.pitdebrief.com/post/2026-f1-las-vegas-gp-fp2-results/",
+                        "https://www.motorsport.com/f1/live-text/f1-las-vegas-gp-follow-fp2-from-las-vegas-with-live-timing/1128341/",
+                    ],
+                },
+            ],
         },
     },
 }
