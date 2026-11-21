@@ -597,7 +597,7 @@ def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path,
     return r.close()
 
 
-def ghost(p, a: dict, b: dict, out: Path, hook: list[str], sub: str | None = None) -> Path:
+def ghost(p, a: dict, b: dict, out: Path, hook: list[str], sub: str | None = None, foot: str | None = None) -> Path:
     """Two laps replayed on one map. The verdict uses the official lap times only."""
     P.set_event(p)
     A = {k: np.array(v, float) if isinstance(v, list) else v for k, v in a.items()}
@@ -617,7 +617,7 @@ def ghost(p, a: dict, b: dict, out: Path, hook: list[str], sub: str | None = Non
     _tyre_chip(c, 0.22, 0.275, A.get("compound"))
     _tyre_chip(c, 0.62, 0.275, B.get("compound"))
     verdict = c.text(0.5, 0.215, "", 26, color=P.GOLD, weight=500)
-    _foot(c, "Lap times: official classification (Jolpica). Positions: OpenF1 telemetry")
+    _foot(c, foot or "Lap times: official classification (Jolpica). Positions: OpenF1 telemetry")
     r = Reel(out)
     lap = max(A["lap_s"], B["lap_s"])
     n = int(14 * FPS)
@@ -648,8 +648,8 @@ REEL_SLOTS = {
     -3: {12: "braker", 21: "pedal_record"},                    # + History Reel at 18:04
     -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
     -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
-    0: {12: "pedal_q", 15: "ghost_q", 21: "points"},           # + pedal_fp3 9:04; quali Reels when it ran in the PT morning
-    1: {10: "ghost_q", 12: "pedal_q", 15: "braker_fp2", 18: "pedal_fp3"},   # night qualifying (Las Vegas style)
+    0: {12: "pedal_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # pedal_fp3 before a night qualifying (Michel, 20 Nov)
+    1: {8: "ghost_fp3_ant", 10: "ghost_q", 12: "pedal_q", 15: "braker_fp2", 18: "ghost_fp3_ver"},   # night qualifying (Las Vegas style)
 }
 # A slot whose data is not in (live session not run yet, no wet pole here) takes the next of these not yet
 # posted this GP, best reach first (hourly.build_reel)
@@ -908,6 +908,36 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         cap = _cap(p, kind, f"🎥 Inside the fastest FP3 lap in {name}: {drv(lap['code'], p.colors)}, {_clock(lap['lap_s'])}.",
                    "👀 Throttle, brake, gear and speed on the map, shown faster than real time.",
                    "💬 Does it carry into the race? Tell us below.")
+    elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
+        from .gp_facts import SESSION_NEWS
+        code = kind.rsplit("_", 1)[1].upper()
+        try:
+            rows = SESSION_NEWS[p.title][p.season]["FP3"][0]["standings"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        other = next((r for r in rows if r[0] == code), None)
+        if other is None or rows[0][0] == code:
+            return None
+
+        def _ms(t):
+            m_, _, sec = t.rpartition(":")
+            return (int(m_ or 0) * 60 + float(sec)) * 1000
+        ma = _ms(rows[0][1])
+        mb = ma + float(other[1].lstrip("+")) * 1000
+        try:
+            a = lap_of(oc, p.season, ck, "Practice 3", rot, rows[0][0], ma) | {"year": "FP3"}
+            b = lap_of(oc, p.season, ck, "Practice 3", rot, code, mb) | {"year": "FP3"}
+        except Exception:
+            return None
+        if abs(a["lap_s"] * 1000 - ma) > 5 or abs(b["lap_s"] * 1000 - mb) > 5:   # telemetry lap must be the classified one
+            log.warning("ghost_fp3: OpenF1 laps do not match the official FP3 times")
+            return None
+        ta, tb = _clock(ma / 1000), _clock(mb / 1000)
+        ghost(p, a, b, video, [f"{a['code']} vs {b['code']},", "FP3 on one map"],
+              f"{name} {p.season}, third practice, official times", "Lap times: official FP3 classification. Positions: OpenF1 telemetry")
+        cap = _cap(p, kind, f"👻 FP3 in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
+                   f"⏱️ The gap: {(mb - ma) / 1000:.3f} s (official FP3 times).",
+                   "💬 Where does the time go? Tell us below.")
     elif kind == "points_teams":
         from . import news
         st = news.standings(p.season)
