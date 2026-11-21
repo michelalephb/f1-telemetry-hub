@@ -1127,7 +1127,8 @@ REEL_SLOTS = {
     -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
     -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
     0: {12: "board_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # board_q: the standard first quali Reel (Michel, 20 Nov)
-    1: {8: "ribbon_q", 10: "strengths_q", 12: "delta_q_ver_rus", 15: "braker_fp2", 18: "board_q"},   # ghost_q off at Las Vegas 2026 (dots overlap)   # night qualifying; delta_q_ver_rus is the
+    1: {8: "ribbon_q", 10: "strengths_q", 12: "delta_q_ver_rus", 14: "strengths_q_ant_rus_lec_ham"},   # Las Vegas 2026: all approved
+    # Reels before 4 PM, then race news only (Michel, 21 Nov); braker_fp2 off (not previewed)   # night qualifying; delta_q_ver_rus is the
     # Las Vegas 2026 front row (elsewhere it finds no such pair and falls back); board_q went out Friday night there   # night qualifying (Las Vegas style);
     # Michel, 20 Nov: one ghost a day at most, new formats around it. ghost_fp3_* stay buildable for other circuits.
 }
