@@ -1,7 +1,8 @@
 """Measure and optimise for growth.
 
 metrics (twice a day): per post numbers from Upload-Post for everything we published in the last 21 days,
-plus the profile (followers, reach) once a day, into Supabase (ig_metrics, ig_profile_daily).
+plus the profile (followers, reach) once a day, into Supabase (ig_metrics, ig_profile_daily). The profile row
+also carries raw.growth: net followers per 1,000 accounts reached over 7 days, the growth number to watch.
 
 optimize (weekly, Sunday night): scores each story group on the last 14 days and sets its weight in the
 race week rotation (social_weights: 3 for the best, 2 for the runner up, 1 for the rest). Guardrails: a group
@@ -27,6 +28,19 @@ def score(m: dict) -> float | None:
     if reach <= 0:
         return None
     return 100.0 * inter / reach if inter else None
+
+
+def follows_per_1k(followers_now: int | None, followers_before: int | None, daily_reach: list[dict],
+                   days: int = 7) -> dict | None:
+    """Growth north star (Michel, 20 Nov): net new followers per 1,000 accounts reached over the last `days`.
+    daily_reach is the profile's reach_timeseries ([{date, value}], oldest first). None when it cannot be computed."""
+    if followers_now is None or followers_before is None:
+        return None
+    reach = sum(int(r.get("value") or 0) for r in daily_reach[-days:])
+    if reach <= 0:
+        return None
+    net = followers_now - followers_before
+    return {"days": days, "net_followers": net, "reach": reach, "per_1k": round(1000.0 * net / reach, 2)}
 
 
 def _int(v):
@@ -69,6 +83,15 @@ def cmd_metrics(a) -> int:
     try:
         prof = up.profile_analytics()
         if prof:
+            before = (date.today() - timedelta(days=7)).isoformat()
+            prev = sb.table("ig_profile_daily").select("followers,day").lte("day", before) \
+                .order("day", desc=True).limit(1).execute().data
+            g = follows_per_1k(_int(prof.get("followers")), prev[0]["followers"] if prev else None,
+                               prof.get("reach_timeseries") or [])
+            if g:
+                prof = {**prof, "growth": g}
+                log.info("growth: %+d followers on %s reached in 7 days = %.2f per 1,000 reached",
+                         g["net_followers"], g["reach"], g["per_1k"])
             sb.table("ig_profile_daily").upsert({
                 "day": today, "followers": _int(prof.get("followers")), "reach": _int(prof.get("reach")),
                 "views": _int(prof.get("views")), "profile_views": _int(prof.get("profileViews")),

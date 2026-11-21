@@ -551,3 +551,109 @@ def test_story_counter_ignores_feed_post_ids():
     from pipeline.social import hourly
     src = inspect.getsource(hourly)
     assert 'published_count(sb, f"{prefix}20")' in src and "published_count(sb, prefix)" not in src
+
+
+# ---------------------------------------------------------------- growth plan (20 Nov 2026)
+
+def test_hashtags_capped_at_five_and_send_line():
+    results, laps, drivers, traces = quali_fixture()
+    st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
+    c = captions.quali(st, {"event": "Qatar Grand Prix", "code": "Q", "round": 21}, "reel")
+    assert c.split("\n")[-1].count("#") <= captions.MAX_TAGS and "#QatarGP" in c and "Send it to" in c
+    assert captions.tags("Qatar Grand Prix", "VER", "NOR", "LEC").count("#") == 5
+
+
+def test_reel_slots_are_buildable_kinds_and_fill_every_race_week_day():
+    import inspect
+    from pipeline.social import hourly, reels_tel
+    src = inspect.getsource(reels_tel.build)
+    kinds = {k for d in reels_tel.REEL_SLOTS.values() for k in d.values()} | set(reels_tel.FALLBACK)
+    kinds |= {s.split(":", 1)[1] for d in hourly.SLOTS.values() for s in d.values() if s.startswith("reeltel:")}
+    for k in kinds:
+        assert f'"{k}"' in src, k                                   # every scheduled kind has a renderer
+    for day in range(-5, 1):                                        # Monday to qualifying day: at least 2 Reels
+        n = len(reels_tel.REEL_SLOTS.get(day, {})) + sum(
+            1 for s in hourly.SLOTS.get(day, {}).values() if s.startswith("reeltel:") or s == "history")
+        assert n >= 2, day
+    for day, hours in reels_tel.REEL_SLOTS.items():                 # never at a slot hour that already has a Reel
+        clash = {h for h, s in hourly.SLOTS.get(day, {}).items() if s.startswith("reeltel:")} & set(hours)
+        assert not clash, (day, clash)
+    assert all(h in hourly.WINDOW for d in reels_tel.REEL_SLOTS.values() for h in d)
+    assert len(hourly.STORY_HOURS) == 4 and all("-" not in v for v in reels_tel.SEND.values())
+    assert reels_tel.send_line("braker_z3").startswith("Send it to") and reels_tel.send_line("x").startswith("Send it to")
+
+
+class _Q:
+    """Minimal stand in for the Supabase query builder: only what build_reel reads."""
+    def __init__(self, hits):
+        self.hits = hits
+
+    def __getattr__(self, name):
+        return lambda *a, **k: self
+
+    def execute(self):
+        return type("R", (), {"data": self.hits})()
+
+
+class _SB:
+    def __init__(self, hits=()):
+        self.hits = list(hits)
+
+    def table(self, name):
+        return _Q(self.hits)
+
+
+def test_build_reel_falls_back_and_never_repeats(tmp_path, monkeypatch):
+    from pipeline.social import hourly, reels_tel
+    published = {"2026_22_PREVIEW_REEL_BRAKER_Z3"}
+    tried = []
+
+    def fake_build(p, kind, out):
+        tried.append(kind)
+        if kind in ("pedal_wet", "braker_z2"):
+            return None                                             # data not in
+        out.mkdir(parents=True, exist_ok=True)
+        return out / "reel.mp4", f"cap {kind}"
+
+    def post_row(sb, sid, kind, story):
+        return {"status": "published"} if sid in published else None
+
+    monkeypatch.setattr(reels_tel, "build", fake_build)
+    got = hourly.build_reel(_SB(), object(), None, "2026_22_PREVIEW", "pedal_wet", tmp_path, post_row)
+    # pedal_wet has no data, braker_z3 is already out, braker_z2 has no data, braker is next
+    assert got[0] == "braker" and got[1] == "2026_22_PREVIEW_REEL_BRAKER" and tried == ["pedal_wet", "braker_z2", "braker"]
+    tried.clear()
+    published.add("2026_22_PREVIEW_REEL_PEDAL_WET")
+    got = hourly.build_reel(_SB(), object(), None, "2026_22_PREVIEW", "pedal_wet", tmp_path, post_row)
+    assert "pedal_wet" not in tried                                  # never posted twice in a GP
+    from datetime import datetime
+    w = (datetime(2026, 11, 27, 12, 25, tzinfo=hourly.TZ), datetime(2026, 11, 27, 13, tzinfo=hourly.TZ))
+    assert hourly.build_reel(_SB([{"session_id": "x"}]), object(), None, "2026_22_PREVIEW", "ghost", tmp_path, post_row, w) == "done"
+
+
+def test_follows_per_1k():
+    from pipeline.social.metrics import follows_per_1k
+    ts = [{"date": f"2026-11-{d}", "value": v} for d, v in zip(range(14, 21), (0, 80, 232, 665, 2738, 3164, 1384))]
+    g = follows_per_1k(980, 969, ts)
+    assert g == {"days": 7, "net_followers": 11, "reach": 8263, "per_1k": 1.33}
+    assert follows_per_1k(None, 969, ts) is None and follows_per_1k(970, 969, []) is None
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="needs ffmpeg")
+def test_end_card_appended_to_reel(tmp_path):
+    from pipeline.social import reels_tel
+    p = preview_fixture()
+    video = tmp_path / "reel.mp4"
+    r = render.Reel(video)
+    c = reels_tel._card(p)
+    r.add(c.fig, render.FPS)                                        # 1 s of data frame
+    render.plt.close(c.fig)
+    r.close()
+    card = reels_tel.end_card(p, "braker_z2", tmp_path / "end_card.jpg")
+    reels_tel.append_end(video, card)
+    pr = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(video)],
+                                   capture_output=True, text=True, check=True).stdout)
+    v = [s for s in pr["streams"] if s["codec_type"] == "video"][0]
+    assert (v["width"], v["height"], v["pix_fmt"], v["r_frame_rate"]) == (1080, 1920, "yuv420p", "30/1")
+    assert abs(float(pr["format"]["duration"]) - (1 + reels_tel.END_S)) < 0.15
+    assert not [s for s in pr["streams"] if s["codec_type"] == "audio"]

@@ -48,8 +48,12 @@ def event_tag(event: str) -> str:
     return "#" + re.sub(r"[^A-Za-z0-9]", "", event.replace("Grand Prix", "GP"))
 
 
+MAX_TAGS = 5                     # Instagram caps posts at 5 hashtags (since December 2025)
+
+
 def tags(event: str, *codes: str) -> str:
-    return " ".join(["#F1", "#Formula1", "#F1Telemetry", event_tag(event), *[f"#{c}" for c in codes if c], "#DataViz"])
+    """At most MAX_TAGS hashtags: brand, event, then the drivers in the story."""
+    return " ".join(["#F1", "#F1Telemetry", event_tag(event), *[f"#{c}" for c in codes if c]][:MAX_TAGS])
 
 
 def quali(st: QualiStory, meta: dict, kind: str, rewind: bool = False) -> str:
@@ -70,6 +74,7 @@ def quali(st: QualiStory, meta: dict, kind: str, rewind: bool = False) -> str:
         "🎥 Same clock, same lap. Watch where the gap opens." if kind == "reel"
         else "👉 Swipe for the sectors, the speed trace and the corners.\n💾 Save it for the race.",
         "💬 Which corner decided it? Tell us below.",
+        "📤 Send it to the friend who called a different pole.",
         FOOTER, tags(meta["event"], a, b)))
 
 
@@ -93,6 +98,7 @@ def race(st: RaceStory, meta: dict, kind: str) -> str:
         "🎥 The top 5, lap by lap." if kind == "reel"
         else "👉 Swipe for the running order lap by lap and the biggest climb.\n💾 Save it.",
         "💬 Driver of the day? Tell us below.",
+        "📤 Send it to the friend who backed someone else.",
         FOOTER, tags(meta["event"], w, st.mover["code"] if st.mover else "")))
 
 

@@ -29,9 +29,11 @@ TZ = ZoneInfo("America/Los_Angeles")
 # sessions (reports, timing data), its news and its forecast. Nothing from other years or the season.
 GP_ONLY = {"LAS VEGAS": (2026, datetime(2026, 11, 23, tzinfo=ZoneInfo("America/Los_Angeles")))}
 GP_ONLY_GROUPS = {"session", "live", "news", "rain"}
-# Michel, 20 Nov: fewer stories, more Reels. While GP_ONLY holds, a data story goes out only at these hours;
-# session reports from the news still go out in any hour (they are first in line).
-GP_ONLY_STORY_HOURS = {7, 10, 13, 16, 19, 22}
+# Michel, 20 Nov (growth plan approved): Reels reach about 35x more accounts than stories (avg 771 vs 21 over
+# 28 days), so every race week now runs about 4 data stories a day; the effort goes into Reels. A data story
+# goes out only at these hours; session reports from the news still go out in any hour (first in line).
+STORY_HOURS = {8, 11, 14, 20}
+GP_ONLY_STORY_HOURS = STORY_HOURS                 # kept for older imports
 UTC = ZoneInfo("UTC")
 WINDOW = range(7, 23)            # race week: 7 AM to 10 PM PT, 16 posts a day
 DAILY_HOUR = 9                   # other weeks: one post at 9 AM PT (6 PM in central Europe)
@@ -42,8 +44,10 @@ SLOTS = {
     -3: {9: "history_carousel", 12: "starthere", 18: "history"},
     -2: {9: "titlemath", 18: "strategy"},       # 17 Nov: championship math and the strategy file (no duplicates)
     # 18 Nov, no replicas: the Preview Reel, Lap in data and Gear map repeated Tuesday's stories; new Reels instead
-    -1: {9: "reeltel:pedal_wet", 18: "reeltel:braker_z2"},
-    0: {9: "reeltel:teammates_race"},
+    # 20 Nov growth plan: braking and pedal Reels lead (top reach); braker_z2 moved to day -2 in REEL_SLOTS,
+    # FP2 braking and FP3 pedal take these slots (live data; a fallback Reel runs when it is not in)
+    -1: {9: "reeltel:pedal_wet", 18: "reeltel:braker_fp2"},
+    0: {9: "reeltel:pedal_fp3"},
     1: {9: "raceday"},
 }
 
@@ -333,6 +337,55 @@ def render_rewind(sb, item: tuple, out: Path) -> Path | None:
     return storyize(slides[min(i, len(slides) - 1)], out / f"story_rewind_{sid}_{i + 1}.jpg")
 
 
+# ---------------------------------------------------------------- Reels with a fallback
+
+FALLBACK_TRIES = 3              # Reels to try in one run before giving the hour up (each build reads OpenF1)
+
+
+def build_reel(sb, ig, p, sid: str, rk: str, out: Path, post_row, window: tuple[datetime, datetime] | None = None):
+    """The scheduled Reel, or when its data is not in (a live session not run yet, no wet pole at this track)
+    the next unpublished Reel from reels_tel.FALLBACK, so a Reel slot never goes empty (Michel, 20 Nov: more
+    Reels). Each kind posts once per GP (session id per kind), so a fallback never repeats a Reel, and a slot
+    that already put out a Reel inside its time window (its own or a stand in) is "done", so the reruns every
+    10 minutes never post a second one. Returns (kind, session id, video, caption), None when nothing could be
+    built, or "done"."""
+    from . import reels_tel
+
+    def published(kind: str) -> bool:
+        if ig is None:
+            return False
+        row = post_row(sb, f"{sid}_REEL_{kind.upper()}", "reel", "session")
+        return bool(row and row["status"] == "published")
+
+    if window is not None and ig is not None:
+        lo, hi = (t.astimezone(UTC).isoformat() for t in window)
+        hit = sb.table("ig_posts").select("session_id").like("session_id", f"{sid}_REEL_%").eq("status", "published") \
+            .gte("published_at", lo).lt("published_at", hi).execute().data
+        if hit:
+            return "done"
+    tries = 0
+    for kind in [rk] + [k for k in reels_tel.FALLBACK if k != rk]:
+        if tries >= FALLBACK_TRIES:
+            break
+        if published(kind):                      # scheduled or stand in, never twice per GP
+            continue
+        tries += 1
+        try:
+            built = reels_tel.build(p, kind, out / f"reel_{kind}")
+        except Exception as e:
+            log.error("reel %s failed: %s", kind, e)
+            built = None
+        if built is None:
+            log.warning("reel %s: data not in, trying the next Reel", kind)
+            continue
+        if kind != rk:
+            log.info("reel %s stands in for %s", kind, rk)
+        video, cap = built
+        return kind, f"{sid}_REEL_{kind.upper()}", video, cap
+    log.warning("no Reel could be built for %s this run", rk)
+    return None
+
+
 # ---------------------------------------------------------------- command
 
 def cmd_hourly(a) -> int:
@@ -378,24 +431,16 @@ def cmd_hourly(a) -> int:
         from . import reels_tel
         rk = reels_tel.REEL_SLOTS.get((now.date() - w["q"].date()).days, {}).get(now.hour)
         if rk:
-            rsid = f"{sid}_REEL_{rk.upper()}"
-            row = post_row(sb, rsid, "reel", "session") if ig is not None else None
-            if not (row and row["status"] == "published"):
-                try:
-                    built = reels_tel.build(p, rk, out / f"reel_{rk}")
-                except Exception as e:
-                    log.error("reel %s failed: %s", rk, e)
-                    built = None
-                if built is None:
-                    log.warning("reel %s: data not in yet, skipped this run", rk)
-                else:
-                    video, cap = built
-                    jobs = [(rsid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
-                    checks |= {"reel": rk}
-                    report, failed = publish_jobs(sb, ig, jobs, checks)
-                    if ig is not None:
-                        sb.table("ig_posts").update({"content": f"reel {rk}"}).eq("session_id", rsid).eq("kind", "reel").execute()
-                    return finish(report, a.out, failed)
+            h0 = now.replace(minute=0, second=0, microsecond=0)
+            got = build_reel(sb, ig, p, sid, rk, out, post_row, (h0 + timedelta(minutes=25), h0 + timedelta(hours=1)))
+            if got is not None and got != "done":
+                rk, rsid, video, cap = got
+                jobs = [(rsid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
+                checks |= {"reel": rk}
+                report, failed = publish_jobs(sb, ig, jobs, checks)
+                if ig is not None:
+                    sb.table("ig_posts").update({"content": f"reel {rk}"}).eq("session_id", rsid).eq("kind", "reel").execute()
+                return finish(report, a.out, failed)
 
     jobs = None
     if w["race_week"] and p is not None:
@@ -403,18 +448,13 @@ def cmd_hourly(a) -> int:
         if slot and slot.startswith("reeltel:"):
             from . import reels_tel
             rk = slot.split(":", 1)[1]
-            rsid = f"{sid}_REEL_{rk.upper()}"
-            row = post_row(sb, rsid, "reel", "session") if ig is not None else None
-            if row and row["status"] == "published":
+            h0 = now.replace(minute=0, second=0, microsecond=0)
+            got = build_reel(sb, ig, p, sid, rk, out, post_row, (h0, h0 + timedelta(minutes=25)))
+            if got == "done":
                 log.info("slot %s already published: nothing more this hour", slot)
                 return 0
-            try:
-                built = reels_tel.build(p, rk, out / f"reel_{rk}")
-            except Exception as e:
-                log.error("reel %s failed: %s", rk, e)
-                built = None
-            if built is not None:
-                video, cap = built
+            if got is not None:
+                rk, rsid, video, cap = got
                 jobs = [(rsid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
                 checks["slot"] = slot
                 report, failed = publish_jobs(sb, ig, jobs, checks)
@@ -439,12 +479,10 @@ def cmd_hourly(a) -> int:
             return 0
         if w["race_week"]:
             items, prefix = story_units(sb, p, sid, now, w["q"]), f"{sid}_H"
-            only = GP_ONLY.get(getattr(p, "title", None))
-            if only and w["q"] is not None and w["q"].year == only[0] and now < only[1] \
-                    and now.hour not in GP_ONLY_STORY_HOURS:
+            if now.hour not in STORY_HOURS:
                 items = [u for u in items if u[0] == "session"]          # reports only between story hours
                 if not items:
-                    log.info("story hour skipped: Reels first this weekend (Michel, 20 Nov)")
+                    log.info("story hour skipped: Reels first in race week (Michel, 20 Nov)")
                     return 0
             if not items:
                 log.info("no story this hour: every card of the week is already out (no duplicates)")
