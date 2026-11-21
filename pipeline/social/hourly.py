@@ -355,13 +355,15 @@ def build_reel(sb, ig, p, sid: str, rk: str, out: Path, post_row, window: tuple[
         if ig is None:
             return False
         row = post_row(sb, f"{sid}_REEL_{kind.upper()}", "reel", "session")
-        return bool(row and row["status"] == "published")
+        return bool(row and row["status"] in ("published", "held"))   # held: waiting for Michel, never rebuilt
 
     if window is not None and ig is not None:
         lo, hi = (t.astimezone(UTC).isoformat() for t in window)
         hit = sb.table("ig_posts").select("session_id").like("session_id", f"{sid}_REEL_%").eq("status", "published") \
             .gte("published_at", lo).lt("published_at", hi).execute().data
-        if hit:
+        held = sb.table("ig_posts").select("session_id").like("session_id", f"{sid}_REEL_%").eq("status", "held") \
+            .gte("created_at", lo).lt("created_at", hi).execute().data
+        if hit or held:
             return "done"
     tries = 0
     for kind in [rk] + [k for k in reels_tel.FALLBACK if k != rk]:
