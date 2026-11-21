@@ -981,9 +981,11 @@ CORNER_NAMES = {("LAS VEGAS", 5): ["T1", "T5", "T7", "T12", "T14"]}
 
 STRENGTH_HOOKS = {"strengths_q_ant_rus_lec_ham": ["Ferrari: 346 km/h.", "Still 0.7 s down on the Strip"]}
 STRENGTH_ROWS = {"strengths_q_ant_rus_lec_ham": ("strip", "top", "apex")}
+Q_EXTRA_SESSION = {("LAS VEGAS", 2026): {"LEC": "Q1", "HAM": "Q2"}}   # which part of qualifying Q_EXTRA's laps came from
 
 
-def strength_caption(p, D: dict, cn: list[str], what: str | None = None) -> list[str]:
+def strength_caption(p, D: dict, cn: list[str], what: str | None = None, strip: bool = False,
+                     sessions: dict | None = None) -> list[str]:
     """Caption blocks built from the same numbers as the Reel."""
     from .captions import drv
     O, codes, ck = D["out"], D["codes"], D["clean"]
@@ -992,7 +994,19 @@ def strength_caption(p, D: dict, cn: list[str], what: str | None = None) -> list
     brk = {c_: float(np.mean([O[c_]["brk"][k] for k in ck])) for c_ in codes}
     fastc, latest, early = max(apex, key=apex.get), min(brk, key=brk.get), max(brk, key=brk.get)
     where = ", ".join(cn[k] for k in ck)
+    extra = []
+    if strip:
+        last = [0.0] + D["fa"]
+        cut = D["fa"][ck[-1]]
+        st = {c_: sum(s_ for s_, lo in zip(O[c_]["seg"], last) if lo >= cut - 1e-9) for c_ in codes}
+        b_ = min(st, key=st.get)
+        extra.append(f"⏱️ {cn[ck[-1]]} to the line: {drv(b_, p.colors)} quickest; " + ", ".join(
+            f"{drv(c_, p.colors)} +{st[c_] - st[b_]:.2f} s" for c_ in sorted(codes, key=st.get) if c_ != b_) + ".")
+    if sessions:
+        extra.append("🕒 Best laps from different parts of qualifying (" + ", ".join(f"{c_} {s_}" for c_, s_ in sessions.items())
+                     + "): the track gets quicker through a session, so part of the gap is track, not car.")
     return [f"🧭 Where each car is strong, {p.title.title()} " + (f"qualifying, {what}:" if what else f"Q3, the top {len(codes)} laps:"),
+            *extra,
             "🚀 Straight line: " + ", ".join(f"{drv(c_, p.colors)} {O[c_]['top']:.0f}" for c_ in top) + " km/h top speed.",
             f"🌀 Slow corners ({where}): {drv(fastc, p.colors)} carries {apex[fastc]:.0f} km/h on average at the apex, "
             f"{drv(codes[0], p.colors)} {apex[codes[0]]:.0f}.",
@@ -1527,7 +1541,14 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         else:
             hk, sb_ = ["Where each car", "is strong"], f"{name} {p.season} Q3, the top {len(laps)} laps"
         strengths(p, laps, off, video, hk, sb_, cn, D["clean"], STRENGTH_ROWS.get(kind, ("top", "apex", "brake")))
-        cap = _cap(p, kind, *strength_caption(p, D, cn, "best qualifying laps" if pick else None))
+        sess = {}
+        for r_ in res:
+            ts = {q: r_[q] for q in ("q1", "q2", "q3") if r_[q]}
+            if ts:
+                sess[r_["code"]] = min(ts, key=lambda q: int(ts[q].rpartition(":")[0] or 0) * 60 + float(ts[q].rpartition(":")[2])).upper()
+        sess.update(Q_EXTRA_SESSION.get((p.title, p.season), {}))
+        cap = _cap(p, kind, *strength_caption(p, D, cn, "best qualifying laps" if pick else None,
+                                              "strip" in STRENGTH_ROWS.get(kind, ()), sess if pick and len(set(sess.values())) > 1 else None))
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
         from .gp_facts import SESSION_NEWS
         code = kind.rsplit("_", 1)[1].upper()
