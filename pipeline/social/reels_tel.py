@@ -772,7 +772,7 @@ def _lap_stats(L: dict) -> dict:
 
 
 def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[str], sub: str,
-            src: str = "Lap times: official timing. Throttle, brake, speed: OpenF1 telemetry") -> Path:
+            src: str = "Lap times: official timing. Throttle, brake, speed, mini sectors: OpenF1 telemetry", n_sec: int = 25) -> Path:
     """Top laps of a session on one board. The gap to the fastest lap draws itself across the lap (one line per
     driver), a dot runs the map in step, and each driver's row fills in: full throttle share, braking share,
     top speed. Ends on the official gaps."""
@@ -794,13 +794,22 @@ def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[st
     rx, ry = np.interp(d * ref["dist"][-1], ref["dist"], ref["x"]), np.interp(d * ref["dist"][-1], ref["dist"], ref["y"])
     c = _card(p)
     _hook(c, hook, sub, y0=0.83)
-    mp = _track(c, [0.32, 0.585, 0.36, 0.15], ref["x"], ref["y"], lw=6)
-    dot, = mp.plot([], [], "o", ms=12, color=P.TEXT, mec=P.EV, mew=3, zorder=5)
-    ax = c.fig.add_axes([0.08, 0.405, 0.84, 0.165])
+    mp = _track(c, [0.12, 0.600, 0.76, 0.128], ref["x"], ref["y"], lw=9)
+    # mini sectors: each painted in the colour of the quickest of these drivers through it (Michel, 20 Nov)
+    from matplotlib.collections import LineCollection
+    edges = np.linspace(0, len(d) - 1, n_sec + 1).astype(int)
+    best = [int(np.argmin([t[e1] - t[e0] for t in T])) for e0, e1 in zip(edges[:-1], edges[1:])]
+    seg = np.stack([np.column_stack([rx, ry])[:-1], np.column_stack([rx, ry])[1:]], axis=1)
+    segcol = [cols[best[min(int(np.searchsorted(edges[1:], q, side="right")), n_sec - 1)]] for q in range(len(seg))]
+    paint = LineCollection([], linewidths=9, colors=[], capstyle="butt", zorder=3)
+    mp.add_collection(paint)
+    dot, = mp.plot([], [], "o", ms=13, color=P.TEXT, mec=P.EV, mew=3, zorder=5)
+    c.text(0.5, 0.588, f"MAP: QUICKEST THROUGH EACH OF {n_sec} MINI SECTORS", 11, color=P.MUTED, weight=600, track=True)
+    ax = c.fig.add_axes([0.08, 0.405, 0.84, 0.155])
     ax.set_xlim(0, 1.14), ax.set_ylim(lim, -lim * 0.35)           # behind the fastest lap = down; room for the tags
     ax.axis("off")
     ax.axhline(0, color="#232D3F", lw=2)
-    c.text(0.08, 0.575, "GAP TO THE FASTEST LAP, ACROSS THE LAP", 12, color=P.MUTED, weight=600, ha="left", track=True)
+    c.text(0.08, 0.565, "GAP TO THE FASTEST LAP, ACROSS THE LAP", 12, color=P.MUTED, weight=600, ha="left", track=True)
     lines = [ax.plot([], [], color=cc, lw=4 if k == 0 else 3, solid_capstyle="round")[0] for k, cc in enumerate(cols)]
     tags = [ax.text(0, 0, "", fontsize=15, color=cc, family=P.FONT, weight=600, va="center") for cc in cols]
     st = [_lap_stats(L) for L in Ls]
@@ -825,6 +834,7 @@ def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[st
             if k:
                 tg.set_position((f + 0.012, g[j - 1])), tg.set_text(f"{g[j - 1]:+.2f}")
         dot.set_data([rx[j - 1]], [ry[j - 1]])
+        paint.set_segments(seg[:j - 1]), paint.set_color(segcol[:j - 1])
         for k, L in enumerate(Ls):                                # stats so far on this lap
             m = L["t"] <= T[k][j - 1] * L["t"][-1] / official[k]
             if m.sum() > 2:
@@ -833,6 +843,7 @@ def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[st
                     tx.set_text(v)
         r.add(c.fig)
     dot.set_data([], [])
+    paint.set_segments(seg), paint.set_color(segcol)
     for k, (tg, g) in enumerate(zip(tags, gaps)):
         if k:
             tg.set_position((1.012, g[-1])), tg.set_text(f"+{official[k] - official[0]:.3f}")
@@ -855,8 +866,9 @@ REEL_SLOTS = {
     -3: {12: "braker", 21: "pedal_record"},                    # + History Reel at 18:04
     -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
     -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
-    0: {12: "pedal_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # pedal_fp3 before a night qualifying (Michel, 20 Nov)
-    1: {8: "ribbon_q", 10: "ghost_q", 12: "board_q", 15: "braker_fp2"},   # night qualifying (Las Vegas style);
+    0: {12: "board_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # board_q: the standard first quali Reel (Michel, 20 Nov)
+    1: {8: "ribbon_q", 10: "ghost_q", 12: "delta_q_ver_rus", 15: "braker_fp2", 18: "board_q"},   # night qualifying; delta_q_ver_rus is the
+    # Las Vegas 2026 front row (elsewhere it finds no such pair and falls back); board_q went out Friday night there   # night qualifying (Las Vegas style);
     # Michel, 20 Nov: one ghost a day at most, new formats around it. ghost_fp3_* stay buildable for other circuits.
 }
 # A slot whose data is not in (live session not run yet, no wet pole here) takes the next of these not yet
