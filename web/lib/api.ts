@@ -106,3 +106,9 @@ export function getTrace(prefix: string, driver: string): Promise<TraceRow[]> {
   }
   return p
 }
+
+/** Bug report from the site footer. The table accepts inserts only: nobody can read it with the public key. */
+export async function sendFeedback(message: string, contact: string, page: string): Promise<void> {
+  const { error } = await sb.from('feedback').insert({ message, contact: contact || null, page })
+  if (error) throw new Error(error.message)
+}

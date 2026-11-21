@@ -1,11 +1,11 @@
 name: ingest latest
 
-# Hourly: sync calendar and results, ingest any finished session not yet on the site,
+# Four tries an hour: sync calendar and results, ingest any finished session not yet on the site,
 # then fail (GitHub emails the repo owner) if a session from the last 7 days is missing.
-# GitHub skips or delays scheduled runs under load, so hourly gives many chances per session.
+# GitHub skips or delays scheduled runs under load, so several tries an hour give many chances per session.
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "2,17,32,47 * * * *"   # 4 tries an hour: GitHub was running only about 1 in 8 of the hourly ones (every 8 h, Nov 2026)
   workflow_dispatch:
     inputs:
       season:
