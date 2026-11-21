@@ -1,5 +1,7 @@
 'use client'
 
+import { track } from '@/lib/analytics'
+
 import { useEffect, useMemo, useRef, useState } from 'react'
 import DriverBadge, { badgeText } from '@/components/DriverBadge'
 import ShareButton from '@/components/ShareButton'
@@ -97,6 +99,7 @@ export default function RaceReplay({ sid, prefix, trackM, raceLaps, title, drive
     }
     try {
       setRec({ p: 0 })
+      track('video_export', { session: sid, driver: code(me), seconds: len })
       const { blob, ext } = await recordReplay({
         title, outlinePts: tp.p, ow: outline.w, oh: outline.h, logoUrl: `${BASE}/logo.png`, accent: ACCENT,
         seconds: len, frameAt: frameFor, onProgress: (p) => setRec({ p }),
@@ -161,7 +164,7 @@ export default function RaceReplay({ sid, prefix, trackM, raceLaps, title, drive
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => { if (now >= end) setT(start); setPlaying((p) => !p) }}
+        <button type="button" onClick={() => { if (now >= end) setT(start); if (!playing) track('replay_play', { session: sid, driver: code(me) }); setPlaying((p) => !p) }}
           className="min-h-11 min-w-24 rounded-lg bg-cyan px-5 font-semibold text-bg">{playing ? 'Pause' : 'Play'}</button>
         <span className="ml-1 text-xs text-mute">Speed</span>
         {SPEEDS.map((v) => (

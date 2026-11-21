@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import './globals.css'
 import BugReport from '@/components/BugReport'
+import Analytics from '@/components/Analytics'
 
 // Link previews (WhatsApp, iMessage, X, LinkedIn, Slack): the preview image, favicon and Apple icon come from the
 // files next to this layout (opengraph-image.png, twitter-image.png, icon.png, apple-icon.png). The preview is the
@@ -74,6 +75,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a className="underline hover:text-ink" href="https://github.com/jolpica/jolpica-f1">Jolpica</a> and{' '}
           <a className="underline hover:text-ink" href="https://github.com/f1db/f1db">F1DB</a> (CC BY 4.0).
         </footer>
+        <Analytics />
       </body>
     </html>
   )
