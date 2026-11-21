@@ -17,7 +17,7 @@ import pandas as pd
 
 from . import insights as I
 from . import preview as P
-from .gp_facts import COMPOUND_COLOR
+from .gp_facts import COMPOUND_COLOR, GRID_POLE
 from .render import lap_time
 
 log = logging.getLogger(__name__)
@@ -308,7 +308,7 @@ def q_teams(p, code: str = "Q"):
         g = v - lead
         ax.barh(y, max(g, 0.004), color=_col(s, cars[t]), height=0.62)
         ax.text(-0.01, y, t, ha="right", va="center", fontsize=13, color=P.TEXT, family=P.FONT, weight=500, transform=ax.get_yaxis_transform())
-        ax.text(g + 0.02, y, "POLE" if g == 0 else f"+{g:.3f}", va="center", fontsize=13, color=P.TEXT, family=P.FONT, weight=300)
+        ax.text(g + 0.02, y, ("FASTEST" if GRID_POLE.get((p.season, p.round)) else "POLE") if g == 0 else f"+{g:.3f}", va="center", fontsize=13, color=P.TEXT, family=P.FONT, weight=300)
     ax.set_yticks([]), ax.set_xticks([])
     ax.set_xlim(0, (tb.iloc[-1] - lead) * 1.25 + 0.05)
     return c
