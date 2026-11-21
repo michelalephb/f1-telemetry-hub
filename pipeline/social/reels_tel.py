@@ -1228,6 +1228,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         if len(laps) < 2 or rows[0][0] != res[0]["code"]:
             log.warning("board_q: OpenF1 laps do not match the official qualifying times")
             return None
+        log.info("BOARD_LAPS_JSON " + json.dumps([{k: L[k] for k in ("code", "color", "t", "dist", "speed", "throttle", "brake", "x", "y", "lap_s")}
+                                                 | {"official": o_} for L, o_ in zip(laps, off)], separators=(",", ":")))
         q_board(p, laps, off, video, ["Q3, the top four", "laps on one board"], f"{name} {p.season} qualifying, official times")
         gp = grid_pole(p.season, p.round, rows[0][0])
         st = [_lap_stats({k: np.array(L[k], float) for k in ("t", "throttle", "brake", "speed")}) for L in laps]
