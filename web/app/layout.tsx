@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import './globals.css'
+import BugReport from '@/components/BugReport'
 
 export const metadata: Metadata = {
   title: 'F1 Telemetry Hub',
@@ -23,20 +24,31 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <header className="border-b border-line">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 sm:px-6">
             <Link href="/" aria-label="F1 Telemetry Hub home" className="flex min-h-11 items-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/logo.png`} alt="F1 Telemetry Hub" className="h-6 w-auto" />
             </Link>
-            <nav aria-label="Main" className="ml-auto flex items-center gap-1 text-sm">
+            <nav aria-label="Main" className="-ml-3 flex w-full flex-wrap items-center gap-1 text-sm sm:ml-auto sm:w-auto">
               <Link href="/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">Season</Link>
-              <Link href="/historique/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">F1 History Analytics</Link>
+              <Link href="/historique/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink"><span className="sm:hidden">History</span><span className="hidden sm:inline">F1 History Analytics</span></Link>
+              <a href="https://www.instagram.com/f1telemetryhub/" target="_blank" rel="noopener noreferrer"
+                className="ml-auto flex min-h-11 items-center gap-1.5 rounded-lg border border-line px-3 text-ink hover:border-ink/60 sm:ml-1">
+                Instagram
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 17 17 7" /><path d="M8 7h9v9" />
+                </svg>
+              </a>
             </nav>
-            <span className="rounded border border-line px-2 py-1 font-mono text-xs text-mute">TEST BUILD · data: OpenF1</span>
           </div>
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
         <footer className="mx-auto max-w-7xl px-4 pb-10 pt-4 text-xs text-mute sm:px-6">
+          <div className="mb-4 flex flex-wrap items-start gap-3 border-t border-line pt-6">
+            <BugReport />
+            <a href="https://www.instagram.com/f1telemetryhub/" target="_blank" rel="noopener noreferrer"
+              className="flex min-h-11 items-center rounded-lg border border-line px-4 text-sm text-ink hover:border-ink/60">@f1telemetryhub on Instagram</a>
+          </div>
           Unofficial. Not associated with Formula 1 companies. F1 and related marks are trademarks of Formula One Licensing B.V.{' '}
           Timing and telemetry: <a className="underline hover:text-ink" href="https://openf1.org">OpenF1</a>. Results and history:{' '}
           <a className="underline hover:text-ink" href="https://github.com/jolpica/jolpica-f1">Jolpica</a> and{' '}

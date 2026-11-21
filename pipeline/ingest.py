@@ -195,6 +195,17 @@ def centre_line(laps: pd.DataFrame, pos: pd.DataFrame) -> CentreLine:
         if len(p) > 100:
             tracks.append(p[["x", "y", "z"]].to_numpy() / 10.0)
     if not tracks:
+        # The position feed can stop part way through a session (Monaco 2026 race: about 1 hour of 2.4).
+        # Then use each driver's fastest accurate lap among the laps the feed does cover.
+        t_hi = pos["t"].max() if len(pos) else float("-inf")
+        covered = ok[ok["lap_end_s"] <= t_hi].sort_values("lap_time_ms").groupby("driver_number").head(1).head(CENTRE_LINE_LAPS)
+        for _, lap in covered.iterrows():
+            p = pos[(pos["driver_number"] == lap["driver_number"]) & (pos["t"] >= lap["lap_start_s"]) & (pos["t"] <= lap["lap_end_s"])]
+            if len(p) > 100:
+                tracks.append(p[["x", "y", "z"]].to_numpy() / 10.0)
+        if tracks:
+            log.warning("centre line from %d laps inside the position feed's coverage (feed ends at %.0f s)", len(tracks), t_hi)
+    if not tracks:
         raise NoData(f"no accurate lap to build a centre line ({len(ok)} accurate laps, {len(best)} candidates, "
                      f"position samples per candidate: {[int(((pos['driver_number'] == r.driver_number) & (pos['t'] >= r.lap_start_s) & (pos['t'] <= r.lap_end_s)).sum()) for r in best.itertuples()][:5]}; "
                      f"pos t {pos['t'].min():.0f}..{pos['t'].max():.0f} s ({len(pos)} rows, drivers {sorted(pos['driver_number'].unique())[:5]}); "
