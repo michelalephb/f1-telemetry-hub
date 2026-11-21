@@ -771,11 +771,30 @@ def _lap_stats(L: dict) -> dict:
             "top": float(L["speed"].max())}
 
 
+def _along(ref_x, ref_y, x, y, frac=None, win: float = 0.08) -> tuple[np.ndarray, float]:
+    """Distance along the reference racing line of each point, by nearest point projection inside a window around
+    where the car should be (its share of lap time), so parts of the circuit that run close to each other cannot
+    capture it. Robust to the drift of speed integrated distance between cars. Monotonic."""
+    s_ref = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(ref_x), np.diff(ref_y)))])
+    N, L = len(ref_x), s_ref[-1]
+    frac = np.linspace(0, 1, len(x)) if frac is None else frac
+    out = np.empty(len(x))
+    w = int(win * N)
+    for q in range(len(x)):
+        c0 = int(frac[q] * (N - 1))
+        a, b = max(0, c0 - w), min(N, c0 + w + 1)
+        out[q] = s_ref[a + int(np.argmin((ref_x[a:b] - x[q]) ** 2 + (ref_y[a:b] - y[q]) ** 2))]
+    out[0] = 0.0
+    out[-1] = L
+    return np.maximum.accumulate(out), L
+
+
 def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[str], sub: str,
             src: str = "Lap times: official timing. Throttle, brake, speed, mini sectors: OpenF1 telemetry", n_sec: int = 25) -> Path:
-    """Top laps of a session on one board. The gap to the fastest lap draws itself across the lap (one line per
-    driver), a dot runs the map in step, and each driver's row fills in: full throttle share, braking share,
-    top speed. Ends on the official gaps."""
+    """Top laps of a session on one board (Michel's favourite format, 20 Nov). The gap to the fastest lap draws
+    itself across the lap, the map paints each mini sector in the colour of the quickest driver through it, and each
+    driver's row fills in: full throttle share, braking share, top speed. Laps are aligned on the fastest lap's line
+    (nearest point projection), so the gap is real, and the board ends on the official gaps."""
     P.set_event(p)
     Ls = [{k: np.array(v, float) if isinstance(v, list) else v for k, v in l.items()} for l in laps]
     used, cols = set(), []
@@ -784,75 +803,112 @@ def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[st
         cols.append(P.TEXT if cc in used else cc)
         used.add(cc)
     ref = Ls[0]
-    d = np.linspace(0, 1, 900)
+    tf = np.linspace(0, ref["t"][-1], 2000)                       # reference line, finely resampled
+    rx_f, ry_f = np.interp(tf, ref["t"], ref["x"]), np.interp(tf, ref["t"], ref["y"])
+    grid = np.linspace(0, 1, 900)
     T = []
-    for L, o in zip(Ls, official):
-        t = np.interp(d * L["dist"][-1], L["dist"], L["t"])
-        T.append(t * o / t[-1])
-    gaps = [t - T[0] for t in T]
-    lim = max(0.15, max(float(np.abs(g).max()) for g in gaps) * 1.15)
-    rx, ry = np.interp(d * ref["dist"][-1], ref["dist"], ref["x"]), np.interp(d * ref["dist"][-1], ref["dist"], ref["y"])
+    for L in Ls:                                                  # time at each point of the fastest lap's line
+        s_, Ltot = _along(rx_f, ry_f, L["x"], L["y"], L["t"] / L["t"][-1])
+        u, keep = np.unique(s_, return_index=True)
+        T.append(np.interp(grid * Ltot, u, L["t"][keep]))
+    from numpy.lib.stride_tricks import sliding_window_view
+    gaps = []
+    for t in T:
+        g = t - T[0]
+        # median over 10% of the lap removes short location glitches (one car's position stream can lag its car
+        # data for a few seconds), then a light mean smooths the 240 ms sampling
+        g = np.median(sliding_window_view(np.pad(g, 45, mode="edge"), 91), axis=1)
+        g = np.convolve(np.pad(g, 7, mode="edge"), np.ones(15) / 15, mode="valid")
+        s0 = int(0.04 * len(g))                                   # lap start: timing offsets, not driving
+        g[:s0] = np.linspace(0, g[s0], s0)
+        g[-1] = 0.0
+        gaps.append(g)
+    for k in range(1, len(gaps)):                                 # finish on the official gap
+        gaps[k] = gaps[k] + (official[k] - official[0] - gaps[k][-2]) * np.clip((grid - 0.9) / 0.1, 0, 1)
+        gaps[k][-1] = official[k] - official[0]
+    hi = max(0.1, max(float(g.max()) for g in gaps)) * 1.18
+    lo = min(-0.05, min(float(g.min()) for g in gaps)) * 1.25
+    fin = np.linspace(0, len(rx_f) - 1, len(grid)).astype(int)
+    rx, ry = rx_f[fin], ry_f[fin]
     c = _card(p)
     _hook(c, hook, sub, y0=0.83)
-    mp = _track(c, [0.12, 0.600, 0.76, 0.128], ref["x"], ref["y"], lw=9)
-    # mini sectors: each painted in the colour of the quickest of these drivers through it (Michel, 20 Nov)
-    from matplotlib.collections import LineCollection
-    edges = np.linspace(0, len(d) - 1, n_sec + 1).astype(int)
+    # map, one stroke per mini sector in the quickest driver's colour
+    mp = _track(c, [0.14, 0.60, 0.72, 0.125], ref["x"], ref["y"], lw=11)
+    edges = np.linspace(0, len(grid) - 1, n_sec + 1).astype(int)
     best = [int(np.argmin([t[e1] - t[e0] for t in T])) for e0, e1 in zip(edges[:-1], edges[1:])]
-    seg = np.stack([np.column_stack([rx, ry])[:-1], np.column_stack([rx, ry])[1:]], axis=1)
-    segcol = [cols[best[min(int(np.searchsorted(edges[1:], q, side="right")), n_sec - 1)]] for q in range(len(seg))]
-    paint = LineCollection([], linewidths=9, colors=[], capstyle="butt", zorder=3)
-    mp.add_collection(paint)
-    dot, = mp.plot([], [], "o", ms=13, color=P.TEXT, mec=P.EV, mew=3, zorder=5)
+    strokes = [mp.plot([], [], color=cols[b], lw=9, solid_capstyle="round", zorder=3)[0] for b in best]
+    dot, = mp.plot([], [], "o", ms=14, color=P.TEXT, mec=P.EV, mew=3, zorder=5)
     c.text(0.5, 0.588, f"MAP: QUICKEST THROUGH EACH OF {n_sec} MINI SECTORS", 11, color=P.MUTED, weight=600, track=True)
-    ax = c.fig.add_axes([0.08, 0.405, 0.84, 0.155])
-    ax.set_xlim(0, 1.14), ax.set_ylim(lim, -lim * 0.35)           # behind the fastest lap = down; room for the tags
+    # gap chart
+    c.text(0.08, 0.555, f"GAP TO {Ls[0]['code']} ACROSS THE LAP, SECONDS  (UP = AHEAD)", 12, color=P.MUTED, weight=600, ha="left", track=True)
+    ax = c.fig.add_axes([0.08, 0.375, 0.76, 0.17])
+    ax.set_xlim(0, 1), ax.set_ylim(hi, lo)                        # behind = down
     ax.axis("off")
-    ax.axhline(0, color="#232D3F", lw=2)
-    c.text(0.08, 0.565, "GAP TO THE FASTEST LAP, ACROSS THE LAP", 12, color=P.MUTED, weight=600, ha="left", track=True)
-    lines = [ax.plot([], [], color=cc, lw=4 if k == 0 else 3, solid_capstyle="round")[0] for k, cc in enumerate(cols)]
-    tags = [ax.text(0, 0, "", fontsize=15, color=cc, family=P.FONT, weight=600, va="center") for cc in cols]
+    step = 0.1 if hi < 0.6 else 0.25 if hi < 1.5 else 0.5
+    for gl in np.arange(step, hi, step):
+        ax.axhline(gl, color="#1A2130", lw=1, zorder=0)
+    ax.axhline(0, color=cols[0], lw=3, alpha=0.9, zorder=1)
+    lines = [ax.plot([], [], color=cc, lw=3.5, solid_capstyle="round", zorder=2)[0] for cc in cols[1:]]
+    tags = [c.text(0.86, 0.5, "", 16, color=cc, weight=600, ha="left") for cc in cols]
+    tags[0].set_text(Ls[0]["code"])
+
+    def _tag_y(vals):                                             # data -> figure y, then push apart (min 0.016)
+        ys = [0.375 + 0.17 * (hi - v) / (hi - lo) for v in vals]
+        order = sorted(range(len(ys)), key=lambda q: -ys[q])
+        for a, b in zip(order, order[1:]):
+            if ys[a] - ys[b] < 0.016:
+                ys[b] = ys[a] - 0.016
+        return ys
     st = [_lap_stats(L) for L in Ls]
     rows = []
-    y0 = 0.37
-    for h, xh in (("LAP", 0.24), ("FULL THROTTLE", 0.47), ("BRAKING", 0.66), ("TOP KM/H", 0.86)):
+    y0 = 0.335
+    for h, xh in (("LAP", 0.25), ("FULL THROTTLE", 0.47), ("BRAKING", 0.67), ("TOP KM/H", 0.86)):
         c.text(xh, y0, h, 11, color=P.MUTED, weight=600, track=True)
     for k, (L, cc) in enumerate(zip(Ls, cols)):
-        y = y0 - 0.034 - k * 0.037
+        y = y0 - 0.032 - k * 0.033
         c.text(0.10, y, L["code"], 24, color=cc, weight=600, ha="left")
         g = official[k] - official[0]
-        c.text(0.24, y, _clock(official[k]) if k == 0 else f"+{g:.3f}", 20, weight=300)
-        rows.append([c.text(x_, y, "", 20, weight=300) for x_ in (0.47, 0.66, 0.86)])
+        c.text(0.25, y, _clock(official[k]) if k == 0 else f"+{g:.3f}", 20, weight=300)
+        rows.append([c.text(x_, y, "", 20, weight=300) for x_ in (0.47, 0.67, 0.86)])
     _foot(c, src)
     r = Reel(out)
     n = int(13 * FPS)
     for i in range(n + 1):
-        j = max(2, int(len(d) * i / n))
-        f = d[j - 1]
-        for k, (ln, tg, g) in enumerate(zip(lines, tags, gaps)):
-            ln.set_data(d[:j], g[:j])
+        j = max(2, int(len(grid) * i / n))
+        for ln, g in zip(lines, gaps[1:]):
+            ln.set_data(grid[:j], g[:j])
+        ys = _tag_y([0.0] + [g[j - 1] for g in gaps[1:]])
+        for k, tg in enumerate(tags):
+            tg.set_y(ys[k])
             if k:
-                tg.set_position((f + 0.012, g[j - 1])), tg.set_text(f"{g[j - 1]:+.2f}")
+                tg.set_text(f"{L_code(Ls, k)} {gaps[k][j - 1]:+.2f}")
+        for q, (e0, e1) in enumerate(zip(edges[:-1], edges[1:])):
+            hi_ = min(j, e1 + 1)
+            strokes[q].set_data(rx[e0:hi_], ry[e0:hi_]) if hi_ > e0 + 1 else strokes[q].set_data([], [])
         dot.set_data([rx[j - 1]], [ry[j - 1]])
-        paint.set_segments(seg[:j - 1]), paint.set_color(segcol[:j - 1])
         for k, L in enumerate(Ls):                                # stats so far on this lap
-            m = L["t"] <= T[k][j - 1] * L["t"][-1] / official[k]
+            m = L["t"] <= T[k][j - 1]
             if m.sum() > 2:
                 s_ = _lap_stats({kk: L[kk][m] for kk in ("t", "throttle", "brake", "speed")})
                 for tx, v in zip(rows[k], (f"{s_['full']:.0f}%", f"{s_['brake']:.0f}%", f"{s_['top']:.0f}")):
                     tx.set_text(v)
         r.add(c.fig)
     dot.set_data([], [])
-    paint.set_segments(seg), paint.set_color(segcol)
-    for k, (tg, g) in enumerate(zip(tags, gaps)):
+    ys = _tag_y([0.0] + [official[k] - official[0] for k in range(1, len(Ls))])
+    for k, tg in enumerate(tags):
+        tg.set_y(ys[k])
         if k:
-            tg.set_position((1.012, g[-1])), tg.set_text(f"+{official[k] - official[0]:.3f}")
+            tg.set_text(f"{L_code(Ls, k)} +{official[k] - official[0]:.3f}")
     for k in range(len(Ls)):
         for tx, v in zip(rows[k], (f"{st[k]['full']:.1f}%", f"{st[k]['brake']:.1f}%", f"{st[k]['top']:.0f}")):
             tx.set_text(v)
     r.add(c.fig, int(3.5 * FPS))
     plt.close(c.fig)
     return r.close()
+
+
+def L_code(Ls, k):
+    return Ls[k]["code"]
 
 # ---------------------------------------------------------------- production (Michel, 17 Nov: approved, post at half past)
 
@@ -1208,7 +1264,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             cap = _cap(p, kind, f"🟩 Mini sector by mini sector, {name} qualifying: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
                        f"⏱️ The gap: {abs(mb - ma) / 1000:.3f} s (official qualifying times). The track turns the colour of whoever was quicker there.",
                        "💬 Where would you have found the time? Tell us below.")
-    elif kind == "board_q":                      # top four qualifying laps on one animated board
+    elif kind in ("board_q", "board_q_v2"):        # board_q_v2: the fixed board, reposted at Las Vegas 2026                      # top four qualifying laps on one animated board
         from .gp_facts import grid_pole
         res = _q_official(p)[:4]
         if len(res) < 2:
@@ -1228,6 +1284,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         if len(laps) < 2 or rows[0][0] != res[0]["code"]:
             log.warning("board_q: OpenF1 laps do not match the official qualifying times")
             return None
+        log.info("BOARD_LAPS_JSON " + json.dumps([{k: L[k] for k in ("code", "color", "t", "dist", "speed", "throttle", "brake", "x", "y", "lap_s")}
+                                                 | {"official": o_} for L, o_ in zip(laps, off)], separators=(",", ":")))
         q_board(p, laps, off, video, ["Q3, the top four", "laps on one board"], f"{name} {p.season} qualifying, official times")
         gp = grid_pole(p.season, p.round, rows[0][0])
         st = [_lap_stats({k: np.array(L[k], float) for k in ("t", "throttle", "brake", "speed")}) for L in laps]
