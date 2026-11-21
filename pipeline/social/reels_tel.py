@@ -892,6 +892,29 @@ def _colors_now(oc, season: int, fallback: dict) -> dict:
         return dict(fallback)
 
 
+def _q_official(p) -> list[dict]:
+    """Official qualifying order and times: Jolpica, or while Jolpica has not published yet, the session report
+    in SESSION_NEWS (times checked in two outlets by the report task). Same shape as live._q_results."""
+    from .live import _q_results
+    res = _q_results(p)
+    if res:
+        return res
+    from .gp_facts import SESSION_NEWS
+    try:
+        rows = SESSION_NEWS[p.title][p.season]["Q"][0]["standings"]
+    except (KeyError, IndexError, TypeError):
+        return []
+    m_, _, sec = rows[0][1].rpartition(":")
+    base = int(m_ or 0) * 60 + float(sec)
+    out = []
+    for k, r in enumerate(rows):
+        s_ = base if k == 0 else base + float(r[1].lstrip("+"))
+        t = f"{int(s_ // 60)}:{s_ % 60:06.3f}"
+        out.append({"code": r[0], "pos": k + 1, "team": None, "q1": None, "q2": None, "q3": t})
+    log.info("qualifying times from the session report (Jolpica not published yet)")
+    return out
+
+
 def _cap(p, kind: str, *blocks) -> str:
     from .captions import FOOTER, clean, event_tag, paragraphs
     return clean(paragraphs(*blocks, f"📤 {send_line(kind)}", FOOTER, TAGS.format(ev=event_tag(p.event))))
@@ -991,8 +1014,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                        "👀 Throttle, brake, gear and speed on the map, shown faster than real time.",
                        "💾 Save it.\n💬 Where is the lap won? Tell us below.")
     elif kind == "pedal_q":
-        from .live import _q_results
-        res = _q_results(p)
+        res = _q_official(p)
         pole = res[0] if res else None
         try:
             ms = None
@@ -1012,8 +1034,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "👀 Every input on the lap, live on the map, shown faster than real time.",
                    "💾 Save it.\n💬 Who beats it in the race? Tell us below.")
     elif kind == "ghost_q":                      # this year's pole lap vs P2, official qualifying times
-        from .live import _q_results
-        res = _q_results(p)
+        res = _q_official(p)
         if len(res) < 2:
             return None
 
@@ -1045,8 +1066,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "💬 Does it carry into the race? Tell us below.")
     elif kind in ("ribbon_q", "delta_q") or kind.startswith("delta_q_"):
         from .gp_facts import grid_pole
-        from .live import _q_results
-        res = _q_results(p)
+        res = _q_official(p)
 
         def _ms(r):
             t = r["q3"] or r["q2"] or r["q1"]
