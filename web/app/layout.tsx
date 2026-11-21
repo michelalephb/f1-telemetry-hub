@@ -3,9 +3,29 @@ import Link from 'next/link'
 import './globals.css'
 import BugReport from '@/components/BugReport'
 
+// Link previews (WhatsApp, iMessage, X, LinkedIn, Slack): the preview image, favicon and Apple icon come from the
+// files next to this layout (opengraph-image.jpg, twitter-image.jpg, icon.png, apple-icon.png). The preview image
+// is 1200 x 630 and under 300 KB (WhatsApp drops larger ones), with the logo inside the centre 630 x 630 square so
+// apps that crop the thumbnail to a square still show the whole logo (Michel, 20 Nov 2026).
+const SITE = process.env.NEXT_PUBLIC_BASE_PATH === '' ? 'https://f1telemetryhub.com' : 'https://michelalephb.github.io'
+const DESCRIPTION = 'Every F1 session, decoded in telemetry. Braking points, pedal traces, pole laps.'
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE),
   title: 'F1 Telemetry Hub',
-  description: 'Every lap, every corner. F1 telemetry analysis.',
+  description: DESCRIPTION,
+  openGraph: {
+    type: 'website',
+    siteName: 'F1 Telemetry Hub',
+    title: 'F1 Telemetry Hub',
+    description: DESCRIPTION,
+    url: '/',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'F1 Telemetry Hub',
+    description: DESCRIPTION,
+  },
   // Launch switch: search engines may index the site only when it is served from its own domain
   // (Pages base path ""), i.e. f1telemetryhub.com. The github.io test build stays noindex.
   robots: process.env.NEXT_PUBLIC_BASE_PATH === '' ? { index: true, follow: true } : { index: false, follow: false },
