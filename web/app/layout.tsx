@@ -24,16 +24,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <header className="border-b border-line">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 sm:px-6">
             <Link href="/" aria-label="F1 Telemetry Hub home" className="flex min-h-11 items-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/logo.png`} alt="F1 Telemetry Hub" className="h-6 w-auto" />
             </Link>
-            <nav aria-label="Main" className="ml-auto flex flex-wrap items-center gap-1 text-sm">
+            <nav aria-label="Main" className="-ml-3 flex w-full flex-wrap items-center gap-1 text-sm sm:ml-auto sm:w-auto">
               <Link href="/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">Season</Link>
-              <Link href="/historique/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink">F1 History Analytics</Link>
+              <Link href="/historique/" className="flex min-h-11 items-center rounded-lg px-3 text-mute hover:text-ink"><span className="sm:hidden">History</span><span className="hidden sm:inline">F1 History Analytics</span></Link>
               <a href="https://www.instagram.com/f1telemetryhub/" target="_blank" rel="noopener noreferrer"
-                className="ml-1 flex min-h-11 items-center gap-1.5 rounded-lg border border-line px-3 text-ink hover:border-ink/60">
+                className="ml-auto flex min-h-11 items-center gap-1.5 rounded-lg border border-line px-3 text-ink hover:border-ink/60 sm:ml-1">
                 Instagram
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M7 17 17 7" /><path d="M8 7h9v9" />
