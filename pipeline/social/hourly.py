@@ -25,6 +25,10 @@ from PIL import Image
 log = logging.getLogger(__name__)
 
 TZ = ZoneInfo("America/Los_Angeles")
+# Michel, 20 Nov 2026: through the end of the weekend, stories are only about this GP and this year: the
+# sessions (reports, timing data), its news and its forecast. Nothing from other years or the season.
+GP_ONLY = {"LAS VEGAS": (2026, datetime(2026, 11, 23, tzinfo=ZoneInfo("America/Los_Angeles")))}
+GP_ONLY_GROUPS = {"session", "live", "news", "rain"}
 UTC = ZoneInfo("UTC")
 WINDOW = range(7, 23)            # race week: 7 AM to 10 PM PT, 16 posts a day
 DAILY_HOUR = 9                   # other weeks: one post at 9 AM PT (6 PM in central Europe)
@@ -199,6 +203,9 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     except Exception as e:
         log.error("session reports unavailable: %s", e)
         sess = []
+    only = GP_ONLY.get(p.title)
+    if only and q is not None and q.year == only[0] and now < only[1]:
+        out = [u for u in out if u[0] in GP_ONLY_GROUPS]
     return sess + out
 
 
