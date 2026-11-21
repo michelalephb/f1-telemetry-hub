@@ -37,6 +37,10 @@ STORY_HOURS = {8, 11, 14, 20}
 # RPRE and race reports R from SESSION_NEWS), any hour, nothing else
 _LA = ZoneInfo("America/Los_Angeles")
 RACE_ONLY = {"LAS VEGAS": (2026, datetime(2026, 11, 21, 16, 0, tzinfo=_LA), datetime(2026, 11, 22, 23, 0, tzinfo=_LA), ("RPRE", "R"))}
+# Race build up posting order (1 based item numbers): grid, start time, tyres, weather, P2 fight, penalties. Items
+# added later (late updates) post first. Build up stops at RACE_START so nothing stale posts once the race is on.
+RACE_ORDER = {("LAS VEGAS", 2026): [1, 6, 3, 4, 5, 2]}
+RACE_START = {("LAS VEGAS", 2026): datetime(2026, 11, 21, 20, 0, tzinfo=_LA)}
 GP_ONLY_STORY_HOURS = STORY_HOURS                 # kept for older imports
 UTC = ZoneInfo("UTC")
 WINDOW = range(7, 23)            # race week: 7 AM to 10 PM PT, 16 posts a day
@@ -218,8 +222,22 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     if only and q is not None and q.year == only[0] and now < only[1]:
         out = [u for u in out if u[0] in GP_ONLY_GROUPS]
     ro = RACE_ONLY.get(p.title)
+    if ro and q is not None and q.year == ro[0] and now < ro[1]:     # race build up waits for the race window
+        sess = [u for u in sess if not u[1].startswith("RPRE:")]
     if ro and q is not None and q.year == ro[0] and ro[1] <= now < ro[2]:
-        sess = [u for u in sess if u[1].split(":")[0] in ro[3]]
+        key = (p.title, ro[0])
+        order = RACE_ORDER.get(key, [])
+        start = RACE_START.get(key)
+
+        def rank(u):
+            code, i = u[1].split(":")[0], int(u[1].split(":")[1])
+            if code == "R":
+                return (0, i)                                         # race reports first
+            if i not in order:
+                return (1, -i)                                        # late updates, newest first
+            return (2, order.index(i))
+        sess = sorted([u for u in sess if u[1].split(":")[0] in ro[3]
+                       and not (u[1].startswith("RPRE:") and start is not None and now >= start)], key=rank)
         out = []
     return sess + out
 
