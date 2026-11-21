@@ -404,7 +404,7 @@ SESSION_NEWS: dict = {
                 {
                     "session": "FP3", "session_name": "Third practice", "when": "Fri 20 Nov, Las Vegas",
                     "title": "Verstappen's tough hour", "subtitle": "P6, two stewards' probes and a steering complaint",
-                    "standings": [["RUS", "1:34.041"], ["COL", "+1.157"], ["VER", "+1.309"]],
+                    "standings": [["RUS", "1:34.041", 1], ["COL", "+1.157", 5], ["VER", "+1.309", 6]],
                     "notes": ["Weaved early, Colapinto passed, he repassed",
                               "Wheel to wheel with Russell late on",
                               "Complained about his steering"],
