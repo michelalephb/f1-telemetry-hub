@@ -715,13 +715,26 @@ def delta_map(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, officia
     ca, cb = A.get("color") or P.CYAN, B.get("color") or P.GOLD
     if ca.lower() == cb.lower():
         cb = P.GOLD
-    d = np.linspace(0, A["dist"][-1], 1200)
-    ta = np.interp(d, A["dist"], A["t"])
-    tb = np.interp(d * B["dist"][-1] / A["dist"][-1], B["dist"], B["t"])   # same fraction of the lap
-    tb = tb * official[1] / tb[-1]                                          # telemetry clock scaled to the official lap
-    ta = ta * official[0] / ta[-1]
-    gap = tb - ta                                                           # > 0: A ahead
-    x, y = np.interp(d, A["dist"], A["x"]), np.interp(d, A["dist"], A["y"])
+    # both laps on A's racing line (windowed nearest point projection, as in q_board), 1200 points
+    tf = np.linspace(0, A["t"][-1], 2000)
+    rx_f, ry_f = np.interp(tf, A["t"], A["x"]), np.interp(tf, A["t"], A["y"])
+    grid = np.linspace(0, 1, 1200)
+    TT = []
+    for L in (A, B):
+        s_, Ltot = _along(rx_f, ry_f, L["x"], L["y"], L["t"] / L["t"][-1])
+        u, keep = np.unique(s_, return_index=True)
+        TT.append(np.interp(grid * Ltot, u, L["t"][keep]))
+    from numpy.lib.stride_tricks import sliding_window_view
+    g = TT[1] - TT[0]
+    g = np.median(sliding_window_view(np.pad(g, 60, mode="edge"), 121), axis=1)
+    g = np.convolve(np.pad(g, 10, mode="edge"), np.ones(21) / 21, mode="valid")
+    s0 = int(0.04 * len(g))
+    g[:s0] = np.linspace(0, g[s0], s0)
+    g = g + ((official[1] - official[0]) - g[-1]) * np.clip((grid - 0.9) / 0.1, 0, 1)
+    gap = g                                                                 # > 0: A ahead
+    fin = np.linspace(0, len(rx_f) - 1, len(grid)).astype(int)
+    x, y = rx_f[fin], ry_f[fin]
+    d = grid
     edges = np.linspace(0, len(d) - 1, n_sec + 1).astype(int)
     win = [ca if gap[e1] - gap[e0] > 0 else cb for e0, e1 in zip(edges[:-1], edges[1:])]
     pts = np.column_stack([x, y])
@@ -923,7 +936,7 @@ REEL_SLOTS = {
     -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
     -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
     0: {12: "board_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # board_q: the standard first quali Reel (Michel, 20 Nov)
-    1: {8: "ribbon_q", 10: "ghost_q", 12: "delta_q_ver_rus", 15: "braker_fp2", 18: "board_q"},   # night qualifying; delta_q_ver_rus is the
+    1: {8: "ribbon_q", 12: "delta_q_ver_rus", 15: "braker_fp2", 18: "board_q"},   # ghost_q off at Las Vegas 2026 (dots overlap)   # night qualifying; delta_q_ver_rus is the
     # Las Vegas 2026 front row (elsewhere it finds no such pair and falls back); board_q went out Friday night there   # night qualifying (Las Vegas style);
     # Michel, 20 Nov: one ghost a day at most, new formats around it. ghost_fp3_* stay buildable for other circuits.
 }
