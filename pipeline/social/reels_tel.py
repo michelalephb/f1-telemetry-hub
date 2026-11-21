@@ -640,12 +640,75 @@ def ghost(p, a: dict, b: dict, out: Path, hook: list[str], sub: str | None = Non
 
 # day offset from qualifying day -> {hour PT: kind}; posted at HH:30, between the hourly stories
 REEL_SLOTS = {
-    -2: {12: "points_teams", 15: "braker", 21: "guess"},       # pedal_record posted early (17 Nov, 10:42 PM)
-    -1: {12: "teammates", 15: "points"},
-    0: {11: "guess2023", 12: "ghost", 15: "pedal_pole"},        # guess_fp2 dropped: the FP2 story reveals that driver
-    1: {10: "ghost_q", 12: "pedal_q", 15: "braker_fp2", 18: "pedal_fp3"},   # Michel, 20 Nov: more Reels, this GP only
+    # Michel, 20 Nov growth plan: Reels reach about 35x more accounts than stories, and braking and pedal Reels
+    # lead (braker_z2 2,213, pedal_record 1,853, pedal_wet 1,646 accounts reached at Las Vegas 2026). So 2 to 4
+    # Reels every race week day, braking and pedal first. hourly.SLOTS adds Reels at HH:04 on days -3 to 0.
+    -5: {12: "guess", 18: "teammates_race"},                   # Monday (Saturday qualifying)
+    -4: {12: "guess2023", 18: "points_teams"},
+    -3: {12: "braker", 21: "pedal_record"},                    # + History Reel at 18:04
+    -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
+    -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
+    0: {12: "pedal_q", 15: "ghost_q", 21: "points"},           # + pedal_fp3 9:04; quali Reels when it ran in the PT morning
+    1: {10: "ghost_q", 12: "pedal_q", 15: "braker_fp2", 18: "pedal_fp3"},   # night qualifying (Las Vegas style)
 }
+# A slot whose data is not in (live session not run yet, no wet pole here) takes the next of these not yet
+# posted this GP, best reach first (hourly.build_reel)
+FALLBACK = ["braker_z3", "braker_z2", "braker", "pedal_pole", "pedal_record", "ghost", "teammates", "points",
+            "guess2023", "guess", "points_teams", "teammates_race"]
+# Last line of every Reel caption and the end card: a reason to send it (sends per reach is the signal
+# Instagram leans on for reach to non followers). Keyed by the start of the kind.
+SEND = {
+    "braker": "Send it to the friend who thinks he knows who brakes latest.",
+    "pedal": "Send it to someone who has never ridden a lap from the inside.",
+    "ghost": "Send it to the friend you argue F1 with.",
+    "guess": "Send it to a friend and see who gets it first.",
+    "teammates": "Send it to a fan of the driver on the wrong side of this.",
+    "points": "Send it to the friend who already called P2.",
+}
+
+
+def send_line(kind: str) -> str:
+    return next((v for k, v in SEND.items() if kind.startswith(k)), "Send it to the friend who needs to see this.")
+
+
 TAGS = "#F1 #Formula1 {ev} #F1Telemetry #RaceWeek"
+
+
+END_S = 2.5                      # seconds of end card after every Reel
+
+
+def end_card(p, kind: str, out: Path) -> Path:
+    """Closing frame of a Reel: the reason to send it, the site and the handle (Michel, 20 Nov growth plan)."""
+    import textwrap
+    from . import style as S
+    P.set_event(p)
+    c = _card(p)
+    body = send_line(kind).removeprefix("Send it to ").rstrip(".")
+    c.text(0.5, 0.64, "SEND IT TO", 18, color=P.CYAN, weight=600, track=True)
+    for k, ln in enumerate(textwrap.wrap(body, 24)):
+        c.text(0.5, 0.585 - k * 0.042, ln, 44, weight=300)
+    c.rule(0.45, 0.55, 0.43)
+    c.text(0.5, 0.38, S.SITE, 34, color=P.CYAN, weight=300)
+    c.text(0.5, 0.345, "Every session, decoded in telemetry", 20, color=P.MUTED, weight=300)
+    c.text(0.5, 0.29, f"Follow {S.HANDLE}", 26, weight=300)
+    _foot(c, SRC_TEL)
+    return c.save(out)
+
+
+def append_end(video: Path, card: Path, seconds: float = END_S) -> Path:
+    """Re-encode the Reel with the end card held for `seconds`, same settings as render.Reel."""
+    import subprocess
+    from .render import W
+    tmp = video.with_name(video.stem + "_end.mp4")
+    subprocess.run([
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-loop", "1", "-framerate", str(FPS), "-t", f"{seconds}",
+        "-i", str(card), "-filter_complex",
+        f"[0:v]setsar=1,fps={FPS}[a];[1:v]scale={W}:{H_REEL},setsar=1,format=yuv420p[b];[a][b]concat=n=2:v=1:a=0[o]",
+        "-map", "[o]", "-an", "-c:v", "libx264", "-profile:v", "high", "-preset", "veryfast", "-crf", "21",
+        "-maxrate", "12M", "-bufsize", "24M", "-pix_fmt", "yuv420p", "-g", str(FPS * 2), "-movflags", "+faststart",
+        str(tmp)], check=True)
+    tmp.replace(video)
+    return video
 
 
 def _ctx(p):
@@ -700,9 +763,9 @@ def _colors_now(oc, season: int, fallback: dict) -> dict:
         return dict(fallback)
 
 
-def _cap(p, *blocks) -> str:
+def _cap(p, kind: str, *blocks) -> str:
     from .captions import FOOTER, clean, event_tag, paragraphs
-    return clean(paragraphs(*blocks, FOOTER, TAGS.format(ev=event_tag(p.event))))
+    return clean(paragraphs(*blocks, f"📤 {send_line(kind)}", FOOTER, TAGS.format(ev=event_tag(p.event))))
 
 
 def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
@@ -725,7 +788,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                "brake": p.brake.tolist(), "gear": p.gear.tolist(), "x": p.x.tolist(), "y": p.y.tolist(), "lap_s": p.lap_s,
                "compound": cpd, "lap": h[0]["fl_lap"]}
         pedal(p, lap, video, ["Inside the", "race lap record"], f"{p.driver}, {p.ref_year}, lap {h[0]['fl_lap']}, {h[0]['fl_time']}")
-        cap = _cap(p, f"🎥 Inside the {name} race lap record: {drv(p.driver, p.colors)}, {p.ref_year}, {h[0]['fl_time']} on lap {h[0]['fl_lap']}",
+        cap = _cap(p, kind, f"🎥 Inside the {name} race lap record: {drv(p.driver, p.colors)}, {p.ref_year}, {h[0]['fl_time']} on lap {h[0]['fl_lap']}",
                    "👀 Throttle, brake, gear and speed, live on the map, shown faster than real time.",
                    f"🏁 Top speed {p.stats['top_speed']} km/h, {p.stats['flat_pct']}% of the lap flat out.",
                    "💾 Save it.\n💬 Where would you lift? Tell us below.")
@@ -743,7 +806,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         braker(p, rows, zone, video, year, label)
         good = [r for r in rows if r.get("n", 0) >= 10 and r["err"] <= 10] or rows
         lead = good[0]
-        cap = _cap(p, f"🛑 Who brakes latest {NICK.get(p.title, 'into the fastest braking zone')}? {year} {label}, every green lap.",
+        cap = _cap(p, kind, f"🛑 Who brakes latest {NICK.get(p.title, 'into the fastest braking zone')}? {year} {label}, every green lap.",
                    f"🥇 {drv(lead['code'], p.colors)} leads: brakes {lead['m']:.0f} m before the slowest point of the corner (±{lead['err']:.0f} m).",
                    "ℹ️ Median of each driver's green laps; the ± is the standard error. Telemetry: OpenF1.",
                    "💬 Who did you expect at the top? Tell us below.")
@@ -758,7 +821,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                 return None
             what = f"fastest lap of FP2, {name} {p.season}"
         guess(p, lap, video, what)
-        cap = _cap(p, f"🕵️ Who is it? The {what}.", "👀 One speed trace, no names. Watch to the end for the answer.",
+        cap = _cap(p, kind, f"🕵️ Who is it? The {what}.", "👀 One speed trace, no names. Watch to the end for the answer.",
                    "💬 Comment your guess before the reveal!", "ℹ️ Lap time: official timing. Telemetry: OpenF1.")
     elif kind == "teammates":
         from . import news
@@ -766,7 +829,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         rows = season_quali(p.season, st["after_round"])
         cols = _colors_now(oc, p.season, p.colors)
         teammates(p, rows, st["after_round"], video, cols, [t["name"] for t in st["teams"]])
-        cap = _cap(p, f"⚔️ Teammate wars: {p.season} qualifying head to head, after round {st['after_round']}.",
+        cap = _cap(p, kind, f"⚔️ Teammate wars: {p.season} qualifying head to head, after round {st['after_round']}.",
                    "📊 Final qualifying classification each round, the rounds both drivers took part in.",
                    "💬 Which duel surprises you most? Tell us below.")
     elif kind == "points":
@@ -776,7 +839,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         codes = [r["code"] for r in st["drivers"][1:5]]
         pointsrace(p, pts, codes, _colors_now(oc, p.season, p.colors), video)
         a, b = st["drivers"][1], st["drivers"][2]
-        cap = _cap(p, f"📈 The fight for P2 in {p.season}, round by round.",
+        cap = _cap(p, kind, f"📈 The fight for P2 in {p.season}, round by round.",
                    f"{drv(a['code'], p.colors)} {a['pts']:.0f} pts\n{drv(b['code'], p.colors)} {b['pts']:.0f} pts",
                    f"ℹ️ Official standings after round {st['after_round']}.", "💬 Who finishes second? Tell us below.")
     elif kind in ("ghost", "pedal_pole"):
@@ -787,7 +850,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             a, b = sorted(laps[:2], key=lambda l: l["year"])
             ghost(p, a, b, video, ["Two poles,", "one Strip" if p.title == "LAS VEGAS" else "one track"])
             fast = a if a["lap_s"] < b["lap_s"] else b
-            cap = _cap(p, f"👻 Two {name} poles on one map: {drv(a['code'], p.colors)} {a['year']} {a['official']} vs {drv(b['code'], p.colors)} {b['year']} {b['official']}.",
+            cap = _cap(p, kind, f"👻 Two {name} poles on one map: {drv(a['code'], p.colors)} {a['year']} {a['official']} vs {drv(b['code'], p.colors)} {b['year']} {b['official']}.",
                        f"⏱️ {fast['code']} {fast['year']} quicker by {abs(a['lap_s'] - b['lap_s']):.3f} s (official pole times).",
                        "💬 Which year would you take? Tell us below.")
         else:
@@ -795,7 +858,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                 return None
             lap = laps[0]
             pedal(p, lap, video, ["Inside the", f"{lap['year']} pole lap"], f"{lap['code']}, {lap['year']} qualifying, {lap['official']}")
-            cap = _cap(p, f"🎥 Inside the {lap['year']} {name} pole lap: {drv(lap['code'], p.colors)}, {lap['official']}.",
+            cap = _cap(p, kind, f"🎥 Inside the {lap['year']} {name} pole lap: {drv(lap['code'], p.colors)}, {lap['official']}.",
                        "👀 Throttle, brake, gear and speed on the map, shown faster than real time.",
                        "💾 Save it.\n💬 Where is the lap won? Tell us below.")
     elif kind == "pedal_q":
@@ -813,7 +876,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             return None
         official = (pole["q3"] or pole["q2"]) if pole else _clock(lap["lap_s"])
         pedal(p, lap, video, ["Inside the", "pole lap"], f"{lap['code']}, {name} {p.season}, {official}")
-        cap = _cap(p, f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}.",
+        cap = _cap(p, kind, f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}.",
                    "👀 Every input on the lap, live on the map, shown faster than real time.",
                    "💾 Save it.\n💬 Who beats it in the race? Tell us below.")
     elif kind == "ghost_q":                      # this year's pole lap vs P2, official qualifying times
@@ -833,7 +896,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         except Exception:
             return None
         ghost(p, a, b, video, ["Pole vs P2,", "one map"], f"{a['code']} vs {b['code']}, {name} {p.season} qualifying, official times")
-        cap = _cap(p, f"👻 Pole vs P2 in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
+        cap = _cap(p, kind, f"👻 Pole vs P2 in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
                    f"⏱️ The gap: {abs(ma - mb) / 1000:.3f} s (official qualifying times).",
                    "💬 Where was pole won? Tell us below.")
     elif kind == "pedal_fp3":                    # this year's fastest FP3 lap
@@ -842,7 +905,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         except Exception:
             return None
         pedal(p, lap, video, ["Inside the", "fastest FP3 lap"], f"{lap['code']}, {name} {p.season}, FP3, {_clock(lap['lap_s'])}")
-        cap = _cap(p, f"🎥 Inside the fastest FP3 lap in {name}: {drv(lap['code'], p.colors)}, {_clock(lap['lap_s'])}.",
+        cap = _cap(p, kind, f"🎥 Inside the fastest FP3 lap in {name}: {drv(lap['code'], p.colors)}, {_clock(lap['lap_s'])}.",
                    "👀 Throttle, brake, gear and speed on the map, shown faster than real time.",
                    "💬 Does it carry into the race? Tell us below.")
     elif kind == "points_teams":
@@ -857,7 +920,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         tcol = {t: cols.get(drv_team.get(t), P.CYAN) for t in names}
         pointsrace(p, pts, names, tcol, video, teams=True)
         a, b = st["teams"][1], st["teams"][2]
-        cap = _cap(p, f"📈 The constructors fight for P2 in {p.season}, round by round.",
+        cap = _cap(p, kind, f"📈 The constructors fight for P2 in {p.season}, round by round.",
                    f"🏎️ {a['name']} {a['pts']:.0f} pts\n🏎️ {b['name']} {b['pts']:.0f} pts",
                    f"ℹ️ Official standings after round {st['after_round']}.", "💬 Who keeps second? Tell us below.")
     elif kind == "pedal_wet":
@@ -875,15 +938,16 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         if lap is None:
             return None
         pedal(p, lap, video, ["Inside the", "wet pole lap"], f"{lap['code']}, {lap['year']} qualifying, {lap['official']}")
-        cap = _cap(p, f"🌧️ Inside the wet {name} pole lap: {drv(lap['code'], p.colors)}, {lap['year']}, {lap['official']} on {lap['compound'].lower()}s.",
+        cap = _cap(p, kind, f"🌧️ Inside the wet {name} pole lap: {drv(lap['code'], p.colors)}, {lap['year']}, {lap['official']} on {lap['compound'].lower()}s.",
                    "👀 Every input on a cold, wet track, shown faster than real time.",
                    "💾 Save it.\n💬 Could it rain again this year? Tell us below.")
-    elif kind == "braker_z2":
+    elif kind in ("braker_z2", "braker_z3"):                # 2nd and 3rd fastest braking zones
         from .lapdata import zones
+        k = int(kind[-1])
         zs = sorted(zones(p), key=lambda z: -z["entry"])
-        if len(zs) < 2:
+        if len(zs) < k:
             return None
-        z = zs[1]
+        z = zs[k - 1]
         zone = {"turn": z["turn"], "entry": z["entry"], "xy": [float(p.x[z["imin"]]), float(p.y[z["imin"]])]}
         rows = brake_rows_race(oc, p.ref_year, ck, rot, tuple(zone["xy"]), ref_frac=float(p.dist[z["imin"]] / p.dist[-1]))
         if len(rows) < 8:
@@ -895,7 +959,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             if saved:
                 NICK[p.title] = saved
         good = [r for r in rows if r.get("n", 0) >= 10 and r["err"] <= 10] or rows
-        cap = _cap(p, f"🛑 Who brakes latest into {zone['turn']}? {p.ref_year} race, every green lap.",
+        cap = _cap(p, kind, f"🛑 Who brakes latest into {zone['turn']}? {p.ref_year} race, every green lap.",
                    f"🥇 {drv(good[0]['code'], p.colors)} leads: brakes {good[0]['m']:.0f} m before the slowest point (±{good[0]['err']:.0f} m).",
                    "ℹ️ Median of each driver's green laps; the ± is the standard error. Telemetry: OpenF1.",
                    "💬 Surprised? Tell us below.")
@@ -904,16 +968,17 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         st = news.standings(p.season)
         rows = season_race_h2h(p.season, st["after_round"])
         teammates(p, rows, st["after_round"], video, _colors_now(oc, p.season, p.colors), [t["name"] for t in st["teams"]], "races")
-        cap = _cap(p, f"⚔️ Teammate wars, race edition: {p.season} race head to head, after round {st['after_round']}.",
+        cap = _cap(p, kind, f"⚔️ Teammate wars, race edition: {p.season} race head to head, after round {st['after_round']}.",
                    "📊 Official race classification each round, the rounds both drivers started.",
                    "💬 Quali pace or race craft: which matters more? Tell us below.")
     elif kind == "guess2023":
         lap = lap_of(oc, p.season - 3, ck, "Race", rot)
         what = f"fastest lap of the {lap['year']} race here"
         guess(p, lap, video, what)
-        cap = _cap(p, f"🕵️ Who is it? The {what}.", "👀 One speed trace, no names. Watch to the end for the answer.",
+        cap = _cap(p, kind, f"🕵️ Who is it? The {what}.", "👀 One speed trace, no names. Watch to the end for the answer.",
                    "💬 Comment your guess before the reveal!", "ℹ️ Lap time: official timing. Telemetry: OpenF1.")
     else:
         return None
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-1", "-i", str(video), "-frames:v", "1", str(out / "cover.jpg")], check=True)
+    append_end(video, end_card(p, kind, out / "end_card.jpg"))      # after the cover: the cover stays the data frame
     return video, cap
