@@ -1239,7 +1239,7 @@ def _q_official(p) -> list[dict]:
 
 def _cap(p, kind: str, *blocks) -> str:
     from .captions import FOOTER, clean, event_tag, paragraphs
-    return clean(paragraphs(*blocks, f"📤 {send_line(kind)}", FOOTER, TAGS.format(ev=event_tag(p.event))))
+    return clean(paragraphs(*blocks, FOOTER, TAGS.format(ev=event_tag(p.event))))
 
 
 def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
@@ -1589,5 +1589,5 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
     else:
         return None
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-1", "-i", str(video), "-frames:v", "1", str(out / "cover.jpg")], check=True)
-    append_end(video, end_card(p, kind, out / "end_card.jpg"))      # after the cover: the cover stays the data frame
+    # Michel, 20 Nov: no "send it to a friend" end card any more (end_card and append_end kept, unused)
     return video, cap

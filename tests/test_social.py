@@ -559,7 +559,8 @@ def test_hashtags_capped_at_five_and_send_line():
     results, laps, drivers, traces = quali_fixture()
     st = story.quali_story(results, laps, drivers, CORNERS, traces, TRACK_M)
     c = captions.quali(st, {"event": "Qatar Grand Prix", "code": "Q", "round": 21}, "reel")
-    assert c.split("\n")[-1].count("#") <= captions.MAX_TAGS and "#QatarGP" in c and "Send it to" in c
+    assert c.split("\n")[-1].count("#") <= captions.MAX_TAGS and "#QatarGP" in c
+    assert "Send it to" not in c and "📤" not in c and c.count("💬") == 1 and "favourite driver" in c   # Michel, 20 Nov
     assert captions.tags("Qatar Grand Prix", "VER", "NOR", "LEC").count("#") == 5
 
 

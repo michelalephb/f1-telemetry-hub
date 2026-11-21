@@ -107,8 +107,32 @@ def race(st: RaceStory, meta: dict, kind: str) -> str:
         FOOTER, tags(meta["event"], w, st.mover["code"] if st.mover else "")))
 
 
+SESSION_WORDS = ("qualifying", "Qualifying", "Q3", "FP1", "FP2", "FP3", "practice", "grid", "race lap", "Race", "sprint")
+
+
+def fan_question(s: str) -> str:
+    """The one comment prompt we use (Michel, 20 Nov): a plain fan question, never a challenge to the reader."""
+    return ("💬 Who was your favourite driver today?" if any(w in s for w in SESSION_WORDS)
+            else "💬 Who are you backing this weekend?")
+
+
 def clean(s: str) -> str:
-    """House style: no hyphens or dashes in captions. Instagram limit: 2,200 characters."""
+    """House style: no hyphens or dashes in captions. Instagram limit: 2,200 characters.
+    Michel, 20 Nov: no "send it to a friend" lines, and comment prompts are replaced by one plain fan question
+    (keep captions technical)."""
+    q = fan_question(s)
+    out, asked = [], False
+    for ln in s.split("\n"):
+        if ln.lstrip().startswith("📤"):
+            continue
+        if ln.lstrip().startswith("💬"):
+            if asked:
+                continue
+            ln, asked = q, True
+        out.append(ln)
+    s = "\n".join(out)
+    while "\n\n\n" in s:
+        s = s.replace("\n\n\n", "\n\n")
     s = s.replace("—", ",").replace("–", " to ").replace("-", " ")
     if len(s) > 2200:
         raise ValueError(f"caption is {len(s)} characters")
