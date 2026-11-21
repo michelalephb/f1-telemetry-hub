@@ -762,6 +762,87 @@ def delta_map(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, officia
     plt.close(c.fig)
     return r.close()
 
+
+def _lap_stats(L: dict) -> dict:
+    """Share of lap time at full throttle (98% or more) and on the brake, and the top speed (OpenF1 car data)."""
+    dt = np.diff(L["t"], append=L["t"][-1])
+    tot = max(float(dt.sum()), 1e-6)
+    return {"full": float(dt[L["throttle"] >= 98].sum() / tot * 100), "brake": float(dt[L["brake"] > 0].sum() / tot * 100),
+            "top": float(L["speed"].max())}
+
+
+def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[str], sub: str,
+            src: str = "Lap times: official timing. Throttle, brake, speed: OpenF1 telemetry") -> Path:
+    """Top laps of a session on one board. The gap to the fastest lap draws itself across the lap (one line per
+    driver), a dot runs the map in step, and each driver's row fills in: full throttle share, braking share,
+    top speed. Ends on the official gaps."""
+    P.set_event(p)
+    Ls = [{k: np.array(v, float) if isinstance(v, list) else v for k, v in l.items()} for l in laps]
+    used, cols = set(), []
+    for L in Ls:                                                  # teammates share a colour: second one goes white
+        cc = (L.get("color") or P.CYAN).lower()
+        cols.append(P.TEXT if cc in used else cc)
+        used.add(cc)
+    ref = Ls[0]
+    d = np.linspace(0, 1, 900)
+    T = []
+    for L, o in zip(Ls, official):
+        t = np.interp(d * L["dist"][-1], L["dist"], L["t"])
+        T.append(t * o / t[-1])
+    gaps = [t - T[0] for t in T]
+    lim = max(0.15, max(float(np.abs(g).max()) for g in gaps) * 1.15)
+    rx, ry = np.interp(d * ref["dist"][-1], ref["dist"], ref["x"]), np.interp(d * ref["dist"][-1], ref["dist"], ref["y"])
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    mp = _track(c, [0.32, 0.585, 0.36, 0.15], ref["x"], ref["y"], lw=6)
+    dot, = mp.plot([], [], "o", ms=12, color=P.TEXT, mec=P.EV, mew=3, zorder=5)
+    ax = c.fig.add_axes([0.08, 0.405, 0.84, 0.165])
+    ax.set_xlim(0, 1.14), ax.set_ylim(lim, -lim * 0.35)           # behind the fastest lap = down; room for the tags
+    ax.axis("off")
+    ax.axhline(0, color="#232D3F", lw=2)
+    c.text(0.08, 0.575, "GAP TO THE FASTEST LAP, ACROSS THE LAP", 12, color=P.MUTED, weight=600, ha="left", track=True)
+    lines = [ax.plot([], [], color=cc, lw=4 if k == 0 else 3, solid_capstyle="round")[0] for k, cc in enumerate(cols)]
+    tags = [ax.text(0, 0, "", fontsize=15, color=cc, family=P.FONT, weight=600, va="center") for cc in cols]
+    st = [_lap_stats(L) for L in Ls]
+    rows = []
+    y0 = 0.37
+    for h, xh in (("LAP", 0.24), ("FULL THROTTLE", 0.47), ("BRAKING", 0.66), ("TOP KM/H", 0.86)):
+        c.text(xh, y0, h, 11, color=P.MUTED, weight=600, track=True)
+    for k, (L, cc) in enumerate(zip(Ls, cols)):
+        y = y0 - 0.034 - k * 0.037
+        c.text(0.10, y, L["code"], 24, color=cc, weight=600, ha="left")
+        g = official[k] - official[0]
+        c.text(0.24, y, _clock(official[k]) if k == 0 else f"+{g:.3f}", 20, weight=300)
+        rows.append([c.text(x_, y, "", 20, weight=300) for x_ in (0.47, 0.66, 0.86)])
+    _foot(c, src)
+    r = Reel(out)
+    n = int(13 * FPS)
+    for i in range(n + 1):
+        j = max(2, int(len(d) * i / n))
+        f = d[j - 1]
+        for k, (ln, tg, g) in enumerate(zip(lines, tags, gaps)):
+            ln.set_data(d[:j], g[:j])
+            if k:
+                tg.set_position((f + 0.012, g[j - 1])), tg.set_text(f"{g[j - 1]:+.2f}")
+        dot.set_data([rx[j - 1]], [ry[j - 1]])
+        for k, L in enumerate(Ls):                                # stats so far on this lap
+            m = L["t"] <= T[k][j - 1] * L["t"][-1] / official[k]
+            if m.sum() > 2:
+                s_ = _lap_stats({kk: L[kk][m] for kk in ("t", "throttle", "brake", "speed")})
+                for tx, v in zip(rows[k], (f"{s_['full']:.0f}%", f"{s_['brake']:.0f}%", f"{s_['top']:.0f}")):
+                    tx.set_text(v)
+        r.add(c.fig)
+    dot.set_data([], [])
+    for k, (tg, g) in enumerate(zip(tags, gaps)):
+        if k:
+            tg.set_position((1.012, g[-1])), tg.set_text(f"+{official[k] - official[0]:.3f}")
+    for k in range(len(Ls)):
+        for tx, v in zip(rows[k], (f"{st[k]['full']:.1f}%", f"{st[k]['brake']:.1f}%", f"{st[k]['top']:.0f}")):
+            tx.set_text(v)
+    r.add(c.fig, int(3.5 * FPS))
+    plt.close(c.fig)
+    return r.close()
+
 # ---------------------------------------------------------------- production (Michel, 17 Nov: approved, post at half past)
 
 # day offset from qualifying day -> {hour PT: kind}; posted at HH:30, between the hourly stories
@@ -775,7 +856,7 @@ REEL_SLOTS = {
     -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
     -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
     0: {12: "pedal_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # pedal_fp3 before a night qualifying (Michel, 20 Nov)
-    1: {8: "ribbon_q", 10: "ghost_q", 12: "delta_q_ver_rus", 15: "braker_fp2"},   # night qualifying (Las Vegas style);
+    1: {8: "ribbon_q", 10: "ghost_q", 12: "board_q", 15: "braker_fp2"},   # night qualifying (Las Vegas style);
     # Michel, 20 Nov: one ghost a day at most, new formats around it. ghost_fp3_* stay buildable for other circuits.
 }
 # A slot whose data is not in (live session not run yet, no wet pole here) takes the next of these not yet
@@ -792,6 +873,7 @@ SEND = {
     "teammates": "Send it to a fan of the driver on the wrong side of this.",
     "points": "Send it to the friend who already called P2.",
     "ribbon": "Send it to someone who thinks a lap is just flat out.",
+    "board": "Send it to the friend who still thinks it was the car.",
     "delta": "Send it to the friend who argues about who was really faster.",
 }
 
@@ -1114,6 +1196,34 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             cap = _cap(p, kind, f"🟩 Mini sector by mini sector, {name} qualifying: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
                        f"⏱️ The gap: {abs(mb - ma) / 1000:.3f} s (official qualifying times). The track turns the colour of whoever was quicker there.",
                        "💬 Where would you have found the time? Tell us below.")
+    elif kind == "board_q":                      # top four qualifying laps on one animated board
+        from .gp_facts import grid_pole
+        res = _q_official(p)[:4]
+        if len(res) < 2:
+            return None
+        laps, off, rows = [], [], []
+        for r_ in res:
+            t = r_["q3"] or r_["q2"] or r_["q1"]
+            m_, _, sec = t.rpartition(":")
+            ms = (int(m_ or 0) * 60 + float(sec)) * 1000
+            try:
+                L = lap_of(oc, p.season, ck, "Qualifying", rot, r_["code"], ms)
+            except Exception:
+                continue
+            if abs(L["lap_s"] * 1000 - ms) > 5:
+                continue
+            laps.append(L), off.append(ms / 1000), rows.append((r_["code"], t))
+        if len(laps) < 2 or rows[0][0] != res[0]["code"]:
+            log.warning("board_q: OpenF1 laps do not match the official qualifying times")
+            return None
+        q_board(p, laps, off, video, ["Q3, the top four", "laps on one board"], f"{name} {p.season} qualifying, official times")
+        gp = grid_pole(p.season, p.round, rows[0][0])
+        st = [_lap_stats({k: np.array(L[k], float) for k in ("t", "throttle", "brake", "speed")}) for L in laps]
+        lines = [f"{drv(c_, p.colors)} {t}: {s_['full']:.1f}% full throttle, top {s_['top']:.0f} km/h" for (c_, t), s_ in zip(rows, st)]
+        cap = _cap(p, kind, f"📊 Q3 in {name}, the top {len(laps)} laps on one board." + (f" {gp} starts from pole after grid penalties." if gp else ""),
+                   "\n".join(lines),
+                   "📐 Throttle, brake and top speed: OpenF1 telemetry. Lap times: official qualifying.",
+                   "💬 Who had the best lap in them? Tell us below.")
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
         from .gp_facts import SESSION_NEWS
         code = kind.rsplit("_", 1)[1].upper()
