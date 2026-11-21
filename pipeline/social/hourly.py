@@ -29,6 +29,9 @@ TZ = ZoneInfo("America/Los_Angeles")
 # sessions (reports, timing data), its news and its forecast. Nothing from other years or the season.
 GP_ONLY = {"LAS VEGAS": (2026, datetime(2026, 11, 23, tzinfo=ZoneInfo("America/Los_Angeles")))}
 GP_ONLY_GROUPS = {"session", "live", "news", "rain"}
+# Michel, 20 Nov: fewer stories, more Reels. While GP_ONLY holds, a data story goes out only at these hours;
+# session reports from the news still go out in any hour (they are first in line).
+GP_ONLY_STORY_HOURS = {7, 10, 13, 16, 19, 22}
 UTC = ZoneInfo("UTC")
 WINDOW = range(7, 23)            # race week: 7 AM to 10 PM PT, 16 posts a day
 DAILY_HOUR = 9                   # other weeks: one post at 9 AM PT (6 PM in central Europe)
@@ -436,6 +439,13 @@ def cmd_hourly(a) -> int:
             return 0
         if w["race_week"]:
             items, prefix = story_units(sb, p, sid, now, w["q"]), f"{sid}_H"
+            only = GP_ONLY.get(getattr(p, "title", None))
+            if only and w["q"] is not None and w["q"].year == only[0] and now < only[1] \
+                    and now.hour not in GP_ONLY_STORY_HOURS:
+                items = [u for u in items if u[0] == "session"]          # reports only between story hours
+                if not items:
+                    log.info("story hour skipped: Reels first this weekend (Michel, 20 Nov)")
+                    return 0
             if not items:
                 log.info("no story this hour: every card of the week is already out (no duplicates)")
                 return 0

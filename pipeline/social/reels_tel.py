@@ -597,13 +597,13 @@ def pointsrace(p, points: list[dict], codes: list[str], colors: dict, out: Path,
     return r.close()
 
 
-def ghost(p, a: dict, b: dict, out: Path, hook: list[str]) -> Path:
+def ghost(p, a: dict, b: dict, out: Path, hook: list[str], sub: str | None = None) -> Path:
     """Two laps replayed on one map. The verdict uses the official lap times only."""
     P.set_event(p)
     A = {k: np.array(v, float) if isinstance(v, list) else v for k, v in a.items()}
     B = {k: np.array(v, float) if isinstance(v, list) else v for k, v in b.items()}
     c = _card(p)
-    _hook(c, hook, f"{A['code']} {A['year']} vs {B['code']} {B['year']}, official pole times")
+    _hook(c, hook, sub or f"{A['code']} {A['year']} vs {B['code']} {B['year']}, official pole times")
     ax = _track(c, [0.08, 0.40, 0.84, 0.30], A["x"], A["y"], lw=9)
     ca, cb = A.get("color") or P.CYAN, B.get("color") or P.GOLD
     if ca == cb:
@@ -643,7 +643,7 @@ REEL_SLOTS = {
     -2: {12: "points_teams", 15: "braker", 21: "guess"},       # pedal_record posted early (17 Nov, 10:42 PM)
     -1: {12: "teammates", 15: "points"},
     0: {11: "guess2023", 12: "ghost", 15: "pedal_pole"},        # guess_fp2 dropped: the FP2 story reveals that driver
-    1: {12: "pedal_q", 15: "braker_fp2"},
+    1: {10: "ghost_q", 12: "pedal_q", 15: "braker_fp2", 18: "pedal_fp3"},   # Michel, 20 Nov: more Reels, this GP only
 }
 TAGS = "#F1 #Formula1 {ev} #F1Telemetry #RaceWeek"
 
@@ -816,6 +816,35 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         cap = _cap(p, f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}.",
                    "👀 Every input on the lap, live on the map, shown faster than real time.",
                    "💾 Save it.\n💬 Who beats it in the race? Tell us below.")
+    elif kind == "ghost_q":                      # this year's pole lap vs P2, official qualifying times
+        from .live import _q_results
+        res = _q_results(p)
+        if len(res) < 2:
+            return None
+
+        def _ms(r):
+            t = r["q3"] or r["q2"] or r["q1"]
+            m_, _, sec = t.rpartition(":")
+            return (int(m_ or 0) * 60 + float(sec)) * 1000, t
+        try:
+            (ma, ta), (mb, tb) = _ms(res[0]), _ms(res[1])
+            a = lap_of(oc, p.season, ck, "Qualifying", rot, res[0]["code"], ma) | {"year": p.season, "official": ta}
+            b = lap_of(oc, p.season, ck, "Qualifying", rot, res[1]["code"], mb) | {"year": p.season, "official": tb}
+        except Exception:
+            return None
+        ghost(p, a, b, video, ["Pole vs P2,", "one map"], f"{a['code']} vs {b['code']}, {name} {p.season} qualifying, official times")
+        cap = _cap(p, f"👻 Pole vs P2 in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
+                   f"⏱️ The gap: {abs(ma - mb) / 1000:.3f} s (official qualifying times).",
+                   "💬 Where was pole won? Tell us below.")
+    elif kind == "pedal_fp3":                    # this year's fastest FP3 lap
+        try:
+            lap = lap_of(oc, p.season, ck, "Practice 3", rot)
+        except Exception:
+            return None
+        pedal(p, lap, video, ["Inside the", "fastest FP3 lap"], f"{lap['code']}, {name} {p.season}, FP3, {_clock(lap['lap_s'])}")
+        cap = _cap(p, f"🎥 Inside the fastest FP3 lap in {name}: {drv(lap['code'], p.colors)}, {_clock(lap['lap_s'])}.",
+                   "👀 Throttle, brake, gear and speed on the map, shown faster than real time.",
+                   "💬 Does it carry into the race? Tell us below.")
     elif kind == "points_teams":
         from . import news
         st = news.standings(p.season)
