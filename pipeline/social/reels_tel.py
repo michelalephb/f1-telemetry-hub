@@ -979,7 +979,11 @@ def strength_data(laps: list[dict], skip: tuple[float, float] = (2.0, 2.0)) -> d
 CORNER_NAMES = {("LAS VEGAS", 5): ["T1", "T5", "T7", "T12", "T14"]}
 
 
-def strength_caption(p, D: dict, cn: list[str]) -> list[str]:
+STRENGTH_HOOKS = {"strengths_q_ant_rus_lec_ham": ["Ferrari: 346 km/h.", "Still 0.7 s down on the Strip"]}
+STRENGTH_ROWS = {"strengths_q_ant_rus_lec_ham": ("strip", "top", "apex")}
+
+
+def strength_caption(p, D: dict, cn: list[str], what: str | None = None) -> list[str]:
     """Caption blocks built from the same numbers as the Reel."""
     from .captions import drv
     O, codes, ck = D["out"], D["codes"], D["clean"]
@@ -988,7 +992,7 @@ def strength_caption(p, D: dict, cn: list[str]) -> list[str]:
     brk = {c_: float(np.mean([O[c_]["brk"][k] for k in ck])) for c_ in codes}
     fastc, latest, early = max(apex, key=apex.get), min(brk, key=brk.get), max(brk, key=brk.get)
     where = ", ".join(cn[k] for k in ck)
-    return [f"🧭 Where each car is strong, {p.title.title()} Q3, the top {len(codes)} laps:",
+    return [f"🧭 Where each car is strong, {p.title.title()} " + (f"qualifying, {what}:" if what else f"Q3, the top {len(codes)} laps:"),
             "🚀 Straight line: " + ", ".join(f"{drv(c_, p.colors)} {O[c_]['top']:.0f}" for c_ in top) + " km/h top speed.",
             f"🌀 Slow corners ({where}): {drv(fastc, p.colors)} carries {apex[fastc]:.0f} km/h on average at the apex, "
             f"{drv(codes[0], p.colors)} {apex[codes[0]]:.0f}.",
@@ -999,7 +1003,7 @@ def strength_caption(p, D: dict, cn: list[str]) -> list[str]:
 
 
 def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[str], sub: str, corners: list[str],
-              keep_corners: list[int] | None = None, src: str = "Speeds, braking: OpenF1 telemetry. Section times: each car's own clock") -> Path:
+              keep_corners: list[int] | None = None, rows_spec: tuple = ("top", "apex", "brake"), src: str = "Speeds, braking: OpenF1 telemetry. Section times: each car's own clock") -> Path:
     """Where each car is strong, displayed simply: the lap splits into sections between the clean corners, each
     painted in the colour of the quickest car there, with its margin over the next car underneath; then three rows
     fill in (straight line, slow corners, braking), best in gold."""
@@ -1007,10 +1011,13 @@ def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[
     D = strength_data(laps)
     Ls = [{k: np.array(v, float) if isinstance(v, list) else v for k, v in l.items()} for l in laps]
     used, cols = set(), {}
-    for L in Ls:
+    for L in Ls:                                                  # team mate: a lighter shade of the team colour
         cc = (L.get("color") or P.CYAN).lower()
-        cols[L["code"]] = P.TEXT if cc in used else cc
-        used.add(cc)
+        if cc in used:
+            rgb = [int(cc[k:k + 2], 16) for k in (1, 3, 5)]
+            cc = "#" + "".join(f"{int(v + (255 - v) * 0.55):02x}" for v in rgb)
+        cols[L["code"]] = cc
+        used.add((L.get("color") or P.CYAN).lower())
     O, codes = D["out"], D["codes"]
     keep_corners = D["clean"] if keep_corners is None else keep_corners
     # sections between the kept corners only (merge across dropped ones)
@@ -1037,11 +1044,18 @@ def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[
         c.text(x, 0.585, f"{names[k]} TO {names[k + 1]}", 11, color=P.MUTED, weight=600, track=True)
         chips.append(c.text(x, 0.563, "", 17, color=cols[best], weight=700))
     ck = list(keep_corners)
-    rows = [("STRAIGHT LINE", "top speed, km/h", {cc: O[cc]["top"] for cc in codes}, "{:.0f}", True),
-            ("SLOW CORNERS", "minimum speed at " + ", ".join(corners[k] for k in ck) + ", km/h",
-             {cc: float(np.mean([O[cc]["apex"][k] for k in ck])) for cc in codes}, "{:.0f}", True),
-            ("BRAKING", "starts braking, metres before the apex (less = later)",
-             {cc: float(np.mean([O[cc]["brk"][k] for k in ck])) for cc in codes}, "{:.0f} m", False)]
+    last = [0.0] + D["fa"]
+    k_last = D["fa"].index(D["fa"][ck[-1]])
+    strip = {cc: sum(s_ for s_, lo in zip(O[cc]["seg"], last) if lo >= D["fa"][ck[-1]] - 1e-9) for cc in codes}
+    sbest = min(strip.values())
+    lib = {"top": ("STRAIGHT LINE", "top speed, km/h", {cc: O[cc]["top"] for cc in codes}, "{:.0f}", True),
+           "strip": (f"{corners[ck[-1]]} TO THE LINE", "time lost to the quickest here, seconds",
+                     {cc: strip[cc] - sbest for cc in codes}, "+{:.2f}", False),
+           "apex": ("SLOW CORNERS", "minimum speed at " + ", ".join(corners[k] for k in ck) + ", km/h",
+                    {cc: float(np.mean([O[cc]["apex"][k] for k in ck])) for cc in codes}, "{:.0f}", True),
+           "brake": ("BRAKING", "starts braking, metres before the apex (less = later)",
+                     {cc: float(np.mean([O[cc]["brk"][k] for k in ck])) for cc in codes}, "{:.0f} m", False)}
+    rows = [lib[r] for r in rows_spec]
     y = 0.525
     bars = []
     for title, subt, vals, fmt, hi_good in rows:
@@ -1471,11 +1485,26 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "\n".join(lines),
                    "📐 Throttle, brake and top speed: OpenF1 telemetry. Lap times: official qualifying.",
                    "💬 Who had the best lap in them? Tell us below.")
-    elif kind == "strengths_q":                  # where each car is strong, top four qualifying laps (Michel, 20 Nov)
-        res = _q_official(p)[:4]
+    elif kind == "strengths_q" or kind.startswith("strengths_q_"):   # where each car is strong (Michel, 20 and 21 Nov)
+        from .gp_facts import Q_EXTRA
+        allres = _q_official(p)
+        pick = [c_.upper() for c_ in kind.split("_")[2:]]
+        if pick:                                  # named drivers, best qualifying lap of each (Q1, Q2 or Q3)
+            extra = Q_EXTRA.get((p.title, p.season), {})
+            res = []
+            for c_ in pick:
+                r_ = next((r for r in allres if r["code"] == c_), None)
+                if r_ is None and c_ in extra:
+                    r_ = {"code": c_, "q1": None, "q2": None, "q3": extra[c_]}
+                if r_ is None:
+                    return None
+                res.append(r_)
+        else:
+            res = allres[:4]
         laps, off = [], []
         for r_ in res:
-            t = r_["q3"] or r_["q2"] or r_["q1"]
+            ts = [x for x in (r_["q1"], r_["q2"], r_["q3"]) if x]
+            t = min(ts, key=lambda x: (int(x.rpartition(":")[0] or 0) * 60 + float(x.rpartition(":")[2]))) if ts else None
             m_, _, sec = t.rpartition(":")
             ms = (int(m_ or 0) * 60 + float(sec)) * 1000
             try:
@@ -1486,12 +1515,19 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                 laps.append(L), off.append(ms / 1000)
         if len(laps) < 3 or laps[0]["code"] != res[0]["code"]:
             return None
+        log.info("STRENGTH_LAPS_JSON " + json.dumps([{k: L[k] for k in ("code", "color", "t", "dist", "speed", "throttle", "brake", "x", "y", "lap_s")}
+                                                    | {"official": o_} for L, o_ in zip(laps, off)], separators=(",", ":")))
         D = strength_data(laps)
         if len(D["clean"]) < 2:
             return None
         cn = CORNER_NAMES.get((p.title, len(D["fa"]))) or [f"C{k + 1}" for k in range(len(D["fa"]))]
-        strengths(p, laps, off, video, ["Where each car", "is strong"], f"{name} {p.season} Q3, the top {len(laps)} laps", cn, D["clean"])
-        cap = _cap(p, kind, *strength_caption(p, D, cn))
+        if pick:
+            hk = STRENGTH_HOOKS.get(kind, ["Where each car", "is strong"])
+            sb_ = f"{name} {p.season} qualifying, best laps: " + ", ".join(L["code"] for L in laps)
+        else:
+            hk, sb_ = ["Where each car", "is strong"], f"{name} {p.season} Q3, the top {len(laps)} laps"
+        strengths(p, laps, off, video, hk, sb_, cn, D["clean"], STRENGTH_ROWS.get(kind, ("top", "apex", "brake")))
+        cap = _cap(p, kind, *strength_caption(p, D, cn, "best qualifying laps" if pick else None))
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
         from .gp_facts import SESSION_NEWS
         code = kind.rsplit("_", 1)[1].upper()

@@ -518,3 +518,8 @@ def grid_pole(season, rnd, fastest: str):
     """The driver starting from pole when that is not the fastest qualifier, else None."""
     gp = GRID_POLE.get((season, rnd))
     return gp if gp and gp != fastest else None
+
+
+# Official best qualifying laps of drivers outside the session report's standings, for comparison Reels while Jolpica
+# has not published. Las Vegas 2026: PlanetF1 and grandprix.com (Q1 and Q2 columns), Pit Debrief, The Race, 21 Nov 2026.
+Q_EXTRA = {("LAS VEGAS", 2026): {"LEC": "1:35.040", "HAM": "1:35.253"}}
