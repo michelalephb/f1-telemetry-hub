@@ -33,6 +33,10 @@ GP_ONLY_GROUPS = {"session", "live", "news", "rain"}
 # 28 days), so every race week now runs about 4 data stories a day; the effort goes into Reels. A data story
 # goes out only at these hours; session reports from the news still go out in any hour (first in line).
 STORY_HOURS = {8, 11, 14, 20}
+# Race only window (Michel, 21 Nov): from 4 PM on race day, stories are only race news and updates (race build up
+# RPRE and race reports R from SESSION_NEWS), any hour, nothing else
+_LA = ZoneInfo("America/Los_Angeles")
+RACE_ONLY = {"LAS VEGAS": (2026, datetime(2026, 11, 21, 16, 0, tzinfo=_LA), datetime(2026, 11, 22, 23, 0, tzinfo=_LA), ("RPRE", "R"))}
 GP_ONLY_STORY_HOURS = STORY_HOURS                 # kept for older imports
 UTC = ZoneInfo("UTC")
 WINDOW = range(7, 23)            # race week: 7 AM to 10 PM PT, 16 posts a day
@@ -213,6 +217,10 @@ def story_units(sb, p, sid: str, now: datetime, q: datetime | None = None) -> li
     only = GP_ONLY.get(p.title)
     if only and q is not None and q.year == only[0] and now < only[1]:
         out = [u for u in out if u[0] in GP_ONLY_GROUPS]
+    ro = RACE_ONLY.get(p.title)
+    if ro and q is not None and q.year == ro[0] and ro[1] <= now < ro[2]:
+        sess = [u for u in sess if u[1].split(":")[0] in ro[3]]
+        out = []
     return sess + out
 
 

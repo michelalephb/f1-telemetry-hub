@@ -573,7 +573,7 @@ def test_reel_slots_are_buildable_kinds_and_fill_every_race_week_day():
     kinds = {k for d in reels_tel.REEL_SLOTS.values() for k in d.values()} | set(reels_tel.FALLBACK)
     kinds |= {s.split(":", 1)[1] for d in hourly.SLOTS.values() for s in d.values() if s.startswith("reeltel:")}
     for k in kinds:
-        assert f'"{k}"' in src or (k.startswith("ghost_fp3_") and '"ghost_fp3_"' in src) or (k.startswith("delta_q_") and '"delta_q_"' in src), k   # every scheduled kind has a renderer
+        assert f'"{k}"' in src or (k.startswith("ghost_fp3_") and '"ghost_fp3_"' in src) or (k.startswith("delta_q_") and '"delta_q_"' in src) or (k.startswith("strengths_q_") and '"strengths_q_"' in src), k   # every scheduled kind has a renderer
     for day in range(-5, 1):                                        # Monday to qualifying day: at least 2 Reels
         n = len(reels_tel.REEL_SLOTS.get(day, {})) + sum(
             1 for s in hourly.SLOTS.get(day, {}).values() if s.startswith("reeltel:") or s == "history")
