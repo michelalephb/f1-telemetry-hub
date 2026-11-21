@@ -107,7 +107,7 @@ def race(st: RaceStory, meta: dict, kind: str) -> str:
         FOOTER, tags(meta["event"], w, st.mover["code"] if st.mover else "")))
 
 
-SESSION_WORDS = ("qualifying", "Qualifying", "Q3", "FP1", "FP2", "FP3", "practice", "grid", "race lap", "Race", "sprint")
+SESSION_WORDS = ("qualifying", "Qualifying", "takes pole", "takes Sprint pole", "Driver of the day", "Q3", "FP1", "FP2", "FP3", "practice", "grid", "race lap", "Race", "sprint")
 
 
 def fan_question(s: str) -> str:
