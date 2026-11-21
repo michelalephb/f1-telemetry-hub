@@ -1,12 +1,14 @@
 'use client'
 
 import { useState } from 'react'
+import { track } from '@/lib/analytics'
 
 /** Share the current view: the phone's share sheet where there is one, else copy the link. */
 export default function ShareButton({ title, url, className = '' }: { title: string; url?: () => string; className?: string }) {
   const [msg, setMsg] = useState<string | null>(null)
   const go = async () => {
     const link = url ? url() : window.location.href
+    track('share', { page: window.location.pathname, title })
     try {
       if (navigator.share) { await navigator.share({ title, url: link }); return }
       await navigator.clipboard.writeText(link)
