@@ -298,10 +298,12 @@ def session_story(p, it: dict, story: bool = True):
     else:
         rows = it["standings"][:10]
         step = min(0.034 if story else 0.04, (0.36 if story else 0.40) / max(len(rows), 1))
-    for k, (code, t) in enumerate(rows if not it.get("times") else []):
+    for k, row in enumerate(rows if not it.get("times") else []):
+        code, t = row[0], row[1]
+        pos = row[2] if len(row) > 2 else k + 1  # a partial list keeps the real classified position
         num, team, col = DRIVERS.get(code, ("", "", "9AA1AC"))
         yy = y - step * k - step / 2
-        c.text(0.085, yy, str(k + 1), 17, color=P.MUTED, weight=400, ha="center")
+        c.text(0.085, yy, str(pos), 17, color=P.MUTED, weight=400, ha="center")
         c.fig.add_artist(plt.Rectangle((0.12, yy - step * 0.32), 0.008, step * 0.64, transform=c.fig.transFigure,
                                        facecolor="#" + col, edgecolor="none"))
         c.text(0.145, yy, code, 21, weight=700, ha="left")
