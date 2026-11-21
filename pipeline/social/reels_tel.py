@@ -636,6 +636,132 @@ def ghost(p, a: dict, b: dict, out: Path, hook: list[str], sub: str | None = Non
     return r.close()
 
 
+
+# ---------------------------------------------------------------- new animated formats (Michel, 20 Nov: fewer look alike
+# ghost laps; simple, mesmerizing loops from the telemetry)
+
+SPEED_CMAP = ["#1E3A8A", "#2563EB", "#00E5FF", "#10B981", "#F5C542", "#FF3D8B"]   # slow to fast
+
+
+def _speed_colors(v: np.ndarray, lo: float = 60.0, hi: float = 345.0) -> np.ndarray:
+    from matplotlib.colors import LinearSegmentedColormap
+    cm = LinearSegmentedColormap.from_list("spd", SPEED_CMAP)
+    return cm(np.clip((v - lo) / (hi - lo), 0, 1))
+
+
+def _fine(L: dict, n: int = 1400) -> dict:
+    """Resample a lap on an even time grid so the head moves smoothly between 240 ms car samples."""
+    t = np.linspace(0, L["t"][-1], n)
+    return {k: np.interp(t, L["t"], L[k]) for k in ("x", "y", "speed", "dist")} | {"t": t}
+
+
+def speed_ribbon(p, lap: dict, out: Path, hook: list[str], sub: str, src: str = SRC_TEL, target_s: float = 12.0) -> Path:
+    """The track draws itself as one glowing ribbon coloured by speed. One number moves: the speed.
+    Ends on the full ribbon with the top and lowest speed pinned where they happen."""
+    from matplotlib.collections import LineCollection
+    P.set_event(p)
+    L = {k: np.array(v, float) if isinstance(v, list) else v for k, v in lap.items()}
+    F = _fine(L)
+    c = _card(p)
+    _hook(c, hook, sub)
+    ax = _track(c, [0.06, 0.30, 0.88, 0.40], L["x"], L["y"], lw=10)
+    pts = np.column_stack([F["x"], F["y"]])
+    seg = np.stack([pts[:-1], pts[1:]], axis=1)
+    col = _speed_colors((F["speed"][:-1] + F["speed"][1:]) / 2)
+    glow = LineCollection([], linewidths=22, colors=[], alpha=0.18, capstyle="round", zorder=2)
+    core = LineCollection([], linewidths=8, colors=[], capstyle="round", zorder=3)
+    ax.add_collection(glow), ax.add_collection(core)
+    head, = ax.plot([], [], "o", ms=20, color=P.TEXT, mec=P.EV, mew=4, zorder=5)
+    spd = c.text(0.5, 0.262, "", 96, weight=200)
+    unit = c.text(0.5, 0.218, "KM/H", 14, color=P.MUTED, weight=600, track=True)
+    clock = c.text(0.5, 0.195, "", 22, color=P.MUTED, weight=300)
+    _foot(c, src)
+    r = Reel(out)
+    n = int(target_s * FPS)
+    for i in range(n + 1):
+        j = max(1, int(round((len(seg)) * i / n)))
+        glow.set_segments(seg[:j]), glow.set_color(col[:j])
+        core.set_segments(seg[:j]), core.set_color(col[:j])
+        k = min(j, len(F["t"]) - 1)
+        head.set_data([F["x"][k]], [F["y"][k]])
+        head.set_markeredgecolor(col[min(k, len(col) - 1)])
+        spd.set_text(f"{F['speed'][k]:.0f}")
+        spd.set_color(col[min(k, len(col) - 1)])
+        clock.set_text(_clock(min(L["lap_s"], F["t"][k])))
+        r.add(c.fig)
+    head.set_data([], [])
+    hi, lo = int(np.argmax(L["speed"])), int(np.argmin(L["speed"][5:-5])) + 5
+    for q, lbl in ((hi, "TOP"), (lo, "LOWEST")):
+        ax.plot([L["x"][q]], [L["y"][q]], "o", ms=14, color=P.TEXT, zorder=6)
+        ax.annotate(f"{lbl} {L['speed'][q]:.0f}", (L["x"][q], L["y"][q]), xytext=(0, 26), textcoords="offset points",
+                    ha="center", fontsize=17, color=P.TEXT, family=P.FONT, weight=600, zorder=7)
+    spd.set_text(L.get("official") or _clock(L["lap_s"]))
+    spd.set_color(P.GOLD)
+    unit.set_text("")
+    clock.set_text(f"{L['code']}  {L.get('label', '')}".strip())
+    r.add(c.fig, int(3.0 * FPS))
+    plt.close(c.fig)
+    return r.close()
+
+
+def delta_map(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, official: tuple[float, float],
+              n_sec: int = 25, src: str = "Lap times: official timing. Mini sectors: OpenF1 telemetry") -> Path:
+    """Two laps, one map, no dots racing: a single runner paints each of n_sec mini sectors in the colour of the
+    driver who was quicker there. The gap counter runs underneath; it ends on the official gap and the tally."""
+    from matplotlib.collections import LineCollection
+    P.set_event(p)
+    A = {k: np.array(v, float) if isinstance(v, list) else v for k, v in a.items()}
+    B = {k: np.array(v, float) if isinstance(v, list) else v for k, v in b.items()}
+    ca, cb = A.get("color") or P.CYAN, B.get("color") or P.GOLD
+    if ca.lower() == cb.lower():
+        cb = P.GOLD
+    d = np.linspace(0, A["dist"][-1], 1200)
+    ta = np.interp(d, A["dist"], A["t"])
+    tb = np.interp(d * B["dist"][-1] / A["dist"][-1], B["dist"], B["t"])   # same fraction of the lap
+    tb = tb * official[1] / tb[-1]                                          # telemetry clock scaled to the official lap
+    ta = ta * official[0] / ta[-1]
+    gap = tb - ta                                                           # > 0: A ahead
+    x, y = np.interp(d, A["dist"], A["x"]), np.interp(d, A["dist"], A["y"])
+    edges = np.linspace(0, len(d) - 1, n_sec + 1).astype(int)
+    win = [ca if gap[e1] - gap[e0] > 0 else cb for e0, e1 in zip(edges[:-1], edges[1:])]
+    pts = np.column_stack([x, y])
+    seg = np.stack([pts[:-1], pts[1:]], axis=1)
+    segcol = np.empty(len(seg), dtype=object)
+    for k, (e0, e1) in enumerate(zip(edges[:-1], edges[1:])):
+        segcol[e0:e1] = win[k]
+    c = _card(p)
+    _hook(c, hook, sub)
+    ax = _track(c, [0.06, 0.33, 0.88, 0.37], A["x"], A["y"], lw=10)
+    core = LineCollection([], linewidths=10, colors=[], capstyle="butt", zorder=3)
+    ax.add_collection(core)
+    head, = ax.plot([], [], "o", ms=16, color=P.TEXT, zorder=5)
+    c.text(0.30, 0.315, A["code"], 30, color=ca, weight=600)
+    c.text(0.70, 0.315, B["code"], 30, color=cb, weight=600)
+    na, nb = c.text(0.30, 0.275, "0", 40, weight=200), c.text(0.70, 0.275, "0", 40, weight=200)
+    c.text(0.5, 0.275, "MINI SECTORS", 12, color=P.MUTED, weight=600, track=True)
+    lead = c.text(0.5, 0.222, "", 30, weight=300)
+    _foot(c, src)
+    r = Reel(out)
+    n = int(12 * FPS)
+    for i in range(n + 1):
+        j = max(1, int(round(len(seg) * i / n)))
+        core.set_segments(seg[:j]), core.set_color(list(segcol[:j]))
+        head.set_data([x[min(j, len(x) - 1)]], [y[min(j, len(y) - 1)]])
+        done = int(np.searchsorted(edges[1:], j, side="right"))
+        na.set_text(str(sum(1 for w in win[:done] if w == ca)))
+        nb.set_text(str(sum(1 for w in win[:done] if w == cb)))
+        g = gap[min(j, len(gap) - 1)]
+        lead.set_text(f"{A['code'] if g >= 0 else B['code']} ahead by {abs(g):.3f} s")
+        lead.set_color(ca if g >= 0 else cb)
+        r.add(c.fig)
+    head.set_data([], [])
+    g = official[1] - official[0]
+    lead.set_text(f"{A['code'] if g >= 0 else B['code']} by {abs(g):.3f} s, official")
+    lead.set_color(P.GOLD)
+    r.add(c.fig, int(3.0 * FPS))
+    plt.close(c.fig)
+    return r.close()
+
 # ---------------------------------------------------------------- production (Michel, 17 Nov: approved, post at half past)
 
 # day offset from qualifying day -> {hour PT: kind}; posted at HH:30, between the hourly stories
@@ -649,7 +775,8 @@ REEL_SLOTS = {
     -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
     -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
     0: {12: "pedal_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # pedal_fp3 before a night qualifying (Michel, 20 Nov)
-    1: {8: "ghost_fp3_ant", 10: "ghost_q", 12: "pedal_q", 15: "braker_fp2", 18: "ghost_fp3_ver"},   # night qualifying (Las Vegas style)
+    1: {8: "ribbon_q", 10: "ghost_q", 12: "delta_q_ver_rus", 15: "braker_fp2"},   # night qualifying (Las Vegas style);
+    # Michel, 20 Nov: one ghost a day at most, new formats around it. ghost_fp3_* stay buildable for other circuits.
 }
 # A slot whose data is not in (live session not run yet, no wet pole here) takes the next of these not yet
 # posted this GP, best reach first (hourly.build_reel)
@@ -664,6 +791,8 @@ SEND = {
     "guess": "Send it to a friend and see who gets it first.",
     "teammates": "Send it to a fan of the driver on the wrong side of this.",
     "points": "Send it to the friend who already called P2.",
+    "ribbon": "Send it to someone who thinks a lap is just flat out.",
+    "delta": "Send it to the friend who argues about who was really faster.",
 }
 
 
@@ -914,6 +1043,57 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         cap = _cap(p, kind, f"🎥 Inside the fastest FP3 lap in {name}: {drv(lap['code'], p.colors)}, {_clock(lap['lap_s'])}.",
                    "👀 Throttle, brake, gear and speed on the map, shown faster than real time.",
                    "💬 Does it carry into the race? Tell us below.")
+    elif kind in ("ribbon_q", "delta_q") or kind.startswith("delta_q_"):
+        from .gp_facts import grid_pole
+        from .live import _q_results
+        res = _q_results(p)
+
+        def _ms(r):
+            t = r["q3"] or r["q2"] or r["q1"]
+            m_, _, sec = t.rpartition(":")
+            return (int(m_ or 0) * 60 + float(sec)) * 1000, t
+        if kind == "ribbon_q":
+            if not res:
+                return None
+            ms, t = _ms(res[0])
+            try:
+                lap = lap_of(oc, p.season, ck, "Qualifying", rot, res[0]["code"], ms)
+            except Exception:
+                return None
+            if abs(lap["lap_s"] * 1000 - ms) > 5:
+                return None
+            gp = grid_pole(p.season, p.round, lap["code"])
+            label = "fastest in qualifying" if gp else "pole lap"
+            speed_ribbon(p, lap | {"official": t, "label": label}, video, ["Every km/h of", "the fastest lap" if gp else "the pole lap"],
+                         f"{lap['code']}, {name} {p.season} qualifying, {t}")
+            sp = np.array(lap["speed"], float)
+            cap = _cap(p, kind, f"🌈 Every km/h of the {'fastest qualifying' if gp else 'pole'} lap in {name}: {drv(lap['code'], p.colors)}, {t}."
+                                + (f" {gp} starts from pole after grid penalties." if gp else ""),
+                       f"⚡ Top speed {sp.max():.0f} km/h, slowest corner {sp[5:-5].min():.0f} km/h (OpenF1 telemetry).",
+                       "💬 Which corner would you take flat? Tell us below.")
+        else:
+            parts = kind.split("_")[2:]
+            if len(parts) == 2:
+                ra = next((r for r in res if r["code"] == parts[0].upper()), None)
+                rb = next((r for r in res if r["code"] == parts[1].upper()), None)
+            else:
+                ra, rb = (res[0], res[1]) if len(res) > 1 else (None, None)
+            if not ra or not rb:
+                return None
+            (ma, ta), (mb, tb) = _ms(ra), _ms(rb)
+            try:
+                a = lap_of(oc, p.season, ck, "Qualifying", rot, ra["code"], ma)
+                b = lap_of(oc, p.season, ck, "Qualifying", rot, rb["code"], mb)
+            except Exception:
+                return None
+            if abs(a["lap_s"] * 1000 - ma) > 5 or abs(b["lap_s"] * 1000 - mb) > 5:
+                log.warning("delta_q: OpenF1 laps do not match the official qualifying times")
+                return None
+            delta_map(p, a, b, video, ["Where the lap", "is won"], f"{a['code']} vs {b['code']}, {name} {p.season} qualifying",
+                      (ma / 1000, mb / 1000))
+            cap = _cap(p, kind, f"🟩 Mini sector by mini sector, {name} qualifying: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
+                       f"⏱️ The gap: {abs(mb - ma) / 1000:.3f} s (official qualifying times). The track turns the colour of whoever was quicker there.",
+                       "💬 Where would you have found the time? Tell us below.")
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
         from .gp_facts import SESSION_NEWS
         code = kind.rsplit("_", 1)[1].upper()
