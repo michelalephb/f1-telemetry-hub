@@ -166,11 +166,31 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
         remove(sb, video_paths)   # posted or failed, the video is not kept (a retry renders it again)
 
 
+REQUIRE_APPROVAL = True        # Michel, 21 Nov: "I need to see the Reels before publishing"
+
+
+def approved(sb, sid: str) -> bool:
+    return bool(sb.table("ig_approvals").select("session_id").eq("session_id", sid).execute().data)
+
+
 def send_files(sb, ig: UploadPost, sid: str, kind: str, story: str, built: dict, attempts: int, entry: dict, report: list) -> bool:
     """Upload-Post: send the local files. The request id is saved first, so a crash or timeout is
-    picked up by resume() on the next run instead of being sent again."""
+    picked up by resume() on the next run instead of being sent again.
+    Reels publish only once Michel has approved them (ig_approvals); otherwise the Reel is held: its video goes
+    to a preview link in the web bucket, saved with the caption on the ig_posts row (status held)."""
     rid = f"{sid}-{story}-{kind}-a{attempts}-{uuid.uuid4().hex[:8]}"
     key = {"session_id": sid, "kind": kind, "story": story}
+    if kind == "reel" and REQUIRE_APPROVAL and not approved(sb, sid):
+        row = post_row(sb, sid, kind, story)
+        if row and row["status"] == "held":
+            report.append(entry | {"status": "held for approval (already)"})
+            return False
+        url = upload(sb, Path(built["video"]), f"pending/{sid.lower()}_{uuid.uuid4().hex[:10]}.mp4")
+        save_row(sb, key | {"status": "held", "caption": built["caption"], "attempts": attempts,
+                            "error": f"awaiting Michel's approval; preview {url}"})
+        log.info("HELD for approval: %s preview %s", sid, url)
+        report.append(entry | {"status": "held for approval", "preview": url})
+        return False
     save_row(sb, key | {"status": "queued", "container_id": f"up:{rid}", "attempts": attempts, "error": None})
     try:
         if kind == "reel":

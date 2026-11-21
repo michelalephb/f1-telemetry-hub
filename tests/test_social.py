@@ -338,6 +338,7 @@ class FakeUpHTTP:
 
 def test_uploadpost_reel_sends_the_file_and_records_the_link(tmp_path, monkeypatch):
     from pipeline.social import __main__ as m
+    monkeypatch.setattr(m, "REQUIRE_APPROVAL", False)          # the approval gate has its own test
     from pipeline.social.publish import UploadPost
     monkeypatch.setattr("pipeline.social.publish.POLL_S", 0)
     results, laps, drivers, traces = quali_fixture()
@@ -379,6 +380,7 @@ def test_uploadpost_timeout_resumes_instead_of_resending(tmp_path, monkeypatch):
 
 def test_uploadpost_rejection_marks_failed(tmp_path, monkeypatch):
     from pipeline.social import __main__ as m
+    monkeypatch.setattr(m, "REQUIRE_APPROVAL", False)          # the approval gate has its own test
     from pipeline.social.publish import UploadPost
     monkeypatch.setattr("pipeline.social.publish.POLL_S", 0)
     results, laps, drivers, traces = quali_fixture()
@@ -658,3 +660,23 @@ def test_end_card_appended_to_reel(tmp_path):
     assert (v["width"], v["height"], v["pix_fmt"], v["r_frame_rate"]) == (1080, 1920, "yuv420p", "30/1")
     assert abs(float(pr["format"]["duration"]) - (1 + reels_tel.END_S)) < 0.15
     assert not [s for s in pr["streams"] if s["codec_type"] == "audio"]
+
+
+def test_unapproved_reel_is_held_with_a_preview_and_never_sent(tmp_path, monkeypatch):
+    """Michel, 21 Nov: Reels publish only after he has seen them."""
+    from pipeline.social import __main__ as m
+    saved, sent = [], []
+    monkeypatch.setattr(m, "approved", lambda sb, sid: False)
+    monkeypatch.setattr(m, "post_row", lambda sb, sid, kind, story: None)
+    monkeypatch.setattr(m, "upload", lambda sb, local, remote: f"https://example/{remote}")
+    monkeypatch.setattr(m, "save_row", lambda sb, row: saved.append(row) or row)
+
+    class IG:
+        def send_reel(self, *a):
+            sent.append(a)
+    v = tmp_path / "v.mp4"
+    v.write_bytes(b"x")
+    report = []
+    ok = m.send_files(None, IG(), "2026_21_PREVIEW_REEL_X", "reel", "session",
+                      {"video": v, "cover": None, "caption": "c"}, 1, {}, report)
+    assert ok is False and not sent and saved[-1]["status"] == "held" and "preview https://example/pending/" in saved[-1]["error"]
