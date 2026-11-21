@@ -920,6 +920,164 @@ def q_board(p, laps: list[dict], official: list[float], out: Path, hook: list[st
     return r.close()
 
 
+def strength_data(laps: list[dict], skip: tuple[float, float] = (2.0, 2.0)) -> dict:
+    """Where each car is strong, from each car's own car data clock only (no cross car position matching, whose
+    per car latency can reach 0.5 s). Corners: speed minima under 150 km/h after a braking zone, one per 4% of the
+    lap, matched within 1.2% of the lap; corner complexes with two minima (skip window) are left out because cars
+    bottom out at different points there. Apex time and speed by a parabola through 3 samples, brake onset between
+    samples. Returns per driver: segment times between corners, apex speeds, brake onset metres before the apex,
+    top speed; plus corner lap fractions on the reference (first) lap."""
+    Ls = [{k: np.array(v, float) if isinstance(v, list) else v for k, v in l.items()} for l in laps]
+    ref = Ls[0]
+    fr = lambda L, i: L["dist"][i] / L["dist"][-1]
+    v = ref["speed"]
+    mins = [i for i in range(2, len(v) - 2) if v[i] <= v[i - 1] and v[i] <= v[i + 1] and v[i] < 150
+            and not skip[0] < fr(ref, i) < skip[1]]
+    keep = []
+    for i in sorted(mins, key=lambda i: v[i]):
+        if all(abs(fr(ref, i) - fr(ref, j)) > 0.04 for j in keep):
+            keep.append(i)
+    keep = sorted(keep, key=lambda i: fr(ref, i))
+    # complexes after the skip window that are still ambiguous: keep only corners whose minimum is unique
+    fa = [fr(ref, i) for i in keep]
+
+    def vmin(L, i):
+        t, sp = L["t"][i - 1:i + 2], L["speed"][i - 1:i + 2]
+        a, b, c = np.polyfit(t, sp, 2)
+        tm = float(np.clip(-b / (2 * a), t[0], t[-1])) if a > 0 else float(L["t"][i])
+        return tm, float(np.polyval([a, b, c], tm)), float(np.interp(tm, L["t"], L["dist"]))
+    out = {}
+    for L in Ls:
+        f = L["dist"] / L["dist"][-1]
+        idx = []
+        for x in fa:
+            w = np.where(np.abs(f - x) < 0.012)[0]
+            idx.append(int(w[np.argmin(L["speed"][w])]))
+        ap = [vmin(L, i) for i in idx]
+        brk = []
+        for i, (_, _, dm) in zip(idx, ap):
+            j = i
+            while j > 1 and not (L["brake"][j] > 0 and L["brake"][j - 1] == 0):
+                j -= 1
+            brk.append(dm - (L["dist"][j] + L["dist"][j - 1]) / 2)
+        t = [0.0] + [a[0] for a in ap] + [float(L["lap_s"])]
+        out[L["code"]] = {"seg": np.diff(t).tolist(), "apex": [a[1] for a in ap], "brk": brk, "top": float(L["speed"].max())}
+    # clean corners: no other minimum under 150 km/h within 3% of the lap at a similar speed (complexes such as
+    # Las Vegas T7 to T9 and T14 to T16, where cars bottom out at different points)
+    allmins = [i for i in range(2, len(v) - 2) if v[i] <= v[i - 1] and v[i] <= v[i + 1] and v[i] < 150]
+    clean = [k for k, i in enumerate(keep)
+             if not any(j != i and abs(fr(ref, j) - fr(ref, i)) < 0.03 and abs(v[j] - v[i]) < 12 for j in allmins)]
+    return {"fa": fa, "out": out, "codes": [L["code"] for L in Ls], "clean": clean}
+
+
+# turn names of the corner minima strength_data finds, keyed by (GP title, number of minima found)
+CORNER_NAMES = {("LAS VEGAS", 5): ["T1", "T5", "T7", "T12", "T14"]}
+
+
+def strength_caption(p, D: dict, cn: list[str]) -> list[str]:
+    """Caption blocks built from the same numbers as the Reel."""
+    from .captions import drv
+    O, codes, ck = D["out"], D["codes"], D["clean"]
+    top = sorted(codes, key=lambda c_: -O[c_]["top"])
+    apex = {c_: float(np.mean([O[c_]["apex"][k] for k in ck])) for c_ in codes}
+    brk = {c_: float(np.mean([O[c_]["brk"][k] for k in ck])) for c_ in codes}
+    fastc, latest, early = max(apex, key=apex.get), min(brk, key=brk.get), max(brk, key=brk.get)
+    where = ", ".join(cn[k] for k in ck)
+    return [f"🧭 Where each car is strong, {p.title.title()} Q3, the top {len(codes)} laps:",
+            "🚀 Straight line: " + ", ".join(f"{drv(c_, p.colors)} {O[c_]['top']:.0f}" for c_ in top) + " km/h top speed.",
+            f"🌀 Slow corners ({where}): {drv(fastc, p.colors)} carries {apex[fastc]:.0f} km/h on average at the apex, "
+            f"{drv(codes[0], p.colors)} {apex[codes[0]]:.0f}.",
+            f"🛑 Braking: {drv(latest, p.colors)} starts braking {brk[latest]:.0f} m before the apex, {drv(early, p.colors)} {brk[early]:.0f} m. "
+            "Arrive faster, brake earlier.",
+            "📐 Telemetry: OpenF1, each car on its own clock. Corner complexes left out where cars bottom out at different points.",
+            "💬 Straight line speed or corners: which wins the race? Tell us below."]
+
+
+def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[str], sub: str, corners: list[str],
+              keep_corners: list[int] | None = None, src: str = "Speeds, braking: OpenF1 telemetry. Section times: each car's own clock") -> Path:
+    """Where each car is strong, displayed simply: the lap splits into sections between the clean corners, each
+    painted in the colour of the quickest car there, with its margin over the next car underneath; then three rows
+    fill in (straight line, slow corners, braking), best in gold."""
+    P.set_event(p)
+    D = strength_data(laps)
+    Ls = [{k: np.array(v, float) if isinstance(v, list) else v for k, v in l.items()} for l in laps]
+    used, cols = set(), {}
+    for L in Ls:
+        cc = (L.get("color") or P.CYAN).lower()
+        cols[L["code"]] = P.TEXT if cc in used else cc
+        used.add(cc)
+    O, codes = D["out"], D["codes"]
+    keep_corners = D["clean"] if keep_corners is None else keep_corners
+    # sections between the kept corners only (merge across dropped ones)
+    bounds = [0.0] + [D["fa"][k] for k in keep_corners] + [1.0]
+    secs = []
+    for a_, b_ in zip(bounds[:-1], bounds[1:]):
+        tt = {c: sum(s for s, lo in zip(O[c]["seg"], [0.0] + D["fa"]) if a_ - 1e-9 <= lo < b_ - 1e-9) for c in codes}
+        best = min(tt, key=tt.get)
+        second = sorted(tt.values())[1]
+        secs.append((a_, b_, best, second - tt[best]))
+    ref = Ls[0]
+    fr = ref["dist"] / ref["dist"][-1]
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    mp = _track(c, [0.16, 0.605, 0.68, 0.13], ref["x"], ref["y"], lw=11)
+    strokes = []
+    for a_, b_, best, mg in secs:
+        strokes.append(mp.plot([], [], color=cols[best], lw=10, solid_capstyle="round", zorder=3)[0])
+    names = ["START"] + [corners[k] for k in keep_corners] + ["LINE"]
+    chips = []
+    w = 0.84 / len(secs)
+    for k, (a_, b_, best, mg) in enumerate(secs):
+        x = 0.08 + w * (k + 0.5)
+        c.text(x, 0.585, f"{names[k]} TO {names[k + 1]}", 11, color=P.MUTED, weight=600, track=True)
+        chips.append(c.text(x, 0.563, "", 17, color=cols[best], weight=700))
+    ck = list(keep_corners)
+    rows = [("STRAIGHT LINE", "top speed, km/h", {cc: O[cc]["top"] for cc in codes}, "{:.0f}", True),
+            ("SLOW CORNERS", "minimum speed at " + ", ".join(corners[k] for k in ck) + ", km/h",
+             {cc: float(np.mean([O[cc]["apex"][k] for k in ck])) for cc in codes}, "{:.0f}", True),
+            ("BRAKING", "starts braking, metres before the apex (less = later)",
+             {cc: float(np.mean([O[cc]["brk"][k] for k in ck])) for cc in codes}, "{:.0f} m", False)]
+    y = 0.525
+    bars = []
+    for title, subt, vals, fmt, hi_good in rows:
+        c.text(0.08, y, title, 17, color=P.TEXT, weight=700, ha="left", track=True)
+        c.text(0.08, y - 0.016, subt, 12, color=P.MUTED, weight=400, ha="left")
+        best = (max if hi_good else min)(vals, key=vals.get)
+        lo_, hi_ = min(vals.values()), max(vals.values())
+        for k, cc in enumerate(codes):
+            yy = y - 0.036 - k * 0.018
+            c.text(0.08, yy, cc, 15, color=cols[cc], weight=700, ha="left")
+            nrm = (vals[cc] - lo_) / (hi_ - lo_ + 1e-9) if hi_good else (hi_ - vals[cc]) / (hi_ - lo_ + 1e-9)
+            frac = 0.55 + 0.45 * nrm
+            r = plt.Rectangle((0.18, yy - 0.005), 0.0, 0.010, transform=c.fig.transFigure, fc=cols[cc], alpha=0.9)
+            c.fig.add_artist(r)
+            tx = c.text(0.90, yy, "", 15, color=P.GOLD if cc == best else P.TEXT, weight=700 if cc == best else 300, ha="right")
+            bars.append((r, frac, tx, fmt.format(vals[cc]), len(bars) // len(codes)))
+        y -= 0.036 + len(codes) * 0.018 + 0.016
+    _foot(c, src)
+    r_ = Reel(out)
+    n1 = int(6 * FPS)
+    for i in range(n1 + 1):                                       # sections paint one after another
+        pos = i / n1
+        for (a_, b_, best, mg), st, lb in zip(secs, strokes, chips):
+            m = (fr >= a_) & (fr <= min(b_, max(a_, pos)))
+            st.set_data(ref["x"][m], ref["y"][m])
+            lb.set_text(f"{best} {mg:.2f} s" if pos >= b_ else "")
+        r_.add(c.fig)
+    for lb, (a_, b_, best, mg) in zip(chips, secs):
+        lb.set_text(f"{best} {mg:.2f} s")
+    n2 = int(4.5 * FPS)
+    for i in range(n2 + 1):                                       # rows fill in, one after another
+        for rect, frac, tx, val, row in bars:
+            e = _ease((i / n2) * 3 - row)
+            rect.set_width(0.60 * frac * e)
+            tx.set_text(val if e >= 1 else "")
+        r_.add(c.fig)
+    r_.add(c.fig, int(4 * FPS))
+    plt.close(c.fig)
+    return r_.close()
+
+
 def L_code(Ls, k):
     return Ls[k]["code"]
 
@@ -955,6 +1113,7 @@ SEND = {
     "points": "Send it to the friend who already called P2.",
     "ribbon": "Send it to someone who thinks a lap is just flat out.",
     "board": "Send it to the friend who still thinks it was the car.",
+    "strengths": "Send it to the friend who says it is all about the engine.",
     "delta": "Send it to the friend who argues about who was really faster.",
 }
 
@@ -1307,6 +1466,27 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "\n".join(lines),
                    "📐 Throttle, brake and top speed: OpenF1 telemetry. Lap times: official qualifying.",
                    "💬 Who had the best lap in them? Tell us below.")
+    elif kind == "strengths_q":                  # where each car is strong, top four qualifying laps (Michel, 20 Nov)
+        res = _q_official(p)[:4]
+        laps, off = [], []
+        for r_ in res:
+            t = r_["q3"] or r_["q2"] or r_["q1"]
+            m_, _, sec = t.rpartition(":")
+            ms = (int(m_ or 0) * 60 + float(sec)) * 1000
+            try:
+                L = lap_of(oc, p.season, ck, "Qualifying", rot, r_["code"], ms)
+            except Exception:
+                continue
+            if abs(L["lap_s"] * 1000 - ms) <= 5:
+                laps.append(L), off.append(ms / 1000)
+        if len(laps) < 3 or laps[0]["code"] != res[0]["code"]:
+            return None
+        D = strength_data(laps)
+        if len(D["clean"]) < 2:
+            return None
+        cn = CORNER_NAMES.get((p.title, len(D["fa"]))) or [f"C{k + 1}" for k in range(len(D["fa"]))]
+        strengths(p, laps, off, video, ["Where each car", "is strong"], f"{name} {p.season} Q3, the top {len(laps)} laps", cn, D["clean"])
+        cap = _cap(p, kind, *strength_caption(p, D, cn))
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
         from .gp_facts import SESSION_NEWS
         code = kind.rsplit("_", 1)[1].upper()
