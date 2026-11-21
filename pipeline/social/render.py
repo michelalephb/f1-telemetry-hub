@@ -141,7 +141,9 @@ def quali_carousel(st: QualiStory, meta: dict, rot: float, out: Path) -> list[Pa
     paths = []
 
     fig = new_fig(H_POST)
-    chrome(fig, kick, f"{a.code} on pole by {st.official_gap_s:.3f} s")
+    from .gp_facts import grid_pole
+    gp = grid_pole(meta.get("season"), meta.get("round"), a.code)
+    chrome(fig, kick, f"{a.code} {'fastest' if gp else 'on pole'} by {st.official_gap_s:.3f} s")
     sector_map(track_axes(fig, [0.06, 0.25, 0.88, 0.57]), st, rot)
     fig.text(0.06, 0.19, f"{a.code}  {lap_time(a.lap_ms)}", fontsize=34, color=a.color, family=S.MONO, weight=400)
     fig.text(0.06, 0.14, f"{b.code}  {lap_time(b.lap_ms)}", fontsize=34, color=b.color, family=S.MONO, weight=400)
@@ -326,7 +328,9 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     r = Reel(out / "reel.mp4")
 
     # 1. Intro, 1.5 s
-    fig = reel_fig(kick, "Pole lap vs P2")
+    from .gp_facts import grid_pole
+    gp = grid_pole(meta.get("season"), meta.get("round"), st.a.code)
+    fig = reel_fig(kick, "Fastest lap vs P2" if gp else "Pole lap vs P2")
     fig.text(0.5, 0.56, a.code, ha="center", fontsize=150, color=a.color, weight=400)
     fig.text(0.5, 0.49, "vs", ha="center", fontsize=50, color=S.MUTE)
     fig.text(0.5, 0.39, b.code, ha="center", fontsize=150, color=b.color, weight=400)
@@ -397,7 +401,7 @@ def quali_reel(st: QualiStory, meta: dict, rot: float, out: Path, lap_s: float =
     plt.close(fig)
 
     # 4. End card, 2.5 s
-    fig = reel_fig(kick, "Pole position")
+    fig = reel_fig(kick, "Fastest in qualifying" if gp else "Pole position")
     fig.text(0.5, 0.60, a.code, ha="center", fontsize=170, color=a.color, weight=400)
     fig.text(0.5, 0.52, lap_time(a.lap_ms), ha="center", fontsize=64, family=S.MONO)
     fig.text(0.5, 0.46, f"{b.code} +{st.official_gap_s:.3f} s", ha="center", fontsize=44, color=b.color, family=S.MONO)

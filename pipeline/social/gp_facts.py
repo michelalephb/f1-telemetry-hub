@@ -506,3 +506,15 @@ Sources: GPblog, PlanetF1, Crash.net, RacingNews365, formula1.com, The Race, McL
         },
     },
 }
+
+
+# Grid pole when the fastest qualifier does not start from pole (grid penalty). (season, round) -> driver code.
+# Las Vegas 2026: Antonelli fastest, five place drop for a sixth combustion engine; Verstappen starts from pole
+# (GPblog, Pit Debrief, Crash.net, formula1.com, 21 Nov 2026).
+GRID_POLE = {(2026, 21): "VER"}
+
+
+def grid_pole(season, rnd, fastest: str):
+    """The driver starting from pole when that is not the fastest qualifier, else None."""
+    gp = GRID_POLE.get((season, rnd))
+    return gp if gp and gp != fastest else None

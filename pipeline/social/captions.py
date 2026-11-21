@@ -67,14 +67,19 @@ def quali(st: QualiStory, meta: dict, kind: str, rewind: bool = False) -> str:
     if st.best_b:
         d = st.best_b
         apex.append(f"↩️ {drv(b, col)} was quicker through {corner_label(d.corner)}: {d.min_b:.0f} vs {d.min_a:.0f} km/h")
+    from .gp_facts import grid_pole
+    gp = grid_pole(meta.get("season"), meta.get("round"), a)
+    first = (f"{lead}{drv(a, col)} fastest in qualifying at the {meta['event']} by {st.official_gap_s:.3f} s over "
+             f"{drv(b, col)}; {gp} starts from pole after grid penalties" if gp
+             else f"{lead}{drv(a, col)} takes {pole} at the {meta['event']} by {st.official_gap_s:.3f} s over {drv(b, col)}")
     return clean(paragraphs(
-        f"{lead}{drv(a, col)} takes {pole} at the {meta['event']} by {st.official_gap_s:.3f} s over {drv(b, col)}",
+        first,
         ["📐 Sector by sector"] + secs,
         apex,
         "🎥 Same clock, same lap. Watch where the gap opens." if kind == "reel"
         else "👉 Swipe for the sectors, the speed trace and the corners.\n💾 Save it for the race.",
         "💬 Which corner decided it? Tell us below.",
-        "📤 Send it to the friend who called a different pole.",
+        "📤 Send it to the friend who called a different result." if gp else "📤 Send it to the friend who called a different pole.",
         FOOTER, tags(meta["event"], a, b)))
 
 

@@ -875,8 +875,11 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         except Exception:
             return None
         official = (pole["q3"] or pole["q2"]) if pole else _clock(lap["lap_s"])
-        pedal(p, lap, video, ["Inside the", "pole lap"], f"{lap['code']}, {name} {p.season}, {official}")
-        cap = _cap(p, kind, f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}.",
+        from .gp_facts import grid_pole
+        gp = grid_pole(p.season, p.round, lap["code"])
+        pedal(p, lap, video, ["Inside the", "fastest quali lap" if gp else "pole lap"], f"{lap['code']}, {name} {p.season}, {official}")
+        cap = _cap(p, kind, (f"🎥 Inside the fastest qualifying lap in {name}: {drv(lap['code'], p.colors)}, {official}. {gp} starts from pole after grid penalties."
+                             if gp else f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}."),
                    "👀 Every input on the lap, live on the map, shown faster than real time.",
                    "💾 Save it.\n💬 Who beats it in the race? Tell us below.")
     elif kind == "ghost_q":                      # this year's pole lap vs P2, official qualifying times
@@ -895,8 +898,11 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             b = lap_of(oc, p.season, ck, "Qualifying", rot, res[1]["code"], mb) | {"year": p.season, "official": tb}
         except Exception:
             return None
-        ghost(p, a, b, video, ["Pole vs P2,", "one map"], f"{a['code']} vs {b['code']}, {name} {p.season} qualifying, official times")
-        cap = _cap(p, kind, f"👻 Pole vs P2 in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
+        from .gp_facts import grid_pole
+        gp = grid_pole(p.season, p.round, a["code"])
+        ghost(p, a, b, video, ["Fastest vs P2," if gp else "Pole vs P2,", "one map"], f"{a['code']} vs {b['code']}, {name} {p.season} qualifying, official times")
+        cap = _cap(p, kind, (f"👻 The two fastest qualifying laps in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}. {gp} starts from pole after grid penalties."
+                             if gp else f"👻 Pole vs P2 in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}."),
                    f"⏱️ The gap: {abs(ma - mb) / 1000:.3f} s (official qualifying times).",
                    "💬 Where was pole won? Tell us below.")
     elif kind == "pedal_fp3":                    # this year's fastest FP3 lap
