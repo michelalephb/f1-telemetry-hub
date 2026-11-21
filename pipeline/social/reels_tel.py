@@ -704,7 +704,7 @@ def speed_ribbon(p, lap: dict, out: Path, hook: list[str], sub: str, src: str = 
     return r.close()
 
 
-def delta_map(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, official: tuple[float, float],
+def delta_map(p, a: dict, b: dict, out: Path, hook: list[str] | None, sub: str, official: tuple[float, float],
               n_sec: int = 25, src: str = "Lap times: official timing. Mini sectors: OpenF1 telemetry") -> Path:
     """Two laps, one map, no dots racing: a single runner paints each of n_sec mini sectors in the colour of the
     driver who was quicker there. The gap counter runs underneath; it ends on the official gap and the tally."""
@@ -742,17 +742,23 @@ def delta_map(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, officia
     segcol = np.empty(len(seg), dtype=object)
     for k, (e0, e1) in enumerate(zip(edges[:-1], edges[1:])):
         segcol[e0:e1] = win[k]
+    if hook is None:                                       # anticipation (Michel, 21 Nov): the biggest lead, then the question
+        k = int(np.argmax(np.abs(gap[: int(0.9 * len(gap))])))
+        who = A["code"] if gap[k] >= 0 else B["code"]
+        hook = [f"{who} {abs(gap[k]):.2f} s up", "Can he hold it?"]
     c = _card(p)
     _hook(c, hook, sub)
     ax = _track(c, [0.06, 0.33, 0.88, 0.37], A["x"], A["y"], lw=10)
     core = LineCollection([], linewidths=10, colors=[], capstyle="butt", zorder=3)
     ax.add_collection(core)
     head, = ax.plot([], [], "o", ms=16, color=P.TEXT, zorder=5)
+    # each driver's own lap clock at this point of the lap (Michel, 21 Nov: the timers are the lap times; the track
+    # highlight alone shows who is quicker where, no mini sector counter)
     c.text(0.30, 0.315, A["code"], 30, color=ca, weight=600)
     c.text(0.70, 0.315, B["code"], 30, color=cb, weight=600)
-    na, nb = c.text(0.30, 0.275, "0", 40, weight=200), c.text(0.70, 0.275, "0", 40, weight=200)
-    c.text(0.5, 0.275, "MINI SECTORS", 12, color=P.MUTED, weight=600, track=True)
-    lead = c.text(0.5, 0.222, "", 30, weight=300)
+    na, nb = c.text(0.30, 0.272, "", 44, weight=200), c.text(0.70, 0.272, "", 44, weight=200)
+    lead = c.text(0.5, 0.215, "", 30, weight=300)
+    clk_a = TT[0] * official[0] / TT[0][-1]
     _foot(c, src)
     r = Reel(out)
     n = int(12 * FPS)
@@ -760,15 +766,14 @@ def delta_map(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, officia
         j = max(1, int(round(len(seg) * i / n)))
         core.set_segments(seg[:j]), core.set_color(list(segcol[:j]))
         head.set_data([x[min(j, len(x) - 1)]], [y[min(j, len(y) - 1)]])
-        done = int(np.searchsorted(edges[1:], j, side="right"))
-        na.set_text(str(sum(1 for w in win[:done] if w == ca)))
-        nb.set_text(str(sum(1 for w in win[:done] if w == cb)))
-        g = gap[min(j, len(gap) - 1)]
-        lead.set_text(f"{A['code'] if g >= 0 else B['code']} ahead by {abs(g):.3f} s")
-        lead.set_color(ca if g >= 0 else cb)
+        q = min(j, len(gap) - 1)
+        na.set_text(_clock(clk_a[q]))
+        nb.set_text(_clock(clk_a[q] + gap[q]))
         r.add(c.fig)
     head.set_data([], [])
     g = official[1] - official[0]
+    na.set_text(_clock(official[0])), nb.set_text(_clock(official[1]))
+    (na if g >= 0 else nb).set_color(P.GOLD)
     lead.set_text(f"{A['code'] if g >= 0 else B['code']} by {abs(g):.3f} s, official")
     lead.set_color(P.GOLD)
     r.add(c.fig, int(3.0 * FPS))
@@ -1431,7 +1436,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             if abs(a["lap_s"] * 1000 - ma) > 5 or abs(b["lap_s"] * 1000 - mb) > 5:
                 log.warning("delta_q: OpenF1 laps do not match the official qualifying times")
                 return None
-            delta_map(p, a, b, video, ["Where the lap", "is won"], f"{a['code']} vs {b['code']}, {name} {p.season} qualifying",
+            delta_map(p, a, b, video, None, f"{a['code']} vs {b['code']}, {name} {p.season} qualifying",
                       (ma / 1000, mb / 1000))
             cap = _cap(p, kind, f"🟩 Mini sector by mini sector, {name} qualifying: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}.",
                        f"⏱️ The gap: {abs(mb - ma) / 1000:.3f} s (official qualifying times). The track turns the colour of whoever was quicker there.",
