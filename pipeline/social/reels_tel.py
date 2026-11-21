@@ -979,7 +979,8 @@ def strength_data(laps: list[dict], skip: tuple[float, float] = (2.0, 2.0)) -> d
 CORNER_NAMES = {("LAS VEGAS", 5): ["T1", "T5", "T7", "T12", "T14"]}
 
 
-STRENGTH_HOOKS = {"strengths_q_ant_rus_lec_ham": ["Mercedes vs Ferrari,", "where the time goes"]}
+STRENGTH_HOOKS = {"strengths_q_ant_rus_lec_ham": ["Ferrari: 346 km/h.", "Still 0.7 s down on the Strip"]}
+STRENGTH_ROWS = {"strengths_q_ant_rus_lec_ham": ("strip", "top", "apex")}
 
 
 def strength_caption(p, D: dict, cn: list[str], what: str | None = None) -> list[str]:
@@ -1002,7 +1003,7 @@ def strength_caption(p, D: dict, cn: list[str], what: str | None = None) -> list
 
 
 def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[str], sub: str, corners: list[str],
-              keep_corners: list[int] | None = None, src: str = "Speeds, braking: OpenF1 telemetry. Section times: each car's own clock") -> Path:
+              keep_corners: list[int] | None = None, rows_spec: tuple = ("top", "apex", "brake"), src: str = "Speeds, braking: OpenF1 telemetry. Section times: each car's own clock") -> Path:
     """Where each car is strong, displayed simply: the lap splits into sections between the clean corners, each
     painted in the colour of the quickest car there, with its margin over the next car underneath; then three rows
     fill in (straight line, slow corners, braking), best in gold."""
@@ -1010,10 +1011,13 @@ def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[
     D = strength_data(laps)
     Ls = [{k: np.array(v, float) if isinstance(v, list) else v for k, v in l.items()} for l in laps]
     used, cols = set(), {}
-    for L in Ls:
+    for L in Ls:                                                  # team mate: a lighter shade of the team colour
         cc = (L.get("color") or P.CYAN).lower()
-        cols[L["code"]] = P.TEXT if cc in used else cc
-        used.add(cc)
+        if cc in used:
+            rgb = [int(cc[k:k + 2], 16) for k in (1, 3, 5)]
+            cc = "#" + "".join(f"{int(v + (255 - v) * 0.55):02x}" for v in rgb)
+        cols[L["code"]] = cc
+        used.add((L.get("color") or P.CYAN).lower())
     O, codes = D["out"], D["codes"]
     keep_corners = D["clean"] if keep_corners is None else keep_corners
     # sections between the kept corners only (merge across dropped ones)
@@ -1040,11 +1044,18 @@ def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[
         c.text(x, 0.585, f"{names[k]} TO {names[k + 1]}", 11, color=P.MUTED, weight=600, track=True)
         chips.append(c.text(x, 0.563, "", 17, color=cols[best], weight=700))
     ck = list(keep_corners)
-    rows = [("STRAIGHT LINE", "top speed, km/h", {cc: O[cc]["top"] for cc in codes}, "{:.0f}", True),
-            ("SLOW CORNERS", "minimum speed at " + ", ".join(corners[k] for k in ck) + ", km/h",
-             {cc: float(np.mean([O[cc]["apex"][k] for k in ck])) for cc in codes}, "{:.0f}", True),
-            ("BRAKING", "starts braking, metres before the apex (less = later)",
-             {cc: float(np.mean([O[cc]["brk"][k] for k in ck])) for cc in codes}, "{:.0f} m", False)]
+    last = [0.0] + D["fa"]
+    k_last = D["fa"].index(D["fa"][ck[-1]])
+    strip = {cc: sum(s_ for s_, lo in zip(O[cc]["seg"], last) if lo >= D["fa"][ck[-1]] - 1e-9) for cc in codes}
+    sbest = min(strip.values())
+    lib = {"top": ("STRAIGHT LINE", "top speed, km/h", {cc: O[cc]["top"] for cc in codes}, "{:.0f}", True),
+           "strip": (f"{corners[ck[-1]]} TO THE LINE", "time lost to the quickest here, seconds",
+                     {cc: strip[cc] - sbest for cc in codes}, "+{:.2f}", False),
+           "apex": ("SLOW CORNERS", "minimum speed at " + ", ".join(corners[k] for k in ck) + ", km/h",
+                    {cc: float(np.mean([O[cc]["apex"][k] for k in ck])) for cc in codes}, "{:.0f}", True),
+           "brake": ("BRAKING", "starts braking, metres before the apex (less = later)",
+                     {cc: float(np.mean([O[cc]["brk"][k] for k in ck])) for cc in codes}, "{:.0f} m", False)}
+    rows = [lib[r] for r in rows_spec]
     y = 0.525
     bars = []
     for title, subt, vals, fmt, hi_good in rows:
@@ -1515,7 +1526,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             sb_ = f"{name} {p.season} qualifying, best laps: " + ", ".join(L["code"] for L in laps)
         else:
             hk, sb_ = ["Where each car", "is strong"], f"{name} {p.season} Q3, the top {len(laps)} laps"
-        strengths(p, laps, off, video, hk, sb_, cn, D["clean"])
+        strengths(p, laps, off, video, hk, sb_, cn, D["clean"], STRENGTH_ROWS.get(kind, ("top", "apex", "brake")))
         cap = _cap(p, kind, *strength_caption(p, D, cn, "best qualifying laps" if pick else None))
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
         from .gp_facts import SESSION_NEWS
