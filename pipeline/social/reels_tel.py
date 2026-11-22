@@ -1183,6 +1183,7 @@ def strength_data(laps: list[dict], skip: tuple[float, float] = (2.0, 2.0)) -> d
 CORNER_NAMES = {("LAS VEGAS", 5): ["T1", "T5", "T7", "T12", "T14"]}
 
 
+INCIDENTS_ON_REELS = False                     # race control incident markers off (Michel, 21 Nov); standalone later
 RACE_PACE_TEAMS = {("LAS VEGAS", 2026): ["Mercedes", "Red Bull", "Ferrari"]}
 STRENGTH_HOOKS = {"strengths_q_ant_rus_lec_ham": ["Ferrari: 346 km/h.", "Still 0.7 s down on the Strip"]}
 STRENGTH_ROWS = {"strengths_q_ant_rus_lec_ham": ("strip", "top", "apex")}
@@ -1511,6 +1512,146 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
     lap_t.set_text(f"MOST PASSES: {best}, {tops[best]}")
     lap_t.set_color(colors.get(best, P.TEXT))
     r_.add(c.fig, int(3.5 * FPS))
+    plt.close(c.fig)
+    return r_.close()
+
+
+BATTLE_ZONES = {"LAS VEGAS": {"from": 0.80, "to": 1.0,                       # end of the Strip to the line
+                              "corners": {"T14": 0.835, "T15": 0.844, "T16": 0.855, "T17": 0.980}}}
+
+
+def battle_data(oc, year: int, ck: int, a: str, b: str, ref: dict, zone: dict, last: int = 5) -> dict:
+    """Two cars through one corner sequence over the last laps (Michel, 21 Nov: VER and ANT, T14 to T17, last 5).
+    Each car's position is its distance to the line, integrated backward over its own speed trace from its official
+    line crossing (lap start plus lap time, timing). Gaps therefore rest on timing plus at most ~1.3 km of
+    integration, and no cross car location data (which can lag up to 0.5 s) is used."""
+    sk = _session(oc, year, ck, "Race")
+    codes, cols = _codes(oc, sk)
+    num = {v: k for k, v in codes.items()}
+    laps = oc.frame("laps", session_key=sk)
+    laps = laps[laps["lap_duration"].notna()]
+    n_laps = int(laps["lap_number"].max())
+    Lref = float(ref["dist"][-1])
+    Z = (zone["to"] - zone["from"]) * Lref
+    out = []
+    for L in range(n_laps - last + 1, n_laps + 1):
+        row = {"lap": L}
+        for k, c in (("a", a), ("b", b)):
+            lp = laps[(laps["driver_number"] == num[c]) & (laps["lap_number"] == L)]
+            if lp.empty:
+                break
+            lp = lp.iloc[0]
+            tc = pd.Timestamp(lp["date_start"]) + pd.Timedelta(seconds=float(lp["lap_duration"]))
+            win = [f"date>={(tc - pd.Timedelta(seconds=40)).isoformat()}", f"date<={(tc + pd.Timedelta(seconds=2)).isoformat()}"]
+            car = oc.frame("car_data", win, session_key=sk, driver_number=num[c])
+            ct = (pd.to_datetime(car["date"], format="ISO8601", utc=True) - tc).dt.total_seconds().to_numpy()
+            v = car["speed"].to_numpy(float) / 3.6
+            m = ct <= 0
+            ct, v = np.append(ct[m], 0.0), np.append(v[m], np.interp(0.0, ct, v))
+            to_line = np.concatenate([np.cumsum(((np.diff(ct) * (v[1:] + v[:-1]) / 2))[::-1])[::-1], [0.0]])
+            s = Z - to_line
+            keep = s >= -60
+            row[k] = {"t": (ct[keep] + tc.timestamp()).tolist(), "s": s[keep].tolist(), "v": (v[keep] * 3.6).tolist()}
+        else:
+            t0 = min(row["a"]["t"][0], row["b"]["t"][0])
+            for k in ("a", "b"):
+                row[k]["t"] = [round(q - t0, 3) for q in row[k]["t"]]
+                row[k]["s"] = [round(q, 1) for q in row[k]["s"]]
+                row[k]["v"] = [round(q, 1) for q in row[k]["v"]]
+            out.append(row)
+    return {"a": a, "b": b, "colors": {a: cols.get(a), b: cols.get(b)}, "Z": Z, "Lref": Lref, "from": zone["from"],
+            "corners": {k: (f - zone["from"]) * Lref for k, f in zone["corners"].items()}, "laps": out, "n_laps": n_laps}
+
+
+def _t_at(car: dict, s: float) -> float:
+    return float(np.interp(s, car["s"], car["t"]))
+
+
+def battle_zone(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str,
+                src: str = "Speed traces: official car data, gaps from timing line crossings", mark: str | None = None) -> Path:
+    """One corner sequence, two cars, last laps (Michel, 21 Nov). Per lap the two speed traces race each other
+    through the zone with a live gap, a small map shows both cars, and a grid fills in who led at each corner
+    and the line. Laps with a lead change play slower, so the moves get the screen time."""
+    P.set_event(p)
+    A, B, Z = D["a"], D["b"], D["Z"]
+    col = {A: D["colors"][A] or P.CYAN, B: D["colors"][B] or P.TEXT}
+    if A in col and B in col and col[A].lower() == col[B].lower():
+        col[B] = P.TEXT
+    pts = dict(D["corners"]) | {"LINE": Z}
+    names = list(pts)
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    if mark:
+        c.text(0.5, 0.712, mark, 13, color=P.GOLD, weight=700, track=True)
+    R_ = {k: np.array(v, float) for k, v in ref.items() if k in ("x", "y", "dist")}
+    fr = R_["dist"] / R_["dist"][-1]
+    mp = _track(c, [0.05, 0.545, 0.30, 0.15], R_["x"], R_["y"], lw=5)
+    zm = (fr >= D["from"]) & (fr <= D["from"] + Z / D["Lref"])
+    mp.plot(R_["x"][zm], R_["y"][zm], color=P.GOLD, lw=7, solid_capstyle="round", zorder=2)
+    dot = {k: mp.plot([], [], "o", ms=11, color=col[k], mec="#0B0E14", mew=1.5, zorder=5)[0] for k in (A, B)}
+    lap_t = c.text(0.66, 0.672, "", 44, weight=200)
+    c.text(0.66, 0.640, "LAP", 12, color=P.MUTED, weight=600, track=True)
+    gap_t = c.text(0.66, 0.600, "", 22, weight=700)
+    ax = c.fig.add_axes([0.08, 0.395, 0.84, 0.15])
+    ax.set_xlim(-40, Z + 20), ax.set_ylim(70, 360)
+    ax.axis("off")
+    for nm, s0 in pts.items():
+        ax.axvline(s0, color="#232D3F", lw=1.2, ls=(0, (2, 3)), zorder=0)
+        ax.text(s0, 368, nm, fontsize=13, color=P.MUTED, family=P.FONT, weight=700, ha="center", va="bottom")
+    for kmh in (100, 200, 300):
+        ax.text(-44, kmh, f"{kmh}", fontsize=10, color="#5D6573", family=P.FONT, va="center", ha="right")
+    c.text(0.08, 0.389, "SPEED, KM/H, ALONG THE ZONE", 11, color=P.MUTED, weight=600, ha="left", track=True)
+    ln = {k: ax.plot([], [], color=col[k], lw=3.5, solid_capstyle="round", zorder=3)[0] for k in (A, B)}
+    hd = {k: ax.plot([], [], "o", ms=9, color=col[k], zorder=4)[0] for k in (A, B)}
+    xs = [0.29, 0.43, 0.57, 0.71, 0.86][:len(names)]
+    gy = 0.352
+    for x, nm in zip(xs, names):
+        c.text(x, gy, nm, 13, color=P.MUTED, weight=700, track=True)
+    cells = []
+    for j, row in enumerate(D["laps"]):
+        yy = gy - 0.030 - j * 0.026
+        c.text(0.10, yy, f"L{row['lap']}", 15, color=P.MUTED, weight=600, ha="left")
+        cells.append([c.text(x, yy, "", 15, weight=700) for x in xs])
+    _foot(c, src)
+    r_ = Reel(out)
+    for j, row in enumerate(D["laps"]):
+        ca, cb = row["a"], row["b"]
+        lead = []
+        for s0 in pts.values():
+            ta, tb = _t_at(ca, s0), _t_at(cb, s0)
+            lead.append((A if ta < tb else B, abs(ta - tb)))
+        swap = len({w for w, _ in lead}) > 1
+        t_end = max(_t_at(ca, Z), _t_at(cb, Z)) + 0.3
+        t_beg = max(0.0, min(_t_at(ca, -20), _t_at(cb, -20)))
+        dur = (t_end - t_beg) / (3.2 if swap else 8.0)
+        n = max(2, int(dur * FPS))
+        lap_t.set_text(f"{row['lap']}/{D['n_laps']}")
+        done = 0
+        for i in range(n + 1):
+            tt = t_beg + (t_end - t_beg) * i / n
+            sc = {}
+            for k, car in ((A, ca), (B, cb)):
+                tv, sv, vv = (np.array(car[q]) for q in ("t", "s", "v"))
+                m = tv <= tt
+                s_now = float(np.interp(tt, tv, sv))
+                sc[k] = s_now
+                ln[k].set_data(np.append(sv[m], s_now), np.append(vv[m], np.interp(tt, tv, vv)))
+                hd[k].set_data([s_now], [np.interp(tt, tv, vv)])
+                fq = D["from"] + min(max(s_now, -60), Z) / D["Lref"]
+                dot[k].set_data([np.interp(fq, fr, R_["x"])], [np.interp(fq, fr, R_["y"])])
+            fin = i == n or min(sc.values()) >= Z - 1
+            ahead = lead[-1][0] if fin else (A if sc[A] >= sc[B] else B)
+            behind = B if ahead == A else A
+            car_ahead = ca if ahead == A else cb
+            g = lead[-1][1] if fin else tt - _t_at(car_ahead, sc[behind])
+            gap_t.set_text(f"{ahead} AHEAD +{max(g, 0):.2f} s"), gap_t.set_color(col[ahead])
+            while done < len(names) and (min(sc.values()) >= list(pts.values())[done] - 1 or i == n):
+                w, gg = lead[done]
+                cells[j][done].set_text(f"{w} {gg:.2f}"), cells[j][done].set_color(col[w])
+                done += 1
+            r_.add(c.fig)
+        r_.add(c.fig, int((0.6 if swap else 0.3) * FPS))
+    r_.add(c.fig, int(2.5 * FPS))
     plt.close(c.fig)
     return r_.close()
 
@@ -1983,6 +2124,40 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    f"📐 Our count from OpenF1 position swaps ({O['raw']} in total): pit stop swaps, safety car laps and "
                    "instant swap backs removed. Official counts can differ slightly.",
                    "💬 Who was your favourite driver today?")
+    elif kind.startswith("battle_"):             # two cars, one corner sequence, last 5 laps (Michel, 21 Nov)
+        _, a_, b_ = kind.split("_")[:3]
+        zone = BATTLE_ZONES.get(p.title)
+        if zone is None:
+            return None
+        try:
+            ref = lap_of(oc, p.season, ck, "Race", rot)
+            D = battle_data(oc, p.season, ck, a_.upper(), b_.upper(), ref, zone)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        if len(D["laps"]) < 3:
+            return None
+        log.info("BATTLE_JSON " + json.dumps({"D": D, "ref": {k: ref[k] for k in ("x", "y", "dist")}}, separators=(",", ":")))
+        A, B = D["a"], D["b"]
+        pts = dict(D["corners"]) | {"LINE": D["Z"]}
+        rows = []
+        for r in D["laps"]:
+            ld = [(A if _t_at(r["a"], s0) < _t_at(r["b"], s0) else B, nm) for nm, s0 in pts.items()]
+            rows.append((r["lap"], ld))
+        moves = [(L, ld) for L, ld in rows if len({w for w, _ in ld}) > 1]
+        if moves:
+            L0, ld0 = moves[0]
+            first = next(nm for (w, nm), (w0, _) in zip(ld0[1:], ld0) if w != w0)
+            mover = next(w for (w, nm) in ld0 if nm == first)
+            hook = [f"{drv(mover, p.colors)} makes the move at {first}.", "Does it stick?"]
+        else:
+            hook = [f"{drv(A, p.colors)} against {drv(B, p.colors)}", "through the last 5 laps"]
+        cn = "T14 to T17" if p.title == "LAS VEGAS" else "the final sector"
+        battle_zone(p, ref, D, video, hook, f"{name} {p.season}, {cn}, last {len(D['laps'])} laps")
+        cap = _cap(p, kind, f"⚔️ {drv(A, p.colors)} against {drv(B, p.colors)}, {cn}, the last {len(D['laps'])} laps of {name} {p.season}.",
+                   "🔁 " + " ".join(f"Lap {L}: {ld[0][0]} leads into {ld[0][1]}, {ld[-1][0]} at the line." for L, ld in rows),
+                   "📐 Positions from each car's own speed trace, anchored to its official line crossing. Leader per point is who got there first.",
+                   "💬 Who was your favourite driver today?")
     elif kind == "race_pace_teams":             # Mercedes, Red Bull, Ferrari race pace (Michel, 21 Nov)
         teams = RACE_PACE_TEAMS.get((p.title, p.season), ["Mercedes", "Red Bull", "Ferrari"])
         try:
@@ -1993,6 +2168,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         if len(D["teams"]) < 2:
             return None
         log.info("RACEPACE_JSON " + json.dumps(D, separators=(",", ":")))
+        if not INCIDENTS_ON_REELS:              # Michel, 21 Nov: no crash markers in the main Reels
+            D["events"] = []
         race_pace(p, D, video, ["Race pace:", ", ".join(D["teams"])], f"{name} {p.season}, clean laps only")
         T = D["teams"]
         best = min(T, key=lambda k: T[k]["median"])
