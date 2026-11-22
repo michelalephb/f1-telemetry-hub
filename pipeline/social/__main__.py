@@ -534,7 +534,10 @@ def cmd_reel(a) -> int:
     from ..openf1 import OpenF1
     sb = store.client()
     ig = connect(sb, a.dry_run)
-    w = where_are_we(OpenF1(), datetime.now(TZ))
+    if a.round:                                  # a finished race weekend, after the calendar moved on (22 Nov)
+        w = {"season": a.season, "round": a.round}
+    else:
+        w = where_are_we(OpenF1(), datetime.now(TZ))
     p = preview.load(w["season"], w["round"])
     sid = f"{w['season']}_{w['round']:02d}_PREVIEW_REEL_{a.reel.upper()}"
     row = post_row(sb, sid, "reel", "session") if ig is not None else None
