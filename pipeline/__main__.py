@@ -131,7 +131,9 @@ def sync_calendar(sb, oc: OpenF1, season: int) -> list[dict]:
 
     now = datetime.now(timezone.utc)
     for e in events:
-        if pd.Timestamp(e["event_date"]).tz_localize("UTC") + timedelta(days=1) < now:
+        # From the Friday of the weekend on: qualifying and sprint results are published before race day
+        # (waiting until the day after the race left the qualifying page on "classification pending").
+        if pd.Timestamp(e["event_date"]).tz_localize("UTC") - timedelta(days=2) < now:
             try:
                 res = jolpica.results(season, e["round"])
                 if res:
