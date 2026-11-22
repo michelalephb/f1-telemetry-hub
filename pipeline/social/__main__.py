@@ -180,12 +180,16 @@ def send_files(sb, ig: UploadPost, sid: str, kind: str, story: str, built: dict,
     to a preview link in the web bucket, saved with the caption on the ig_posts row (status held)."""
     rid = f"{sid}-{story}-{kind}-a{attempts}-{uuid.uuid4().hex[:8]}"
     key = {"session_id": sid, "kind": kind, "story": story}
-    if kind == "reel" and REQUIRE_APPROVAL and not approved(sb, sid):
+    if (kind == "reel" or "_REEL_CAROUSEL_" in sid) and REQUIRE_APPROVAL and not approved(sb, sid):
         row = post_row(sb, sid, kind, story)
         if row and row["status"] == "held":
             report.append(entry | {"status": "held for approval (already)"})
             return False
-        url = upload(sb, Path(built["video"]), f"pending/{sid.lower()}_{uuid.uuid4().hex[:10]}.mp4")
+        if built.get("video"):
+            url = upload(sb, Path(built["video"]), f"pending/{sid.lower()}_{uuid.uuid4().hex[:10]}.mp4")
+        else:                                    # held carousel: every slide gets a preview link
+            tag = uuid.uuid4().hex[:10]
+            url = " ".join(upload(sb, Path(f_), f"pending/{sid.lower()}_{tag}_{Path(f_).name}") for f_ in built["files"])
         save_row(sb, key | {"status": "held", "caption": built["caption"], "attempts": attempts,
                             "error": f"awaiting Michel's approval; preview {url}"})
         log.info("HELD for approval: %s preview %s", sid, url)
@@ -537,6 +541,19 @@ def cmd_reel(a) -> int:
     if row and row["status"] == "published":
         log.info("reel %s already published", a.reel)
         return 0
+    if a.reel.startswith("carousel_"):          # animated carousel: still cover, video slides, still close (21 Nov)
+        try:
+            cb = reels_tel.build_carousel(p, a.reel, Path(a.out) / a.reel)
+        except Exception as e:
+            log.warning("carousel %s: data not in: %s", a.reel, e)
+            cb = None
+        if cb is None:
+            log.warning("carousel %s: data not in yet, nothing posted", a.reel)
+            return 0
+        files, cap = cb
+        jobs = [(sid, "carousel", {"video": None, "cover": None, "files": files, "caption": cap})]
+        report, failed = publish_jobs(sb, ig, jobs, {"reel": a.reel, "manual": True})
+        return finish(report, a.out, failed)
     built = reels_tel.build(p, a.reel, Path(a.out) / f"reel_{a.reel}")
     if built is None:
         log.warning("reel %s: data not in yet, nothing posted", a.reel)

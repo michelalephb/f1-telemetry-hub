@@ -1683,7 +1683,7 @@ def _anchored(oc, sk: int, lp, ref_t: np.ndarray, ref_d: np.ndarray, ref_sec: tu
     return {"t": (np.interp(S, s, g) + t0.timestamp()).tolist(), "v": (np.interp(S, s, vg) * 3.6).tolist(), "lap_s": lap_s}
 
 
-def deploy_data(oc, year: int, ck: int, focus: str, other: str, ref: dict, last: int = 5) -> dict:
+def deploy_data(oc, year: int, ck: int, focus: str, other: str, ref: dict, last: int = 5, every: bool = False) -> dict:
     """Focus driver against one rival over the last laps, full lap, on a 10 m grid (Michel, 21 Nov: Max's
     deployment strategy against Antonelli). The lap shown is the last one with a lead change, else the last lap."""
     sk = _session(oc, year, ck, "Race")
@@ -1711,13 +1711,13 @@ def deploy_data(oc, year: int, ck: int, focus: str, other: str, ref: dict, last:
     pick = next((r for r in reversed(rows) if r["changes"]), rows[-1] if rows else None)
     if pick is None:
         return {}
-    t0 = min(pick["f"]["t"][0], pick["o"]["t"][0])
-    for k in ("f", "o"):
-        pick[k]["t"] = [round(q - t0, 3) for q in pick[k]["t"]]
-        pick[k]["v"] = [round(q, 1) for q in pick[k]["v"]]
+    for r in rows:                               # each lap on its own clock (carousel, one lap per slide)
+        t0r = min(r["f"]["t"][0], r["o"]["t"][0])
+        for k in ("f", "o"):
+            r[k] = {"t": [round(q - t0r, 3) for q in r[k]["t"]], "v": [round(q, 1) for q in r[k]["v"]], "lap_s": r[k]["lap_s"]}
     return {"focus": focus, "other": other, "colors": {focus: cols.get(focus), other: cols.get(other)}, "S": S.tolist(),
             "lap": pick["lap"], "f": pick["f"], "o": pick["o"], "n_laps": n_laps,
-            "changes": {r["lap"]: r["changes"] for r in rows}}
+            "changes": {r["lap"]: r["changes"] for r in rows}, **({"all": rows} if every else {})}
 
 
 def deployment(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, segments: list | None = None,
@@ -1837,6 +1837,120 @@ def deployment(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, segm
         r_.add(c.fig, int(3.0 * FPS))
     plt.close(c.fig)
     return r_.close()
+
+
+def race_rows(oc, year: int, ck: int, top: int = 6) -> dict:
+    """Race trace and tyre stint rows from official timing (Michel, 21 Nov). Finishing order is laps completed,
+    then the time at the end of the last lap. Gap to the leader at the end of each lap is each driver's lap end
+    time minus the leader's (the car in front on the road, not lapped cars). Pit laps from pit stop timing."""
+    sk = _session(oc, year, ck, "Race")
+    codes, cols = _codes(oc, sk)
+    laps = oc.frame("laps", session_key=sk)
+    laps = laps[laps["date_start"].notna() & laps["lap_duration"].notna()].copy()
+    laps["end"] = pd.to_datetime(laps["date_start"], format="ISO8601", utc=True) + pd.to_timedelta(laps["lap_duration"], unit="s")
+    laps["code"] = laps["driver_number"].map(lambda n: codes.get(int(n)))
+    n = int(laps["lap_number"].max())
+    last = laps.sort_values("lap_number").groupby("code").tail(1)
+    order = last.sort_values(["lap_number", "end"], ascending=[False, True])["code"].tolist()
+    ends = laps.pivot_table(index="lap_number", columns="code", values="end", aggfunc="first")
+    lead = ends.min(axis=1)
+    pits = {}
+    for r in oc.get("pit", session_key=sk):
+        c_ = codes.get(int(r["driver_number"]))
+        if c_ and r.get("lap_number") is not None:
+            pits.setdefault(c_, []).append(int(r["lap_number"]))
+    stints = {}
+    for s in sorted(oc.get("stints", session_key=sk), key=lambda s: (s["driver_number"], s["stint_number"])):
+        c_ = codes.get(int(s["driver_number"]))
+        if c_ and s.get("lap_start") is not None:
+            stints.setdefault(c_, []).append((str(s.get("compound") or "UNKNOWN").upper(), int(s["lap_start"]),
+                                              int(s["lap_end"] if s.get("lap_end") is not None else n)))
+    trace, tyre = [], []
+    for c_ in order[:top]:
+        g = ((ends[c_] - lead).dt.total_seconds()).reindex(range(1, n + 1)).ffill().fillna(0.0)
+        trace.append({"code": c_, "color": cols.get(c_), "gaps": [round(float(q), 3) for q in g], "pits": sorted(pits.get(c_, []))})
+    for c_ in order:
+        if c_ in stints:
+            tyre.append({"code": c_, "color": cols.get(c_), "stints": stints[c_]})
+    w = order[0]
+    fin = {r["code"]: ("WIN" if r["code"] == w else
+                       (f"+{r['gaps'][-1]:.1f}s" if last.set_index("code").loc[r["code"], "lap_number"] == n else "LAPPED"))
+           for r in trace}
+    return {"n": n, "order": order, "trace": trace, "tyre": tyre, "final": fin}
+
+
+CAROUSELS = {"carousel_race_swipes": {"cover": ["{name} in", "{k} swipes"], "parts": ["race_trace", "overtakes_race",
+                                                                                    "race_pace_teams", "deploy_ver_ant",
+                                                                                    "tyre_stints"]},
+             "carousel_last5_ver_ant": {"cover": ["5 laps.", "{changes} lead changes."], "parts": "last5"}}
+CROP_Y = 285                                     # 1080x1350 window out of the 1920 Reel: hook, chart, source line
+
+
+def _crop_45(src: Path, dst: Path) -> Path:
+    import subprocess
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(src), "-vf", f"crop=1080:1350:0:{CROP_Y}",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", str(dst)], check=True)
+    return dst
+
+
+def _still(p, lines: list[str], sub: str, out: Path, cue: str | None = "SWIPE  →", foot: str | None = None) -> Path:
+    P.set_event(p)
+    c = P.Card(P.H_POST)
+    c.header(p)
+    for k, s in enumerate(lines):
+        c.text(0.5, 0.62 - k * 0.075, s, 64, weight=300)
+    c.text(0.5, 0.62 - len(lines) * 0.075 - 0.01, sub.upper(), 17, color=P.CYAN, weight=600, track=True)
+    if foot:
+        c.text(0.5, 0.20, foot, 15, color=P.MUTED, weight=300)
+    c.footer(cue)
+    return c.save(out)
+
+
+def build_carousel(p, kind: str, out: Path) -> tuple[list[Path], str] | None:
+    """Animated carousel (Michel, 21 Nov): a still cover that earns the swipe, then Reel animations cropped to 4:5
+    as video slides, then a still closing question. Research (Nov 2026): 8 to 10 slides, hook on slide 1, slide 2
+    strong because Instagram re-serves unswiped carousels from slide 2, a swipe cue on slide 1."""
+    from .captions import drv
+    spec = CAROUSELS.get(kind)
+    if spec is None:
+        return None
+    out.mkdir(parents=True, exist_ok=True)
+    name = p.gp if getattr(p, "gp", None) else p.title.title()
+    vids, caps = [], []
+    if spec["parts"] == "last5":
+        _, _, f_, o_ = kind.split("_")[:4]
+        oc, ck, rot = _ctx(p)
+        ref = lap_of(oc, p.season, ck, "Race", rot)
+        D = deploy_data(oc, p.season, ck, f_.upper(), o_.upper(), ref, every=True)
+        if not D:
+            return None
+        for row in D["all"]:
+            Dl = dict(D) | {"lap": row["lap"], "f": row["f"], "o": row["o"]}
+            v = deployment(p, ref, Dl, out / f"lap_{row['lap']}.mp4", [f"Lap {row['lap']} of {D['n_laps']}.",
+                           ("They swap places." if row["changes"] else "No change.")],
+                           f"{name} {p.season}, {D['focus']} against {D['other']}", None)
+            vids.append(v)
+        changes = sum(1 for r in D["all"] for _ in range(r["changes"]))
+        cover = [s.format(changes=changes) for s in spec["cover"]]
+        caps.append(f"⚔️ {drv(D['focus'], p.colors)} against {drv(D['other'], p.colors)}, the last {len(D['all'])} laps of {name} {p.season}, one lap per slide.")
+    else:
+        for k in spec["parts"]:
+            b = build(p, k, out / k)
+            if b is not None:
+                vids.append(b[0])
+                caps.append(b[1].split("\n")[0])
+        cover = [s.format(name=name, k=len(vids) + 2) for s in spec["cover"]]
+    if len(vids) < 2:
+        return None
+    files = [_still(p, cover, f"{name} {p.season}", out / "slide_01.jpg")]
+    for i, v in enumerate(vids):
+        files.append(_crop_45(v, out / f"slide_{i + 2:02d}.mp4"))
+    files.append(_still(p, ["Who was your", "favourite driver today?"], f"{name} {p.season}", out / f"slide_{len(vids) + 2:02d}.jpg",
+                        cue=None, foot="Data: official timing and car data via OpenF1"))
+    files = files[:10]
+    cap = _cap(p, kind, *caps, "📐 Every number from official timing and car data. Swipe through.",
+               "💬 Who was your favourite driver today?")
+    return files, cap
 
 
 def L_code(Ls, k):
@@ -2307,6 +2421,27 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    f"📐 Our count from OpenF1 position swaps ({O['raw']} in total): pit stop swaps, safety car laps and "
                    "instant swap backs removed. Official counts can differ slightly.",
                    "💬 Who was your favourite driver today?")
+    elif kind in ("race_trace", "tyre_stints"):  # the race in one chart / every strategy (Michel, 21 Nov)
+        try:
+            RR = race_rows(oc, p.season, ck)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        if len(RR["trace"]) < 3:
+            return None
+        log.info("RACEROWS_JSON " + json.dumps(RR, separators=(",", ":")))
+        if kind == "race_trace":
+            race_trace(p, RR["trace"], RR["n"], video, ["The race in", "15 seconds"], f"{name} {p.season}, gap to the leader, top {len(RR['trace'])}",
+                       RR["final"])
+            cap = _cap(p, kind, f"📈 {name} {p.season}, the gap to the leader lap by lap: " + ", ".join(
+                           f"{r['code']} {RR['final'][r['code']]}" for r in RR["trace"]) + ".",
+                       "🛞 Dots are pit stops, from official timing.", "💬 Who was your favourite driver today?")
+        else:
+            stops = [len(r["stints"]) - 1 for r in RR["tyre"]]
+            tyre_stints(p, RR["tyre"], RR["n"], video, ["Every strategy", "in one picture"], f"{name} {p.season}, every driver's tyres")
+            cap = _cap(p, kind, f"🛞 {name} {p.season}: every driver's tyres, lap by lap, in finishing order.",
+                       f"⏱️ {sum(1 for s in stops if s == 1)} one stoppers, {sum(1 for s in stops if s == 2)} two stoppers, "
+                       f"{sum(1 for s in stops if s >= 3)} on three or more.", "💬 Who was your favourite driver today?")
     elif kind.startswith("deploy_"):             # Max's deployment strategy (Michel, 21 Nov)
         _, f_, o_ = kind.split("_")[:3]
         try:
