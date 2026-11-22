@@ -1466,7 +1466,7 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
     ys = np.interp([q["frac"] for q in passes], fr, R_["y"])
     ring = mp.scatter([], [], s=[], facecolors="none", edgecolors=[], linewidths=2, zorder=6)
     cnt = c.text(0.5, 0.30, "0", 96, weight=200)
-    c.text(0.5, 0.258, "ON TRACK PASSES", 13, color=P.MUTED, weight=600, track=True)
+    c.text(0.5, 0.258, "POSITION SWAPS ON TRACK", 13, color=P.MUTED, weight=600, track=True)
     lap_t = c.text(0.5, 0.228, "", 18, color=P.MUTED, weight=300)
     _foot(c, src)
     order = sorted(range(len(passes)), key=lambda k: passes[k]["lap"] + passes[k]["frac"])
@@ -2424,17 +2424,18 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         log.info("PASSES_JSON " + json.dumps({"passes": O["passes"], "raw": O["raw"], "laps": O["laps"], "neutral": O["neutral"],
                                               "ref": {k: ref[k] for k in ("x", "y", "dist", "t", "speed", "code", "lap_s")}},
                                              separators=(",", ":")))
-        overtakes_map(p, ref, O["passes"], O["laps"], video, [f"{len(O['passes'])} on track", "passes. Watch them"],
-                      f"{name} {p.season}, every on track pass", O["colors"], cf)
+        overtakes_map(p, ref, O["passes"], O["laps"], video, [f"{len(O['passes'])} position swaps", "on track. Watch them"],
+                      f"{name} {p.season}, every position swap on track", O["colors"], cf)
         tops = {}
         for q in O["passes"]:
             tops[q["who"]] = tops.get(q["who"], 0) + 1
         best = sorted(tops, key=lambda c_: -tops[c_])[:3]
-        cap = _cap(p, kind, f"🔁 {name} {p.season}: {len(O['passes'])} on track passes, every one on the map where it happened.",
+        cap = _cap(p, kind, f"🔁 {name} {p.season}: {len(O['passes'])} position swaps on track, every one on the map where it happened.",
                    "🏁 Most passes: " + ", ".join(f"{drv(c_, p.colors)} {tops[c_]}" for c_ in best) + ".",
                    f"🚦 {sum(1 for q in O['passes'] if q['lap'] == 1)} of them on lap 1. The hot spot on the map counts racing passes after lap 1.",
                    f"📐 Our count from OpenF1 position swaps ({O['raw']} in total): pit stop swaps, safety car laps and "
-                   "instant swap backs removed. Official counts can differ slightly.",
+                   "instant swap backs removed. Counts differ by method: we count every swap at a timing loop, including passes "
+                   "that were reversed later in the lap, so our number is higher than most published totals.",
                    "💬 Who was your favourite driver today?")
     elif kind in ("race_trace", "tyre_stints"):  # the race in one chart / every strategy (Michel, 21 Nov)
         try:
