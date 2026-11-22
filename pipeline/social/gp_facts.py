@@ -54,8 +54,23 @@ TYRES = {
             "https://press.pirelli.com/2019-abu-dhabi-grand-prix--preview/",
         ],
     },
-    # LUSAIL: Pirelli gives Qatar the hardest trio (C1 C2 C3); the cards now say "hardest 3 of 5"
-    # (see trio()), so the weekly facts task can add it.
+    "LUSAIL": {
+        "hard": "C1", "medium": "C2", "soft": "C3",
+        "range": 5,                     # 2026 range is C1 to C5, no C6
+        "streak": 4,                    # C1 C2 C3 in 2023, 2024, 2025 and 2026 (also 2021; no race in 2022)
+        "why": "Fast corners and high lateral loads stress the tyres",
+        "source": "Pirelli, 2026 compound selection (Motorsport.com, Tyrepress)",
+        "refs": [
+            "https://es.motorsport.com/f1/news/neumaticos-pirelli-qatar-vegas-abudhabi/10874388/",
+            "https://www.tyrepress.com/2026/11/pirelli-confirms-tyre-compound-selections-for-final-rounds-of-2026-f1-season/",
+            "https://press.pirelli.com/the-range-of-compounds-for-the-2026-season-has-been-set/",
+            "https://www.formula1.com/en/latest/article/what-tyres-will-the-teams-and-drivers-have-for-the-2025-qatar-grand-prix.5uM7XCc74nzDcQgtnJivy9",
+            "https://www.formula1.com/en/latest/article/what-tyres-will-the-teams-and-drivers-have-for-the-2024-qatar-grand-prix.3wg5fMRihKy4tF17WRrDvw",
+            "https://www.formula1.com/en/latest/article/what-tyres-will-the-teams-and-drivers-have-for-the-2023-qatar-grand-prix.7lwS2mAXKyyh7Un1AV8RVp",
+            "https://press.pirelli.com/another-new-beginning-in-qatar/",
+            "https://www.formula1.com/en/latest/article.what-tyres-will-the-teams-and-drivers-have-for-the-first-ever-qatar-grand.5EjA6dp5WuQRERP6WAcrUH.html",
+        ],
+    },
 }
 
 # Race day card: official race format, hand checked.
