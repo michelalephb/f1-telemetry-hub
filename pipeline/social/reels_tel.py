@@ -1656,6 +1656,189 @@ def battle_zone(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str,
     return r_.close()
 
 
+DEPLOY_SEGMENTS = {"LAS VEGAS": [("Main straight", 0.0, 0.045), ("The Strip", 0.53, 0.80),
+                                 ("T14 to T16", 0.80, 0.86), ("T16 to the line", 0.86, 1.0)]}
+
+
+def _anchored(oc, sk: int, lp, ref_t: np.ndarray, ref_d: np.ndarray, ref_sec: tuple, S: np.ndarray) -> dict:
+    """One lap of one car on a common distance grid. Distance is its own speed integrated from its official lap
+    start, then pinned to the reference lap at the timing anchors (sector 1 and 2 ends, the line), so integration
+    drift cannot build up over more than one sector. Returns absolute time (s, epoch) and speed at each grid point."""
+    t0 = pd.Timestamp(lp["date_start"])
+    lap_s = float(lp["lap_duration"])
+    win = [f"date>={(t0 - pd.Timedelta(seconds=2)).isoformat()}", f"date<={(t0 + pd.Timedelta(seconds=lap_s + 2)).isoformat()}"]
+    car = oc.frame("car_data", win, session_key=sk, driver_number=int(lp["driver_number"]))
+    ct = (pd.to_datetime(car["date"], format="ISO8601", utc=True) - t0).dt.total_seconds().to_numpy()
+    v = car["speed"].to_numpy(float)
+    g = np.concatenate([[0.0], ct[(ct > 0) & (ct < lap_s)], [lap_s]])
+    vg = np.interp(g, ct, v) / 3.6
+    s_int = np.concatenate([[0.0], np.cumsum(np.diff(g) * (vg[1:] + vg[:-1]) / 2)])
+    at_t, at_d = [0.0], [0.0]
+    s1, s2 = lp.get("duration_sector_1"), lp.get("duration_sector_2")
+    if pd.notna(s1) and pd.notna(s2) and all(q == q for q in ref_sec):
+        at_t += [float(s1), float(s1) + float(s2)]
+        at_d += [float(np.interp(ref_sec[0], ref_t, ref_d)), float(np.interp(ref_sec[0] + ref_sec[1], ref_t, ref_d))]
+    at_t.append(lap_s), at_d.append(float(ref_d[-1]))
+    s = np.interp(s_int, np.interp(at_t, g, s_int), at_d)
+    return {"t": (np.interp(S, s, g) + t0.timestamp()).tolist(), "v": (np.interp(S, s, vg) * 3.6).tolist(), "lap_s": lap_s}
+
+
+def deploy_data(oc, year: int, ck: int, focus: str, other: str, ref: dict, last: int = 5) -> dict:
+    """Focus driver against one rival over the last laps, full lap, on a 10 m grid (Michel, 21 Nov: Max's
+    deployment strategy against Antonelli). The lap shown is the last one with a lead change, else the last lap."""
+    sk = _session(oc, year, ck, "Race")
+    codes, cols = _codes(oc, sk)
+    num = {v_: k for k, v_ in codes.items()}
+    laps = oc.frame("laps", session_key=sk)
+    laps = laps[laps["lap_duration"].notna()]
+    n_laps = int(laps["lap_number"].max())
+    ref_t, ref_d = np.array(ref["t"], float), np.array(ref["dist"], float)
+    rl = laps[(laps["driver_number"] == num[ref["code"]]) & (laps["lap_number"] == ref["lap"])].iloc[0]
+    ref_sec = (float(rl["duration_sector_1"]) if pd.notna(rl["duration_sector_1"]) else float("nan"),
+               float(rl["duration_sector_2"]) if pd.notna(rl["duration_sector_2"]) else float("nan"))
+    S = np.arange(0.0, ref_d[-1], 10.0)
+    rows = []
+    for L in range(n_laps - last + 1, n_laps + 1):
+        got = {}
+        for k, c in (("f", focus), ("o", other)):
+            lp = laps[(laps["driver_number"] == num[c]) & (laps["lap_number"] == L)]
+            if lp.empty:
+                break
+            got[k] = _anchored(oc, sk, lp.iloc[0], ref_t, ref_d, ref_sec, S)
+        if len(got) == 2:
+            lead = np.where(np.array(got["f"]["t"]) < np.array(got["o"]["t"]), 1, -1)
+            rows.append({"lap": L, "changes": int(np.sum(np.diff(lead) != 0)), **got})
+    pick = next((r for r in reversed(rows) if r["changes"]), rows[-1] if rows else None)
+    if pick is None:
+        return {}
+    t0 = min(pick["f"]["t"][0], pick["o"]["t"][0])
+    for k in ("f", "o"):
+        pick[k]["t"] = [round(q - t0, 3) for q in pick[k]["t"]]
+        pick[k]["v"] = [round(q, 1) for q in pick[k]["v"]]
+    return {"focus": focus, "other": other, "colors": {focus: cols.get(focus), other: cols.get(other)}, "S": S.tolist(),
+            "lap": pick["lap"], "f": pick["f"], "o": pick["o"], "n_laps": n_laps,
+            "changes": {r["lap"]: r["changes"] for r in rows}}
+
+
+def deployment(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, segments: list | None = None,
+               src: str = "Speed: official car data, timing anchored. Deployment read from speed, battery data is not public",
+               mark: str | None = None) -> Path:
+    """Max's deployment strategy (Michel, 21 Nov): one lap, two cars, the whole track. The track paints itself in
+    the colour of whoever is faster at each point once both cars have passed it, every pass gets a ring, the speed
+    difference fills in below, and four straight line verdicts close it: where the focus driver held back and where
+    he attacked."""
+    from matplotlib.collections import LineCollection
+    P.set_event(p)
+    F, O = D["focus"], D["other"]
+    col = {F: D["colors"][F] or P.CYAN, O: D["colors"][O] or P.TEXT}
+    if col[F].lower() == col[O].lower():
+        col[O] = P.TEXT
+    S = np.array(D["S"])
+    tf, to_, vf, vo = (np.array(D[k][q]) for k, q in (("f", "t"), ("o", "t"), ("f", "v"), ("o", "v")))
+    Lr = float(ref["dist"][-1])
+    rx, ry, rd = (np.array(ref[k], float) for k in ("x", "y", "dist"))
+    X, Y = np.interp(S, rd, rx), np.interp(S, rd, ry)
+    dv = np.array([np.median((vf - vo)[max(0, i - 7):i + 8]) for i in range(len(S))])   # 150 m median
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    if mark:
+        c.text(0.5, 0.712, mark, 13, color=P.GOLD, weight=700, track=True)
+    mp = _track(c, [0.06, 0.445, 0.88, 0.25], X, Y, lw=12)
+    seg = np.stack([np.column_stack([X[:-1], Y[:-1]]), np.column_stack([X[1:], Y[1:]])], axis=1)
+    segc = [col[F] if d > 1.5 else col[O] if d < -1.5 else "#3A4458" for d in dv[:-1]]
+    lc = LineCollection([], linewidths=12, capstyle="round", zorder=2)
+    mp.add_collection(lc)
+    dot = {k: mp.plot([], [], "o", ms=15, color=col[k], mec="#0B0E14", mew=2, zorder=6)[0] for k in (F, O)}
+    lead = np.where(tf < to_, 1, -1)
+    passes = [i + 1 for i in np.where(np.diff(lead) != 0)[0]]
+    rings = []
+    for i in passes:
+        who = F if lead[i] == 1 else O
+        r1 = mp.scatter([X[i]], [Y[i]], s=900, facecolors="none", edgecolors=col[who], linewidths=3, zorder=7, alpha=0)
+        x_lo, x_hi = mp.get_xlim()
+        side = "right" if X[i] > (x_lo + x_hi) / 2 else "left"
+        r2 = mp.annotate(f"{who} PASSES", (X[i], Y[i]), xytext=(-26 if side == "right" else 26, 26), textcoords="offset points",
+                         ha=side, fontsize=16, color=col[who], family=P.FONT, weight=700, zorder=8, alpha=0)
+        rings.append((i, r1, r2))
+    clk = c.text(0.5, 0.425, "", 30, weight=200)
+    c.text(0.5, 0.405, f"{F} LAP {D['lap']} OF {D['n_laps']}", 12, color=P.MUTED, weight=600, track=True)
+    gap_t = c.text(0.5, 0.372, "", 22, weight=700)
+    ax = c.fig.add_axes([0.08, 0.235, 0.84, 0.10])
+    lim = max(8.0, float(np.percentile(np.abs(dv), 98)) * 1.15)
+    ax.set_xlim(0, Lr), ax.set_ylim(-lim, lim)
+    ax.axis("off")
+    ax.axhline(0, color="#3A4458", lw=1)
+    labels = [c.text(0.08, 0.343, f"{F} SPEED MINUS {O}, KM/H", 11, color=P.MUTED, weight=600, ha="left", track=True),
+              c.text(0.08, 0.322, f"{F} faster", 11, color=col[F], weight=600, ha="left"),
+              c.text(0.08, 0.245, f"{O} faster", 11, color=col[O], weight=600, ha="left")]
+    _foot(c, src)
+    r_ = Reel(out)
+    T0, T1 = 0.0, max(tf[-1], to_[-1])
+    n = int(13 * FPS)
+    fills = []
+    for i in range(n + 1):
+        tt = T0 + (T1 - T0) * i / n
+        sf, so = float(np.interp(tt, tf, S)), float(np.interp(tt, to_, S))
+        for k, s_ in ((F, sf), (O, so)):
+            dot[k].set_data([np.interp(s_, rd, rx)], [np.interp(s_, rd, ry)])
+        m = int(np.searchsorted(S, min(sf, so)))
+        lc.set_segments(seg[:m]), lc.set_color(segc[:m])
+        for f_ in fills:
+            f_.remove()
+        fills = [ax.fill_between(S[:m], 0, dv[:m], where=dv[:m] >= 0, color=col[F], alpha=0.85, lw=0),
+                 ax.fill_between(S[:m], 0, dv[:m], where=dv[:m] < 0, color=col[O], alpha=0.85, lw=0)]
+        for j, r1, r2 in rings:
+            a = 1.0 if m > j else 0.0
+            r1.set_alpha(a), r2.set_alpha(a)
+        clk.set_text(_clock(max(0.0, min(tt - tf[0], D["f"]["lap_s"]))))
+        ahead, behind = (F, O) if sf >= so else (O, F)
+        ta_ = tf if ahead == F else to_
+        g = tt - float(np.interp(min(sf, so), S, ta_))
+        if i == n:
+            ahead = F if tf[-1] < to_[-1] else O
+            g = abs(tf[-1] - to_[-1])
+        gap_t.set_text(f"{ahead} AHEAD +{max(g, 0):.2f} s"), gap_t.set_color(col[ahead])
+        r_.add(c.fig)
+    r_.add(c.fig, int(1.0 * FPS))
+    if segments:                                 # verdict card: mean speed difference per straight
+        for f_ in fills:
+            f_.remove()
+        ax.set_visible(False)
+        for lb in labels:
+            lb.set_visible(False)
+        clk.set_text("")
+        box = c.fig.add_axes([0.08, 0.195, 0.84, 0.150])
+        box.axis("off"), box.set_xlim(0, 1), box.set_ylim(0, 1)
+        box.add_patch(plt.Rectangle((0, 0), 1, 1, color="#0B0E14", zorder=0))
+        box.text(0.0, 0.94, f"{F} AGAINST {O}, AVERAGE SPEED DIFFERENCE", fontsize=12, color=P.MUTED, family=P.FONT, weight=600)
+        vals = []
+        for nm, a0, a1 in segments:
+            mm = (S >= a0 * Lr) & (S <= a1 * Lr)
+            vals.append((nm, float(np.mean(vf[mm] - vo[mm]))))
+        big = max(abs(v_) for _, v_ in vals) or 1
+        rows = []
+        for k, (nm, v_) in enumerate(vals):
+            yy = 0.76 - k * 0.20
+            box.text(0.0, yy, nm, fontsize=17, color=P.TEXT, family=P.FONT, weight=700, va="center")
+            cc = col[F] if v_ >= 0 else col[O]
+            bar = box.add_patch(plt.Rectangle((0.62, yy - 0.04), 0, 0.08, color=cc))
+            tx = box.text(0.62 + (0.20 if v_ >= 0 else -0.20), yy, "", fontsize=17, color=cc, family=P.FONT, weight=700,
+                          va="center", ha="left" if v_ >= 0 else "right")
+            rows.append((bar, v_, tx))
+        box.plot([0.62, 0.62], [0.05, 0.88], color="#3A4458", lw=1)
+        m2 = int(2.2 * FPS)
+        for i in range(m2 + 1):
+            for k, (bar, v_, tx) in enumerate(rows):
+                e = _ease(i / m2 * 2 - k * 0.3)
+                w = 0.17 * abs(v_) / big * e
+                bar.set_x(0.62 if v_ >= 0 else 0.62 - w), bar.set_width(w)
+                tx.set_text(f"{v_:+.1f} km/h" if e >= 1 else "")
+            r_.add(c.fig)
+        r_.add(c.fig, int(3.0 * FPS))
+    plt.close(c.fig)
+    return r_.close()
+
+
 def L_code(Ls, k):
     return Ls[k]["code"]
 
@@ -2123,6 +2306,32 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "🏁 Most passes: " + ", ".join(f"{drv(c_, p.colors)} {tops[c_]}" for c_ in best) + ".",
                    f"📐 Our count from OpenF1 position swaps ({O['raw']} in total): pit stop swaps, safety car laps and "
                    "instant swap backs removed. Official counts can differ slightly.",
+                   "💬 Who was your favourite driver today?")
+    elif kind.startswith("deploy_"):             # Max's deployment strategy (Michel, 21 Nov)
+        _, f_, o_ = kind.split("_")[:3]
+        try:
+            ref = lap_of(oc, p.season, ck, "Race", rot)
+            D = deploy_data(oc, p.season, ck, f_.upper(), o_.upper(), ref)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        if not D:
+            return None
+        log.info("DEPLOY_JSON " + json.dumps({"D": D, "ref": {k: ref[k] for k in ("x", "y", "dist", "t", "code", "lap")}},
+                                            separators=(",", ":")))
+        F_, O_ = D["focus"], D["other"]
+        nm_f = drv(F_, p.colors).split()[0]           # "Max's deployment strategy" (Michel)
+        deployment(p, ref, D, video, [f"{nm_f}'s deployment strategy.", "Watch where he attacks."],
+                   f"{name} {p.season}, lap {D['lap']}, against {O_}", DEPLOY_SEGMENTS.get(p.title))
+        Sx = np.array(D["S"]); Lr = Sx[-1] + 10
+        dvs = np.array(D["f"]["v"]) - np.array(D["o"]["v"])
+        seg_txt = ", ".join(f"{nm} {np.mean(dvs[(Sx >= a0 * Lr) & (Sx <= a1 * Lr)]):+.1f} km/h"
+                            for nm, a0, a1 in DEPLOY_SEGMENTS.get(p.title, []))
+        win = F_ if D["f"]["t"][-1] < D["o"]["t"][-1] else O_
+        cap = _cap(p, kind, f"🔋 {drv(F_, p.colors)}'s deployment strategy against {drv(O_, p.colors)}, lap {D['lap']} of {name} {p.season}.",
+                   *([f"📈 Average speed difference, {F_} minus {O_}: {seg_txt}."] if seg_txt else []),
+                   f"🏁 {win} ahead at the line by {abs(D['f']['t'][-1] - D['o']['t'][-1]):.2f} s.",
+                   "📐 Speed from official car data, positions anchored to timing at each sector line. Battery data is not public, so deployment is read from speed.",
                    "💬 Who was your favourite driver today?")
     elif kind.startswith("battle_"):             # two cars, one corner sequence, last 5 laps (Michel, 21 Nov)
         _, a_, b_ = kind.split("_")[:3]
