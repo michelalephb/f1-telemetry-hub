@@ -203,12 +203,13 @@ def race_pace(p, D: dict, out: Path, hook: list[str], sub: str,
     lines = {k: ax.plot([], [], color=T[k]["color"], lw=4, solid_capstyle="round", zorder=3)[0] for k in names}
     tags = {k: ax.text(0, 0, "", fontsize=15, color=T[k]["color"], family=P.FONT, weight=700, va="center") for k in names}
     best_med = min(T[k]["median"] for k in names)
-    rows = [("RACE PACE", "median clean lap, gap to the quickest team", {k: T[k]["median"] - best_med for k in names}, "+{:.2f} s", False),
-            ("TYRE WEAR", "lap time lost per lap within a stint", {k: T[k]["wear"] for k in names}, "{:+.3f} s", False),
-            ("STRAIGHT LINE", "median speed trap, km/h", {k: T[k]["trap"] for k in names}, "{:.0f}", True)]
+    rows = [("RACE PACE", "median clean lap, gap to the quickest team", {k: T[k]["median"] - best_med for k in names}, "+{:.2f} s", False, 0.5),
+            ("TYRE WEAR", "extra time lost per lap in a stint, vs the best team", {k: T[k]["wear"] - min(T[q]["wear"] for q in names)
+                                                                                  for k in names}, "+{:.3f} s", False, 0.1),
+            ("STRAIGHT LINE", "median speed trap, km/h", {k: T[k]["trap"] for k in names}, "{:.0f}", True, 40.0)]
     y = 0.470
     bars = []
-    for title, subt, vals, fmt, hi_good in rows:
+    for title, subt, vals, fmt, hi_good, span in rows:   # fixed span: close values look close
         c.text(0.08, y, title, 17, color=P.TEXT, weight=700, ha="left", track=True)
         c.text(0.08, y - 0.016, subt, 12, color=P.MUTED, weight=400, ha="left")
         ok = {k: v for k, v in vals.items() if v == v}
@@ -218,11 +219,12 @@ def race_pace(p, D: dict, out: Path, hook: list[str], sub: str,
             yy = y - 0.032 - j * 0.017
             c.text(0.08, yy, k.upper(), 13, color=T[k]["color"], weight=700, ha="left")
             v = vals[k]
-            nrm = 0.5 if v != v else ((v - lo_v) / (hi_v - lo_v + 1e-9) if hi_good else (hi_v - v) / (hi_v - lo_v + 1e-9))
+            nrm = 0.5 if v != v else (1 - (hi_v - v) / span if hi_good else 1 - (v - lo_v) / span)
+            nrm = min(1.0, max(0.05, nrm))
             r = plt.Rectangle((0.30, yy - 0.005), 0.0, 0.010, transform=c.fig.transFigure, fc=T[k]["color"], alpha=0.9)
             c.fig.add_artist(r)
             tx = c.text(0.92, yy, "", 15, color=P.GOLD if k == best else P.TEXT, weight=700 if k == best else 300, ha="right")
-            bars.append((r, 0.55 + 0.45 * nrm, tx, "n/a" if v != v else fmt.format(v), len(bars) // len(names)))
+            bars.append((r, nrm, tx, "n/a" if v != v else fmt.format(v), len(bars) // len(names)))
         y -= 0.032 + len(names) * 0.017 + 0.010
     for ev in D.get("events", []):                 # race control incidents, drawn as they are reached
         ev["_l"] = ax.axvline(ev["lap"], color=P.GOLD, lw=1.5, ls=(0, (3, 3)), alpha=0, zorder=1)
@@ -1656,6 +1658,8 @@ def battle_zone(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str,
     return r_.close()
 
 
+FIRST_NAMES = {"VER": "Max", "ANT": "Kimi", "RUS": "George", "LEC": "Charles", "HAM": "Lewis", "NOR": "Lando",
+               "PIA": "Oscar", "HAD": "Isack", "ALO": "Fernando", "GAS": "Pierre", "SAI": "Carlos", "ALB": "Alex"}
 DEPLOY_SEGMENTS = {"LAS VEGAS": [("Main straight", 0.0, 0.045), ("The Strip", 0.53, 0.80),
                                  ("T14 to T16", 0.80, 0.86), ("T16 to the line", 0.86, 1.0)]}
 
@@ -1751,6 +1755,14 @@ def deployment(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, segm
     dot = {k: mp.plot([], [], "o", ms=15, color=col[k], mec="#0B0E14", mew=2, zorder=6)[0] for k in (F, O)}
     lead = np.where(tf < to_, 1, -1)
     passes = [i + 1 for i in np.where(np.diff(lead) != 0)[0]]
+    keep, k = [], 0                              # side by side swaps within 200 m cancel out: no label clutter
+    while k < len(passes):
+        if k + 1 < len(passes) and S[passes[k + 1]] - S[passes[k]] < 200:
+            k += 2
+            continue
+        keep.append(passes[k])
+        k += 1
+    passes = keep
     rings = []
     for i in passes:
         who = F if lead[i] == 1 else O
@@ -1810,7 +1822,7 @@ def deployment(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, segm
         box = c.fig.add_axes([0.08, 0.195, 0.84, 0.150])
         box.axis("off"), box.set_xlim(0, 1), box.set_ylim(0, 1)
         box.add_patch(plt.Rectangle((0, 0), 1, 1, color="#0B0E14", zorder=0))
-        box.text(0.0, 0.94, f"{F} AGAINST {O}, AVERAGE SPEED DIFFERENCE", fontsize=12, color=P.MUTED, family=P.FONT, weight=600)
+        box.text(0.0, 0.94, "WHO WAS FASTER, AVERAGE SPEED", fontsize=12, color=P.MUTED, family=P.FONT, weight=600)
         vals = []
         for nm, a0, a1 in segments:
             mm = (S >= a0 * Lr) & (S <= a1 * Lr)
@@ -1832,7 +1844,7 @@ def deployment(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, segm
                 e = _ease(i / m2 * 2 - k * 0.3)
                 w = 0.17 * abs(v_) / big * e
                 bar.set_x(0.62 if v_ >= 0 else 0.62 - w), bar.set_width(w)
-                tx.set_text(f"{v_:+.1f} km/h" if e >= 1 else "")
+                tx.set_text(f"{F if v_ >= 0 else O} +{abs(v_):.1f} km/h" if e >= 1 else "")   # no minus signs (house style)
             r_.add(c.fig)
         r_.add(c.fig, int(3.0 * FPS))
     plt.close(c.fig)
@@ -2455,16 +2467,16 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         log.info("DEPLOY_JSON " + json.dumps({"D": D, "ref": {k: ref[k] for k in ("x", "y", "dist", "t", "code", "lap")}},
                                             separators=(",", ":")))
         F_, O_ = D["focus"], D["other"]
-        nm_f = drv(F_, p.colors).split()[0]           # "Max's deployment strategy" (Michel)
+        nm_f = FIRST_NAMES.get(F_, F_)                  # "Max's deployment strategy" (Michel)
         deployment(p, ref, D, video, [f"{nm_f}'s deployment strategy.", "Watch where he attacks."],
                    f"{name} {p.season}, lap {D['lap']}, against {O_}", DEPLOY_SEGMENTS.get(p.title))
         Sx = np.array(D["S"]); Lr = Sx[-1] + 10
         dvs = np.array(D["f"]["v"]) - np.array(D["o"]["v"])
-        seg_txt = ", ".join(f"{nm} {np.mean(dvs[(Sx >= a0 * Lr) & (Sx <= a1 * Lr)]):+.1f} km/h"
-                            for nm, a0, a1 in DEPLOY_SEGMENTS.get(p.title, []))
+        seg_txt = ", ".join(f"{nm}: {F_ if mv >= 0 else O_} +{abs(mv):.1f} km/h" for nm, mv in
+                            ((nm, float(np.mean(dvs[(Sx >= a0 * Lr) & (Sx <= a1 * Lr)]))) for nm, a0, a1 in DEPLOY_SEGMENTS.get(p.title, [])))
         win = F_ if D["f"]["t"][-1] < D["o"]["t"][-1] else O_
-        cap = _cap(p, kind, f"🔋 {drv(F_, p.colors)}'s deployment strategy against {drv(O_, p.colors)}, lap {D['lap']} of {name} {p.season}.",
-                   *([f"📈 Average speed difference, {F_} minus {O_}: {seg_txt}."] if seg_txt else []),
+        cap = _cap(p, kind, f"🔋 {nm_f}'s deployment strategy against {drv(O_, p.colors)}, lap {D['lap']} of {name} {p.season}.",
+                   *([f"📈 Who was faster on average, and by how much: {seg_txt}."] if seg_txt else []),
                    f"🏁 {win} ahead at the line by {abs(D['f']['t'][-1] - D['o']['t'][-1]):.2f} s.",
                    "📐 Speed from official car data, positions anchored to timing at each sector line. Battery data is not public, so deployment is read from speed.",
                    "💬 Who was your favourite driver today?")
@@ -2519,7 +2531,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         best = min(T, key=lambda k: T[k]["median"])
         cap = _cap(p, kind, f"⏱️ Race pace in {name}, clean laps only: " + ", ".join(
                        f"{k} {'quickest' if k == best else '+' + format(T[k]['median'] - T[best]['median'], '.2f') + ' s'}" for k in sorted(T, key=lambda k: T[k]["median"])) + ".",
-                   "🛞 Tyre wear, lap time lost per lap in a stint: " + ", ".join(f"{k} {T[k]['wear']:+.3f} s" for k in T if T[k]["wear"] == T[k]["wear"]) + ".",
+                   "🛞 Tyre wear, extra time lost per lap in a stint against the best team (fuel burn is similar for every car, so it largely cancels): "
+                   + ", ".join(f"{k} +{T[k]['wear'] - min(T[q]['wear'] for q in T):.3f} s" for k in T if T[k]["wear"] == T[k]["wear"]) + ".",
                    "🚀 Median speed trap: " + ", ".join(f"{k} {T[k]['trap']:.0f} km/h" for k in T if T[k]["trap"] == T[k]["trap"]) + ".",
                    *[f"⚠️ Lap {e['lap']}: race control noted {' and '.join(e['who'])} {e['what']}." for e in D.get("events", [])],
                    "📐 Clean laps: no lap 1, pit in or out laps, safety car laps or laps over 107% of the driver's median.",
