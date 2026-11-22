@@ -115,6 +115,23 @@ def _neutral_laps(rc: list[dict]) -> set[int]:
     return neutral
 
 
+def race_incidents(rc: list[dict], codes: list[str]) -> list[dict]:
+    """Incidents race control logged against the given drivers (e.g. HAM and LEC contact, lap 38, Michel 21 Nov).
+    Only what race control wrote is used, so nothing is drawn from a TV report alone. One entry per lap."""
+    import re
+    seen, out = set(), []
+    for r in sorted(rc, key=lambda r: r["date"]):
+        msg, ln = (r.get("message") or "").upper(), r.get("lap_number")
+        if ln is None or "INCIDENT" not in msg or "NO FURTHER" in msg or int(ln) in seen:
+            continue
+        who = [c for c in re.findall(r"\(([A-Z]{3})\)", msg) if c in codes]
+        if who:
+            seen.add(int(ln))
+            out.append({"lap": int(ln), "who": sorted(set(who), key=who.index),
+                        "what": "contact" if "COLLISION" in msg or "CONTACT" in msg else "incident"})
+    return out
+
+
 def race_pace_data(oc, year: int, ck: int, teams: list[str]) -> dict:
     """Clean race laps per team (Michel, 21 Nov): no lap 1, no pit in or out laps, no safety car, VSC or red flag
     laps, no laps over 107% of the driver's median (traffic, incidents). Per team: lap times by lap, median clean
@@ -124,7 +141,8 @@ def race_pace_data(oc, year: int, ck: int, teams: list[str]) -> dict:
     codes, cols = _codes(oc, sk)
     laps = oc.frame("laps", session_key=sk)
     stints = oc.get("stints", session_key=sk)
-    neutral = _neutral_laps(oc.get("race_control", session_key=sk))
+    rc = oc.get("race_control", session_key=sk)
+    neutral = _neutral_laps(rc)
     pit_in = {(int(r["driver_number"]), int(r["lap_number"])) for r in oc.get("pit", session_key=sk)}
     laps = laps[laps["lap_duration"].notna() & (laps["lap_number"] > 1)].copy()
     laps["code"] = laps["driver_number"].map(lambda n: codes.get(int(n)))
@@ -152,7 +170,7 @@ def race_pace_data(oc, year: int, ck: int, teams: list[str]) -> dict:
                      "wear": float(np.median(slopes)) if slopes else float("nan"),
                      "trap": float(g["st_speed"].median()) if "st_speed" in g and g["st_speed"].notna().any() else float("nan"),
                      "drivers": members, "n": int(len(g))}
-    return {"teams": out, "laps": n_laps}
+    return {"teams": out, "laps": n_laps, "events": race_incidents(rc, [d for v in out.values() for d in v["drivers"]])}
 
 
 def race_pace(p, D: dict, out: Path, hook: list[str], sub: str,
@@ -206,6 +224,11 @@ def race_pace(p, D: dict, out: Path, hook: list[str], sub: str,
             tx = c.text(0.92, yy, "", 15, color=P.GOLD if k == best else P.TEXT, weight=700 if k == best else 300, ha="right")
             bars.append((r, 0.55 + 0.45 * nrm, tx, "n/a" if v != v else fmt.format(v), len(bars) // len(names)))
         y -= 0.032 + len(names) * 0.017 + 0.010
+    for ev in D.get("events", []):                 # race control incidents, drawn as they are reached
+        ev["_l"] = ax.axvline(ev["lap"], color=P.GOLD, lw=1.5, ls=(0, (3, 3)), alpha=0, zorder=1)
+        ev["_t"] = ax.text(ev["lap"], lo + (hi - lo) * 0.04, f"L{ev['lap']} {' and '.join(ev['who'])} {ev['what']}",
+                           fontsize=12, color=P.GOLD, family=P.FONT, weight=700, alpha=0,
+                           ha="right" if ev["lap"] > D["laps"] * 0.6 else "left")
     _foot(c, src)
     r_ = Reel(out)
     n1 = int(9 * FPS)
@@ -216,6 +239,9 @@ def race_pace(p, D: dict, out: Path, hook: list[str], sub: str,
             m = x <= xl
             dots[k].set_data(x[m], yv[m])
             lines[k].set_data(x[m], ys[m])
+        for ev in D.get("events", []):
+            a = 1.0 if xl >= ev["lap"] else 0.0
+            ev["_l"].set_alpha(0.8 * a), ev["_t"].set_alpha(a)
         live = sorted((ys[x <= xl][-1], k) for k, (x, _, ys) in sm.items() if (x <= xl).any())
         prev = None
         for yv_, k in live:                    # keep end tags apart, at least 9% of the axis
@@ -1974,6 +2000,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                        f"{k} {'quickest' if k == best else '+' + format(T[k]['median'] - T[best]['median'], '.2f') + ' s'}" for k in sorted(T, key=lambda k: T[k]["median"])) + ".",
                    "🛞 Tyre wear, lap time lost per lap in a stint: " + ", ".join(f"{k} {T[k]['wear']:+.3f} s" for k in T if T[k]["wear"] == T[k]["wear"]) + ".",
                    "🚀 Median speed trap: " + ", ".join(f"{k} {T[k]['trap']:.0f} km/h" for k in T if T[k]["trap"] == T[k]["trap"]) + ".",
+                   *[f"⚠️ Lap {e['lap']}: race control noted {' and '.join(e['who'])} {e['what']}." for e in D.get("events", [])],
                    "📐 Clean laps: no lap 1, pit in or out laps, safety car laps or laps over 107% of the driver's median.",
                    "💬 Who was your favourite driver today?")
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
