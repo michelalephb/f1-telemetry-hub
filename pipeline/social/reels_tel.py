@@ -1111,6 +1111,134 @@ def strengths(p, laps: list[dict], official: list[float], out: Path, hook: list[
     return r_.close()
 
 
+def _spread(tags, top, gap_frac: float = 0.045):
+    """Push line end labels apart vertically (data units) so they never overlap."""
+    order = sorted(range(len(tags)), key=lambda q: tags[q].get_position()[1])
+    min_d = top * gap_frac
+    last = None
+    for q in order:
+        x, y = tags[q].get_position()
+        if last is not None and y - last < min_d:
+            y = last + min_d
+            tags[q].set_position((x, y))
+        last = y
+
+
+def race_trace(p, rows: list[dict], laps: int, out: Path, hook: list[str], sub: str, final: dict[str, str],
+               src: str = "Gaps: official lap timing. Pit stops: official timing", mark: str | None = None) -> Path:
+    """The race in one chart (Michel, 21 Nov): each driver's gap to the leader draws itself lap by lap, pit stops
+    pop as dots, a big lap counter ticks, and it ends on the official finishing gaps. rows: [{code, color,
+    gaps: seconds behind the leader at the end of each lap (len laps), pits: [lap numbers]}], leader first."""
+    P.set_event(p)
+    used, cols = set(), []
+    for r in rows:                                                # team mate: a lighter shade of the team colour
+        cc = (r.get("color") or P.CYAN).lower()
+        if cc in used:
+            rgb = [int(cc[k:k + 2], 16) for k in (1, 3, 5)]
+            cc = "#" + "".join(f"{int(v + (255 - v) * 0.55):02x}" for v in rgb)
+        cols.append(cc)
+        used.add((r.get("color") or P.CYAN).lower())
+    G = [np.array(r["gaps"], float) for r in rows]
+    racing = [np.delete(g, [pp - 1 for pp in r.get("pits", [])] + [pp for pp in r.get("pits", []) if pp < len(g)]) for r, g in zip(rows, G)]
+    top = max(5.0, float(np.nanmax([g.max() for g in racing])) * 1.15)   # scale on racing gaps; pit dips run off the bottom
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    if mark:
+        c.text(0.5, 0.712, mark, 13, color=P.GOLD, weight=700, track=True)
+    ax = c.fig.add_axes([0.10, 0.30, 0.72, 0.39])
+    ax.set_xlim(1, laps), ax.set_ylim(top, -top * 0.04)          # leader on top, further back = lower
+    ax.axis("off")
+    for gl in np.arange(0, top, 5 if top < 40 else 10):
+        ax.axhline(gl, color="#1A2130", lw=1, zorder=0)
+        ax.text(0.6, gl, f"{gl:.0f}s" if gl else "LEADER", fontsize=11, color=P.MUTED, family=P.FONT, va="center", ha="right")
+    lines = [ax.plot([], [], color=cc, lw=3.5, solid_capstyle="round", zorder=3)[0] for cc in cols]
+    tags = [ax.text(0, 0, "", fontsize=15, color=cc, family=P.FONT, weight=700, va="center") for cc in cols]
+    dots = [ax.plot([], [], "o", ms=9, color=cc, mec=P.BG if hasattr(P, "BG") else "#0B0E14", mew=2, zorder=4)[0] for cc in cols]
+    lap_t = c.text(0.5, 0.255, "", 48, weight=200)
+    c.text(0.5, 0.222, "LAP", 13, color=P.MUTED, weight=600, track=True)
+    _foot(c, src)
+    r_ = Reel(out)
+    n = int(13 * FPS)
+    for i in range(n + 1):
+        x = 1 + (laps - 1) * i / n
+        k = int(np.floor(x))
+        for r, g, ln, tg, dt in zip(rows, G, lines, tags, dots):
+            xs = np.arange(1, k + 1)
+            ys = g[:k]
+            if k < laps:                                          # smooth head between laps
+                xs = np.append(xs, x)
+                ys = np.append(ys, g[k - 1] + (g[k] - g[k - 1]) * (x - k))
+            ln.set_data(xs, ys)
+            tg.set_position((xs[-1] + laps * 0.012, min(ys[-1], top))), tg.set_text(r["code"])
+            pl = [pp for pp in r.get("pits", []) if pp <= x]
+            dt.set_data(pl, [g[pp - 1] for pp in pl])
+        _spread(tags, top)
+        lap_t.set_text(f"{min(k, laps)}/{laps}")
+        r_.add(c.fig)
+    for r, tg, g in zip(rows, tags, G):
+        tg.set_position((laps * 1.012, min(g[-1], top)))
+        tg.set_text(f"{r['code']} {final.get(r['code'], '')}".strip())
+    _spread(tags, top)
+    lap_t.set_text("FLAG")
+    lap_t.set_color(P.GOLD)
+    r_.add(c.fig, int(3.5 * FPS))
+    plt.close(c.fig)
+    return r_.close()
+
+
+def tyre_stints(p, rows: list[dict], laps: int, out: Path, hook: list[str], sub: str,
+                src: str = "Stints and compounds: official timing", mark: str | None = None) -> Path:
+    """Every driver's race as one bar that grows lap by lap in the colour of the tyre on the car; pit stops are the
+    joins. Ends on the count of one and two stoppers. rows: [{code, color, stints: [(compound, first lap, last lap)]}]."""
+    from .gp_facts import COMPOUND_COLOR
+    P.set_event(p)
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    if mark:
+        c.text(0.5, 0.712, mark, 13, color=P.GOLD, weight=700, track=True)
+    n_r = len(rows)
+    y_top, y_bot = 0.69, 0.31
+    step = (y_top - y_bot) / max(n_r, 1)
+    x0, x1 = 0.20, 0.90
+    bars = []
+    for k, r in enumerate(rows):
+        y = y_top - (k + 0.5) * step
+        c.text(0.08, y, r["code"], 15, color=r.get("color") or P.TEXT, weight=700, ha="left")
+        segs = []
+        for cp, a, b in r["stints"]:
+            rect = plt.Rectangle((x0 + (x1 - x0) * (a - 1) / laps, y - step * 0.32), 0.0, step * 0.64,
+                                 transform=c.fig.transFigure, fc=COMPOUND_COLOR.get(cp.upper(), P.TEXT), ec="#0B0E14", lw=1.5)
+            c.fig.add_artist(rect)
+            segs.append((rect, a, b))
+        bars.append(segs)
+    for xl, lab in ((x0, "LAP 1"), (x1, f"LAP {laps}")):
+        c.text(xl, y_bot - 0.012, lab, 11, color=P.MUTED, weight=600, track=True)
+    used_c = [cp for cp in ("SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET") if any(s[0].upper() == cp for r in rows for s in r["stints"])]
+    for k, cp in enumerate(used_c):                                 # legend
+        xl = 0.5 + (k - (len(used_c) - 1) / 2) * 0.18
+        c.fig.add_artist(plt.Rectangle((xl - 0.07, y_bot - 0.034), 0.022, 0.010, transform=c.fig.transFigure, fc=COMPOUND_COLOR[cp]))
+        c.text(xl - 0.042, y_bot - 0.029, cp, 12, color=P.TEXT, weight=600, ha="left", track=True)
+    lap_t = c.text(0.5, 0.245, "", 44, weight=200)
+    stops = [len(r["stints"]) - 1 for r in rows]
+    _foot(c, src)
+    r_ = Reel(out)
+    n = int(11 * FPS)
+    for i in range(n + 1):
+        x = laps * i / n
+        for segs in bars:
+            for rect, a, b in segs:
+                done = min(max(x - (a - 1), 0), b - a + 1)
+                rect.set_width((x1 - x0) * done / laps)
+        lap_t.set_text(f"LAP {max(1, int(x))}")
+        r_.add(c.fig)
+    one, two = stops.count(1), sum(1 for s in stops if s >= 2)
+    lap_t.set_text(f"{one} one stop, {two} two stop")
+    lap_t.set_color(P.GOLD)
+    r_.add(c.fig, int(3.5 * FPS))
+    plt.close(c.fig)
+    return r_.close()
+
+
 def L_code(Ls, k):
     return Ls[k]["code"]
 
