@@ -100,6 +100,58 @@ def lap_of(oc, year: int, ck: int, session_name: str, rot: float, code: str | No
     return tel
 
 
+def overtake_data(oc, year: int, ck: int, rot: float) -> dict:
+    """On track passes of a race from OpenF1 (Michel, 21 Nov: a template for every race). OpenF1's overtakes are
+    every position swap, pit stops and penalties included, and may be incomplete; we keep on track passes only:
+    neither driver pitting on that lap or the one either side, no safety car, VSC or red flag laps, and no swap that
+    the same pair reverses within 3 s (timing noise). Returns passes with lap and the share of that lap (time)."""
+    sk = _session(oc, year, ck, "Race")
+    codes, cols = _codes(oc, sk)
+    ov = oc.get("overtakes", session_key=sk)
+    laps = oc.frame("laps", session_key=sk)
+    laps = laps[laps["date_start"].notna()].copy()
+    laps["t0"] = pd.to_datetime(laps["date_start"], utc=True, format="ISO8601")
+    laps["dur"] = laps["lap_duration"].fillna(laps["lap_duration"].median())
+    pits = oc.get("pit", session_key=sk)
+    pit_laps = {}
+    for r in pits:
+        pit_laps.setdefault(int(r["driver_number"]), set()).add(int(r["lap_number"]))
+    rc = oc.get("race_control", session_key=sk)
+    neutral, on = set(), None
+    for r in sorted(rc, key=lambda r: r["date"]):
+        msg, ln = (r.get("message") or "").upper(), r.get("lap_number")
+        if ln is None:
+            continue
+        if "SAFETY CAR DEPLOYED" in msg or "RED FLAG" in msg:
+            on = int(ln)
+        elif on is not None and ("IN THIS LAP" in msg or "ENDING" in msg or "GREEN" in msg or "RESUME" in msg):
+            neutral.update(range(on, int(ln) + 2))
+            on = None
+    n_laps = int(laps["lap_number"].max())
+    raw, keep = len(ov), []
+    evs = sorted(ov, key=lambda r: r["date"])
+    for k, r in enumerate(evs):
+        a, b = int(r["overtaking_driver_number"]), int(r["overtaken_driver_number"])
+        t = pd.Timestamp(r["date"]).tz_convert("UTC") if pd.Timestamp(r["date"]).tzinfo else pd.Timestamp(r["date"], tz="UTC")
+        g = laps[(laps["driver_number"] == a) & (laps["t0"] <= t)]
+        if g.empty:
+            continue
+        L = g.sort_values("t0").iloc[-1]
+        lap = int(L["lap_number"])
+        frac = float(min(max((t - L["t0"]).total_seconds() / float(L["dur"]), 0.0), 0.999))
+        if lap in neutral:
+            continue
+        if any(lap + d in pit_laps.get(n, set()) for n in (a, b) for d in (-1, 0, 1)):
+            continue
+        rev = any(int(s["overtaking_driver_number"]) == b and int(s["overtaken_driver_number"]) == a
+                  and abs((pd.Timestamp(s["date"]) - pd.Timestamp(r["date"])).total_seconds()) < 3 for s in evs[max(0, k - 6):k + 7])
+        if rev:
+            continue
+        keep.append({"lap": lap, "tfrac": frac, "who": codes.get(a), "whom": codes.get(b)})
+    return {"passes": [q for q in keep if q["who"] and q["whom"]], "raw": raw, "laps": n_laps, "colors": cols,
+            "neutral": sorted(neutral)}
+
+
 def brake_rows(oc, year: int, ck: int, rot: float, ref_xy: tuple[float, float], session_name: str = "Race") -> list[dict]:
     """Brake point into one corner on each driver's fastest lap: metres before the apex, with the error bar."""
     sk = _session(oc, year, ck, session_name)
@@ -1326,7 +1378,7 @@ REEL_SLOTS = {
     -2: {12: "braker_z2", 15: "pedal_pole", 21: "teammates"},
     -1: {12: "braker_z3", 15: "ghost"},                        # + pedal_wet 9:04, braker_fp2 18:04
     0: {12: "board_q", 15: "ghost_q", 19: "pedal_fp3", 21: "points"},   # board_q: the standard first quali Reel (Michel, 20 Nov)
-    1: {8: "ribbon_q", 10: "strengths_q", 12: "delta_q_ver_rus", 14: "strengths_q_ant_rus_lec_ham"},   # Las Vegas 2026: all approved
+    1: {8: "ribbon_q", 10: "strengths_q", 12: "delta_q_ver_rus", 14: "strengths_q_ant_rus_lec_ham", 22: "overtakes_race"},   # Las Vegas 2026: all approved
     # Reels before 4 PM, then race news only (Michel, 21 Nov); braker_fp2 off (not previewed)   # night qualifying; delta_q_ver_rus is the
     # Las Vegas 2026 front row (elsewhere it finds no such pair and falls back); board_q went out Friday night there   # night qualifying (Las Vegas style);
     # Michel, 20 Nov: one ghost a day at most, new formats around it. ghost_fp3_* stay buildable for other circuits.
@@ -1749,6 +1801,35 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         sess.update(Q_EXTRA_SESSION.get((p.title, p.season), {}))
         cap = _cap(p, kind, *strength_caption(p, D, cn, "best qualifying laps" if pick else None,
                                               "strip" in STRENGTH_ROWS.get(kind, ()), sess if pick and len(set(sess.values())) > 1 else None))
+    elif kind == "overtakes_race":              # every on track pass, every race (Michel, 21 Nov)
+        try:
+            O = overtake_data(oc, p.season, ck, rot)
+            ref = lap_of(oc, p.season, ck, "Race", rot)
+        except Exception as e:
+            log.warning("overtakes_race: data not in: %s", e)
+            return None
+        if len(O["passes"]) < 5:
+            return None
+        R_ = {k: np.array(v, float) if isinstance(v, list) else v for k, v in ref.items()}
+        for q in O["passes"]:                     # time share of the lap -> distance share on the reference lap
+            q["frac"] = float(np.interp(q["tfrac"] * R_["t"][-1], R_["t"], R_["dist"]) / R_["dist"][-1])
+        D = strength_data([ref, ref])
+        cn = CORNER_NAMES.get((p.title, len(D["fa"])))
+        cf = dict(zip(cn, D["fa"])) if cn else None
+        log.info("PASSES_JSON " + json.dumps({"passes": O["passes"], "raw": O["raw"], "laps": O["laps"], "neutral": O["neutral"],
+                                              "ref": {k: ref[k] for k in ("x", "y", "dist", "t", "speed", "code", "lap_s")}},
+                                             separators=(",", ":")))
+        overtakes_map(p, ref, O["passes"], O["laps"], video, [f"{len(O['passes'])} on track", "passes. Watch them"],
+                      f"{name} {p.season}, every on track pass", O["colors"], cf)
+        tops = {}
+        for q in O["passes"]:
+            tops[q["who"]] = tops.get(q["who"], 0) + 1
+        best = sorted(tops, key=lambda c_: -tops[c_])[:3]
+        cap = _cap(p, kind, f"🔁 {name} {p.season}: {len(O['passes'])} on track passes, every one on the map where it happened.",
+                   "🏁 Most passes: " + ", ".join(f"{drv(c_, p.colors)} {tops[c_]}" for c_ in best) + ".",
+                   f"📐 Our count from OpenF1 position swaps ({O['raw']} in total): pit stop swaps, safety car laps and "
+                   "instant swap backs removed. Official counts can differ slightly.",
+                   "💬 Who was your favourite driver today?")
     elif kind.startswith("ghost_fp3_"):          # fastest FP3 lap vs one rival, official FP3 times (Michel, 20 Nov)
         from .gp_facts import SESSION_NEWS
         code = kind.rsplit("_", 1)[1].upper()
