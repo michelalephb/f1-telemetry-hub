@@ -1239,6 +1239,77 @@ def tyre_stints(p, rows: list[dict], laps: int, out: Path, hook: list[str], sub:
     return r_.close()
 
 
+def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: list[str], sub: str,
+                  colors: dict[str, str], corner_fracs: dict[str, float] | None = None,
+                  src: str = "On track passes: OpenF1 position swaps, pit stop swaps and safety car laps removed",
+                  mark: str | None = None) -> Path:
+    """Every on track pass of the race (Michel, 21 Nov): a big counter ticks up lap by lap and each pass pops onto
+    the map where it happened, in the overtaking driver's colour, so the overtaking hot spots build up on their own.
+    Ends on the total, the hot spot and the top overtaker. passes: [{lap, frac (share of the lap), who, whom}]."""
+    P.set_event(p)
+    R_ = {k: np.array(v, float) if isinstance(v, list) else v for k, v in ref.items()}
+    fr = R_["dist"] / R_["dist"][-1]
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    if mark:
+        c.text(0.5, 0.712, mark, 13, color=P.GOLD, weight=700, track=True)
+    mp = _track(c, [0.08, 0.37, 0.84, 0.33], R_["x"], R_["y"], lw=12)
+    xs = np.interp([q["frac"] for q in passes], fr, R_["x"])
+    ys = np.interp([q["frac"] for q in passes], fr, R_["y"])
+    ring = mp.scatter([], [], s=[], facecolors="none", edgecolors=[], linewidths=2, zorder=6)
+    cnt = c.text(0.5, 0.30, "0", 96, weight=200)
+    c.text(0.5, 0.258, "ON TRACK PASSES", 13, color=P.MUTED, weight=600, track=True)
+    lap_t = c.text(0.5, 0.228, "", 18, color=P.MUTED, weight=300)
+    _foot(c, src)
+    order = sorted(range(len(passes)), key=lambda k: passes[k]["lap"] + passes[k]["frac"])
+    when = np.array([passes[k]["lap"] - 1 + passes[k]["frac"] for k in order])
+    cols = [colors.get(passes[k]["who"], P.TEXT) for k in order]
+    px, py = xs[order], ys[order]
+    r_ = Reel(out)
+    n = int(12 * FPS)
+    added = 0
+    for i in range(n + 1):
+        x = laps * i / n
+        m = int(np.searchsorted(when, x, side="right"))
+        while added < m:                                            # one marker per pass, added as it happens
+            mp.plot([px[added]], [py[added]], "o", ms=12, color=cols[added], alpha=0.9, mec="#0B0E14", mew=1, zorder=5)
+            added += 1
+        if m:
+            age = x - when[:m]
+            fresh = age < laps * 0.03                             # a short pulse on new passes
+            ring.set_offsets(np.column_stack([px[:m][fresh], py[:m][fresh]]) if fresh.any() else np.empty((0, 2)))
+            ring.set_sizes(300 + 1600 * (1 - age[fresh] / (laps * 0.03)))
+            ring.set_edgecolors([cols[k] for k in np.where(fresh)[0]])
+        cnt.set_text(str(m))
+        lap_t.set_text(f"LAP {max(1, min(laps, int(np.ceil(x))))} OF {laps}")
+        r_.add(c.fig)
+    ring.set_offsets(np.empty((0, 2)))
+    # hot spot: the busiest 6% of the lap; named after the nearest corner when known
+    fracs = np.array([q["frac"] for q in passes])
+    centers = np.linspace(0, 1, 101)
+    dens = [np.sum(np.abs(((fracs - c0 + 0.5) % 1) - 0.5) < 0.03) for c0 in centers]
+    hot = float(centers[int(np.argmax(dens))])
+    name = None
+    if corner_fracs:
+        name = min(corner_fracs, key=lambda k: abs(corner_fracs[k] - hot))
+    hx, hy = np.interp(hot, fr, R_["x"]), np.interp(hot, fr, R_["y"])
+    mp.scatter([hx], [hy], s=2600, facecolors="none", edgecolors=P.GOLD, linewidths=3, zorder=7)
+    x_lo, x_hi = mp.get_xlim()
+    side = "right" if hx > (x_lo + x_hi) / 2 else "left"           # keep the label inside the card
+    mp.annotate(f"HOT SPOT{': ' + name if name else ''}\n{max(dens)} passes", (hx, hy), xytext=(-40 if side == "right" else 40, 46),
+                textcoords="offset points", ha=side, fontsize=17, color=P.GOLD, family=P.FONT, weight=700, zorder=8)
+    tops = {}
+    for q in passes:
+        tops[q["who"]] = tops.get(q["who"], 0) + 1
+    best = max(tops, key=tops.get)
+    cnt.set_color(P.GOLD)
+    lap_t.set_text(f"MOST PASSES: {best}, {tops[best]}")
+    lap_t.set_color(colors.get(best, P.TEXT))
+    r_.add(c.fig, int(3.5 * FPS))
+    plt.close(c.fig)
+    return r_.close()
+
+
 def L_code(Ls, k):
     return Ls[k]["code"]
 
