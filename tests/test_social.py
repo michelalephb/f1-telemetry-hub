@@ -492,6 +492,15 @@ def test_new_race_week_posts_render(tmp_path):
 
 
 def test_hourly_pool_and_window(tmp_path):
+    try:                                         # needs OpenF1, which locks anonymous access during live sessions
+        _hourly_pool_and_window(tmp_path)
+    except RuntimeError as e:
+        if "OpenF1" not in str(e):
+            raise
+        pytest.skip(f"OpenF1 unreachable: {e}")
+
+
+def _hourly_pool_and_window(tmp_path):
     from pipeline.social import hourly
     from argparse import Namespace
     p = preview_fixture()
