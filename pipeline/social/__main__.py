@@ -539,8 +539,8 @@ def cmd_reel(a) -> int:
         return 0
     built = reels_tel.build(p, a.reel, Path(a.out) / f"reel_{a.reel}")
     if built is None:
-        log.error("reel %s: data not in", a.reel)
-        return 1
+        log.warning("reel %s: data not in yet, nothing posted", a.reel)
+        return 0                                 # not a failure: no red run, no failure email (Michel, 21 Nov)
     video, cap = built
     jobs = [(sid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
     report, failed = publish_jobs(sb, ig, jobs, {"reel": a.reel, "manual": True})
