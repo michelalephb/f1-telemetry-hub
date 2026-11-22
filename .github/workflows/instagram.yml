@@ -88,6 +88,7 @@ jobs:
             for k in $KIND; do python -m pipeline.social reel --reel "$k" --dry-run || true; done
             exit 0
           elif [ "$MODE" = "reel" ]; then
+            [ -n "$ROUND" ] && ARGS+=(--round "$ROUND")
             python -m pipeline.social reel --reel "$KIND" "${ARGS[@]}"
           elif [ "$MODE" = "news" ]; then
             python -m pipeline.social news --news "$KIND" "${ARGS[@]}"
