@@ -1493,7 +1493,9 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
         r_.add(c.fig)
     ring.set_offsets(np.empty((0, 2)))
     # hot spot: the busiest 6% of the lap; named after the nearest corner when known
-    fracs = np.array([q["frac"] for q in passes])
+    fracs = np.array([q["frac"] for q in passes if q["lap"] > 1])   # hot spot from racing passes, not the start
+    if len(fracs) < 5:
+        fracs = np.array([q["frac"] for q in passes])
     centers = np.linspace(0, 1, 101)
     dens = [np.sum(np.abs(((fracs - c0 + 0.5) % 1) - 0.5) < 0.03) for c0 in centers]
     hot = float(centers[int(np.argmax(dens))])
@@ -2430,6 +2432,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         best = sorted(tops, key=lambda c_: -tops[c_])[:3]
         cap = _cap(p, kind, f"🔁 {name} {p.season}: {len(O['passes'])} on track passes, every one on the map where it happened.",
                    "🏁 Most passes: " + ", ".join(f"{drv(c_, p.colors)} {tops[c_]}" for c_ in best) + ".",
+                   f"🚦 {sum(1 for q in O['passes'] if q['lap'] == 1)} of them on lap 1. The hot spot on the map counts racing passes after lap 1.",
                    f"📐 Our count from OpenF1 position swaps ({O['raw']} in total): pit stop swaps, safety car laps and "
                    "instant swap backs removed. Official counts can differ slightly.",
                    "💬 Who was your favourite driver today?")
@@ -2443,6 +2446,19 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             return None
         log.info("RACEROWS_JSON " + json.dumps(RR, separators=(",", ":")))
         if kind == "race_trace":
+            from .gp_facts import SESSION_NEWS
+            off = [it for it in SESSION_NEWS.get(p.title, {}).get(p.season, {}).get("R", []) if it.get("title", "").lower().startswith(("verstappen wins",)) or
+                   (it.get("standings") and "laps" in str(it["standings"][0][1]))]
+            if off:                              # official classification (penalties): keep the top rows that match it
+                st = off[0]["standings"]
+                keep = []
+                for r, (code_, gap_) in zip(RR["trace"], st):
+                    if r["code"] != code_:
+                        break
+                    keep.append(r)
+                if len(keep) >= 3:
+                    RR["trace"] = keep
+                    RR["final"] = {code_: ("WIN" if i == 0 else gap_ + "s") for i, (code_, gap_) in enumerate(st[:len(keep)])}
             race_trace(p, RR["trace"], RR["n"], video, ["The race in", "15 seconds"], f"{name} {p.season}, gap to the leader, top {len(RR['trace'])}",
                        RR["final"])
             cap = _cap(p, kind, f"📈 {name} {p.season}, the gap to the leader lap by lap: " + ", ".join(
