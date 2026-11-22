@@ -87,7 +87,8 @@ class Instagram:
     def post_carousel(self, image_urls: list[str], caption: str) -> tuple[str, str]:
         if not 2 <= len(image_urls) <= 10:
             raise IGError(f"a carousel needs 2 to 10 items, got {len(image_urls)}")
-        kids = [self.call("POST", f"{self.user_id}/media", image_url=u, is_carousel_item="true")["id"] for u in image_urls]
+        kids = [self.call("POST", f"{self.user_id}/media", **({"media_type": "VIDEO", "video_url": u} if u.lower().endswith(".mp4")
+                          else {"image_url": u}), is_carousel_item="true")["id"] for u in image_urls]   # mixed: Meta docs
         for k in kids:
             self.wait(k)
         parent = self.call("POST", f"{self.user_id}/media", media_type="CAROUSEL", children=",".join(kids), caption=caption)["id"]
@@ -228,7 +229,8 @@ class UploadPost:
             raise IGError(f"a photo post needs 1 to 10 images, got {len(images)}")
         handles = [open(p, "rb") for p in images]
         try:
-            files = [("photos[]", (f"slide_{i + 1}.jpg", h, "image/jpeg")) for i, h in enumerate(handles)]
+            files = [("photos[]", (f"slide_{i + 1}.mp4", h, "video/mp4") if p.lower().endswith(".mp4") else
+                      (f"slide_{i + 1}.jpg", h, "image/jpeg")) for i, (p, h) in enumerate(zip(images, handles))]  # mixed carousel
             self._post("upload_photos", self._common(caption, request_id), files, request_id)
         finally:
             for h in handles:
