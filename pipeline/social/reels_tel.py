@@ -2530,6 +2530,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                     t_["color"] = p.colors.get(t_["color"], P.TEXT)
         story_reel.build(p, spec["scenes"], video, spec.get("tag", "The story"), spec.get("src", "Data: official results"))
         cap = _cap(p, kind, *spec["caption"], "💬 " + spec.get("question", "Who are you backing this weekend?"))
+        if spec.get("src"):                       # the footer names the spec's own sources, not OpenF1 (23 Nov)
+            cap = cap.replace("📊 Data: OpenF1.", "📊 " + spec["src"].rstrip(".") + ".")
     elif kind.startswith("story_duel_"):         # narrated story Reel, two cars, one lap (Michel, 22 Nov)
         from . import story_reel
         _, _, f_, o_ = kind.split("_")[:4]

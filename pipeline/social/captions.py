@@ -110,6 +110,9 @@ def race(st: RaceStory, meta: dict, kind: str) -> str:
 SESSION_WORDS = ("qualifying", "Qualifying", "takes pole", "takes Sprint pole", "Driver of the day", "Q3", "FP1", "FP2", "FP3", "practice", "grid", "race lap", "Race", "sprint")
 
 
+FAN_QUESTIONS = ("💬 Who was your favourite driver today?", "💬 Who are you backing this weekend?")
+
+
 def fan_question(s: str) -> str:
     """The one comment prompt we use (Michel, 20 Nov): a plain fan question, never a challenge to the reader."""
     return ("💬 Who was your favourite driver today?" if any(w in s for w in SESSION_WORDS)
@@ -128,7 +131,9 @@ def clean(s: str) -> str:
         if ln.lstrip().startswith("💬"):
             if asked:
                 continue
-            ln, asked = q, True
+            # one of the two plain questions asked on purpose is kept (race week Reels ask who you back;
+            # "#RaceWeek" in the tags matched "Race" and turned it into the session question, 23 Nov)
+            ln, asked = (ln.strip() if ln.strip() in FAN_QUESTIONS else q), True
         out.append(ln)
     s = "\n".join(out)
     while "\n\n\n" in s:
