@@ -2551,8 +2551,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                 if q == 1:
                     lead[r["code"]] = lead.get(r["code"], 0) + 1
         top = sorted(lead, key=lambda c_: -lead[c_])
-        cap = _cap(p, kind, f"📈 {name} {p.season}, race position lap by lap. " +
-                   ", ".join(f"{c_} led {lead[c_]} of {LC['n']} laps at the line" for c_ in top) + ".",
+        cap = _cap(p, kind, f"📈 {name} {p.season}, race position lap by lap, every driver.",   # laps led: counts differ, left out
                    "🛞 Dots are pit stops in the colour of the new tyre. Shaded laps: safety car.",
                    "📐 Positions at the end of each lap, from official timing via OpenF1.",
                    "💬 Who was your favourite driver today?")
