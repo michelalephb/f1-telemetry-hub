@@ -1,0 +1,104 @@
+{
+ "tag": "Qatar history",
+ "src": "Results: FIA, formula1.com",
+ "caption": [
+  "\ud83c\udfc6 Every Qatar Grand Prix winner: 2021 Hamilton (Mercedes), then Verstappen (Red Bull) in 2023, 2024 and 2025.",
+  "\ud83d\udcd0 2023: third title sealed in the Saturday Sprint. 2024: started P2 after a one place grid penalty. 2025: won by 7.995 s after McLaren stayed out under the lap 7 safety car. Sources: FIA, formula1.com, Motorsport Magazine."
+ ],
+ "question": "Who are you backing this weekend?",
+ "scenes": [
+  {
+   "type": "verdict",
+   "kicker": "Qatar Grand Prix",
+   "lines": [
+    "One driver has won",
+    "every race since 2023."
+   ],
+   "color": "#3671C6",
+   "question": "",
+   "dur": 3.2,
+   "say": "One driver has won every Qatar Grand Prix since twenty twenty three."
+  },
+  {
+   "type": "tiles",
+   "kicker": "Four races, two winners",
+   "headline": [
+    "Qatar GP",
+    "winners"
+   ],
+   "dur": 4.5,
+   "tiles": [
+    {
+     "value": 3,
+     "fmt": "{:.0f}",
+     "unit": "wins",
+     "color": "#3671C6",
+     "label": "Verstappen, 2023 to 2025"
+    },
+    {
+     "value": 1,
+     "fmt": "{:.0f}",
+     "unit": "win",
+     "color": "#27F4D2",
+     "label": "Hamilton, 2021, the first"
+    },
+    {
+     "value": 7.995,
+     "fmt": "{:.3f}",
+     "unit": "s",
+     "color": "#3671C6",
+     "label": "Verstappen's winning margin in 2025"
+    }
+   ],
+   "say": "Lewis Hamilton won the first one in twenty twenty one. Max Verstappen has won all three since."
+  },
+  {
+   "type": "verdict",
+   "kicker": "2023",
+   "lines": [
+    "Champion on Saturday.",
+    "Winner on Sunday."
+   ],
+   "color": "#3671C6",
+   "question": "",
+   "dur": 3.5,
+   "say": "In twenty twenty three he sealed his third title in the Saturday sprint, then won on Sunday."
+  },
+  {
+   "type": "verdict",
+   "kicker": "2024",
+   "lines": [
+    "Pole taken away.",
+    "Won anyway."
+   ],
+   "color": "#3671C6",
+   "question": "",
+   "dur": 3.5,
+   "say": "In twenty twenty four a one place grid penalty took his pole. He led into turn one anyway."
+  },
+  {
+   "type": "verdict",
+   "kicker": "2025, lap 7",
+   "lines": [
+    "McLaren stayed out.",
+    "Max won by 7.995 s."
+   ],
+   "color": "#3671C6",
+   "question": "",
+   "dur": 4.0,
+   "say": "In twenty twenty five, McLaren stayed out under the lap seven safety car. Verstappen won by seven point nine nine five seconds."
+  },
+  {
+   "type": "verdict",
+   "kicker": "2026",
+   "lines": [
+    "Four in a row?",
+    ""
+   ],
+   "color": "#3671C6",
+   "question": "Who are you backing this weekend?",
+   "dur": 3.2,
+   "say": "Can anyone stop four in a row?"
+  }
+ ]
+}

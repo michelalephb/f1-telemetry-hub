@@ -544,7 +544,18 @@ def cmd_reel(a) -> int:
     else:
         w = where_are_we(OpenF1(), datetime.now(TZ))
     p = preview.load(w["season"], w["round"])
-    sid = f"{w['season']}_{w['round']:02d}_PREVIEW_REEL_{a.reel.upper()}"
+    sid = f"{w['season']}_{w['round']:02d}_PREVIEW_REEL_{a.reel.upper().replace('@', '_Y')}"
+    if "@" in a.reel:                            # history Reel: same circuit, an earlier year ("lap_chart@2025")
+        base, yr = a.reel.split("@")
+        from ..__main__ import schedule
+        oc_ = OpenF1()
+        ck_ = next(s["circuit_key"] for s in schedule(oc_, w["season"]) if s["round"] == w["round"])
+        r_old = next((s["round"] for s in schedule(oc_, int(yr)) if s["circuit_key"] == ck_), None)
+        if r_old is None:
+            log.warning("reel %s: no %s race at this circuit", a.reel, yr)
+            return 0
+        p = preview.load(int(yr), r_old)
+        a.reel = base
     row = post_row(sb, sid, "reel", "session") if ig is not None else None
     if row and row["status"] == "published":
         log.info("reel %s already published", a.reel)
