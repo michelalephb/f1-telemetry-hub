@@ -1967,6 +1967,48 @@ def build_carousel(p, kind: str, out: Path) -> tuple[list[Path], str] | None:
     return files, cap
 
 
+def lap_chart_data(oc, year: int, ck: int) -> dict:
+    """Race position by lap for every driver (Michel, 22 Nov; reference flabo.jp lap chart). Position at the end of
+    lap L is the order in which the cars completed lap L (timing), lap 0 is the starting grid. Pit laps carry the
+    compound fitted for the next stint; safety car, VSC and red flag laps come from race control."""
+    from .gp_facts import DRIVERS
+    sk = _session(oc, year, ck, "Race")
+    codes, cols = _codes(oc, sk)
+    laps = oc.frame("laps", session_key=sk)
+    laps = laps[laps["date_start"].notna() & laps["lap_duration"].notna()].copy()
+    laps["end"] = pd.to_datetime(laps["date_start"], format="ISO8601", utc=True) + pd.to_timedelta(laps["lap_duration"], unit="s")
+    laps["code"] = laps["driver_number"].map(lambda n: codes.get(int(n)))
+    n = int(laps["lap_number"].max())
+    pos = {}
+    for L, g in laps.groupby("lap_number"):
+        for k, c_ in enumerate(g.sort_values("end")["code"]):
+            pos.setdefault(c_, {})[int(L)] = k + 1
+    try:
+        grid = {codes.get(int(r["driver_number"])): int(r["position"]) for r in oc.get("starting_grid", session_key=sk)}
+    except Exception:
+        grid = {}
+    if not grid:
+        grid = {c_: v.get(1) for c_, v in pos.items()}
+    stints = {}
+    for s in sorted(oc.get("stints", session_key=sk), key=lambda s: (s["driver_number"], s["stint_number"])):
+        c_ = codes.get(int(s["driver_number"]))
+        if c_ and s.get("lap_start") is not None:
+            stints.setdefault(c_, []).append((int(s["lap_start"]), str(s.get("compound") or "UNKNOWN").upper()))
+    rows = []
+    mate = {}
+    for c_ in pos:
+        team = DRIVERS.get(c_, (None, "?"))[1]
+        mate.setdefault(team, []).append(c_)
+    for c_, v in pos.items():
+        team = DRIVERS.get(c_, (None, "?"))[1]
+        series = [grid.get(c_)] + [v.get(L) for L in range(1, n + 1)]
+        st = stints.get(c_, [])
+        stops = [(a - 1, comp) for a, comp in st[1:]]
+        rows.append({"code": c_, "color": cols.get(c_), "dashed": sorted(mate[team]).index(c_) == 1,
+                     "pos": series, "stops": stops, "start": st[0][1] if st else None})
+    return {"n": n, "rows": rows, "neutral": sorted(_neutral_laps(oc.get("race_control", session_key=sk)))}
+
+
 def L_code(Ls, k):
     return Ls[k]["code"]
 
@@ -2471,6 +2513,26 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             cap = _cap(p, kind, f"🛞 {name} {p.season}: every driver's tyres, lap by lap, in finishing order.",
                        f"⏱️ {sum(1 for s in stops if s == 1)} one stoppers, {sum(1 for s in stops if s == 2)} two stoppers, "
                        f"{sum(1 for s in stops if s >= 3)} on three or more.", "💬 Who was your favourite driver today?")
+    elif kind == "lap_chart":                   # race position by lap, every driver (Michel, 22 Nov)
+        from . import reels_cam
+        try:
+            LC = lap_chart_data(oc, p.season, ck)
+        except Exception as e:
+            log.warning("lap_chart: data not in: %s", e)
+            return None
+        log.info("LAPCHART_JSON " + json.dumps(LC, separators=(",", ":")))
+        reels_cam.lap_chart(p, LC, video, f"Round {p.round} · {name}")
+        lead = {}
+        for r in LC["rows"]:
+            for L, q in enumerate(r["pos"][1:], start=1):
+                if q == 1:
+                    lead[r["code"]] = lead.get(r["code"], 0) + 1
+        top = sorted(lead, key=lambda c_: -lead[c_])
+        cap = _cap(p, kind, f"📈 {name} {p.season}, race position lap by lap. " +
+                   ", ".join(f"{c_} led {lead[c_]} of {LC['n']} laps at the line" for c_ in top) + ".",
+                   "🛞 Dots are pit stops in the colour of the new tyre. Shaded laps: safety car.",
+                   "📐 Positions at the end of each lap, from official timing via OpenF1.",
+                   "💬 Who was your favourite driver today?")
     elif kind.startswith("deploy_"):             # Max's deployment strategy (Michel, 21 Nov)
         _, f_, o_ = kind.split("_")[:3]
         try:
