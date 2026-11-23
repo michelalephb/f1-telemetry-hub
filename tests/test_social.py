@@ -689,3 +689,12 @@ def test_unapproved_reel_is_held_with_a_preview_and_never_sent(tmp_path, monkeyp
     ok = m.send_files(None, IG(), "2026_21_PREVIEW_REEL_X", "reel", "session",
                       {"video": v, "cover": None, "caption": "c"}, 1, {}, report)
     assert ok is False and not sent and saved[-1]["status"] == "held" and "preview https://example/pending/" in saved[-1]["error"]
+
+
+def test_caption_keeps_race_week_question():
+    """A race week caption keeps "who are you backing" although #RaceWeek in the tags reads like a session (23 Nov)."""
+    from pipeline.social.captions import clean
+    s = clean("🏆 Every Qatar GP winner.\n\n💬 Who are you backing this weekend?\n\n#F1 #RaceWeek")
+    assert "💬 Who are you backing this weekend?" in s and "favourite driver" not in s
+    s = clean("🏁 Q3 in 30 seconds.\n\n💬 Where would you find the time?\n\n#F1")
+    assert "💬 Who was your favourite driver today?" in s and "find the time" not in s
