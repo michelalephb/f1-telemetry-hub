@@ -2346,7 +2346,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             speed_ribbon(p, lap | {"official": t, "label": label}, video, ["Every km/h of", "the fastest lap" if gp else "the pole lap"],
                          f"{lap['code']}, {name} {p.season} qualifying, {t}")
             sp = np.array(lap["speed"], float)
-            cap = _cap(p, kind, f"🌈 Every km/h of the {'fastest qualifying' if gp else 'pole'} lap in {name}: {drv(lap['code'], p.colors)}, {t}."
+            cap = _cap(p, kind, f"🌈 Every km/h of the {'fastest qualifying' if gp else 'pole'} lap in {name} {p.season}: {drv(lap['code'], p.colors)}, {t}."
                                 + (f" {gp} starts from pole after grid penalties." if gp else ""),
                        f"⚡ Top speed {sp.max():.0f} km/h, slowest corner {sp[5:-5].min():.0f} km/h (OpenF1 telemetry).",
                        "💬 Which corner would you take flat? Tell us below.")
