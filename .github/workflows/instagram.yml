@@ -43,6 +43,7 @@ jobs:
       IG_USER_ID: ${{ secrets.IG_USER_ID }}
       UPLOADPOST_API_KEY: ${{ secrets.UPLOADPOST_API_KEY }}
       UPLOADPOST_USER: ${{ vars.UPLOADPOST_USER }}
+      PIPER_VOICE: ${{ github.workspace }}/.voices/en-us-ryan-high.onnx
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,6 +58,14 @@ jobs:
           sudo ln -sf "$(python -c 'import imageio_ffmpeg as i; print(i.get_ffmpeg_exe())')" /usr/local/bin/ffmpeg
           ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx264 || { echo "ffmpeg without libx264, falling back to apt"; sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
           ffmpeg -version | head -n 1
+      - name: Narration voice (Piper, Ryan; Michel picked it 22 Nov)
+        uses: actions/cache@v4
+        with:
+          path: .voices
+          key: piper-ryan-high-v1
+      - run: |
+          [ -f .voices/en-us-ryan-high.onnx ] || { mkdir -p .voices && curl -sL https://github.com/rhasspy/piper/releases/download/v0.0.2/voice-en-us-ryan-high.tar.gz | tar xz -C .voices; }
+          ls -la .voices
       - name: Restore the kept OpenF1 answers
         uses: actions/cache/restore@v4
         with:

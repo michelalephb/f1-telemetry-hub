@@ -189,9 +189,9 @@ SCENES = {"title": scene_title, "tiles": scene_tiles, "duel": scene_duel, "strip
 def _say(text: str, wav: Path, voice: str) -> float:
     subprocess.run(["python3", "-m", "piper", "-m", voice, "-f", str(wav), "--length_scale", "0.92"],
                    input=text.encode(), check=True, capture_output=True)
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(wav)],
-                         capture_output=True, text=True, check=True).stdout
-    return float(out)
+    import wave                                   # no ffprobe on the runner (ffmpeg comes from imageio-ffmpeg)
+    with wave.open(str(wav)) as w:
+        return w.getnframes() / float(w.getframerate())
 
 
 def build(p, scenes: list[dict], out: Path, tag: str, src: str, voice: str | None = None) -> Path:
