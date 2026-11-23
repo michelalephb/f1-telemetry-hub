@@ -148,9 +148,9 @@ def lap_chart(p, D: dict, out: Path, sub: str, window: int = 12, per_lap: float 
     N = len(rows)
     c = P.Card(H_REEL, story=True)
     c.header(p)
-    c.text(0.5, 0.815, "RACE POSITION BY LAP", 40, weight=800)
-    c.text(0.5, 0.790, sub.upper(), 15, color=P.MUTED, weight=600, track=True)
-    lap_t = c.text(0.5, 0.762, "", 26, color="#FF5A4F", weight=800, track=True)
+    c.text(0.5, 0.815, "Race position by lap", 44, weight=300)                         # brand: Inter Light title
+    c.text(0.5, 0.784, sub.upper(), 15, color=P.MUTED, weight=600, track=True)
+    lap_t = c.text(0.5, 0.757, "", 22, color=P.CYAN, weight=600, track=True)
     ax = c.fig.add_axes([0.10, 0.215, 0.70, 0.525])
     ax.set_ylim(N + 0.7, 0.3), ax.axis("off")
     for k in range(1, N + 1):
@@ -165,15 +165,15 @@ def lap_chart(p, D: dict, out: Path, sub: str, window: int = 12, per_lap: float 
                 runs.append((s0, a))
                 s0 = b
         for a, b in runs:
-            bands.append(ax.axvspan(a - 1, b, color="#5A4A12", alpha=0.45, lw=0, zorder=0))
-            ax.text((a - 1 + b) / 2, 0.55, "SC", color="#F5C542", fontsize=14, family=P.FONT, weight=800, ha="center", zorder=1,
+            bands.append(ax.axvspan(a - 1, b, color=P.GOLD, alpha=0.13, lw=0, zorder=0))      # champagne, brand
+            ax.text((a - 1 + b) / 2, 0.55, "SC", color=P.GOLD, fontsize=14, family=P.FONT, weight=600, ha="center", zorder=1,
                     clip_on=True)
     lines, tags, dots = {}, {}, []
     for r in rows:
         col = r["color"] or P.TEXT
         lines[r["code"]] = ax.plot([], [], color=col, lw=3.2, ls=(0, (5, 3)) if r["dashed"] else "-", zorder=3,
                                    solid_capstyle="round")[0]
-        tags[r["code"]] = c.text(0.86, 0.5, r["code"], 15, color=col, weight=800, ha="left")
+        tags[r["code"]] = c.text(0.86, 0.5, r["code"], 15, color=col, weight=600, ha="left", track=True)
         for L, comp in r["stops"]:
             if 0 <= L <= n and r["pos"][L] is not None:
                 d_ = ax.plot([L], [r["pos"][L]], "o", ms=9, color=TYRE.get(comp, "#888888"), mec="#05070A", mew=1.5,
@@ -210,7 +210,7 @@ def lap_chart(p, D: dict, out: Path, sub: str, window: int = 12, per_lap: float 
             tags[code].set_y(y_ax(k + 1))
         for L, d_ in dots:
             d_.set_alpha(1.0 if L <= xl else 0.0)
-        lap_t.set_text(f"LAP {int(np.floor(xl))} / {n}" if xl < n else f"FLAG  ·  LAP {n} / {n}")
+        lap_t.set_text(f"LAP {int(np.floor(xl))} OF {n}" if xl < n else f"FLAG, LAP {n} OF {n}")
         r_.add(c.fig)
     plt.close(c.fig)
     return r_.close()

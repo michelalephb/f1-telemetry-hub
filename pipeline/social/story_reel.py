@@ -57,23 +57,23 @@ def _frame(p, tag: str, src: str):
 
 
 def _head(c, kicker: str, headline: list[str], colors: list[str] | None = None, y: float = 0.74):
-    c.text(0.06, y, kicker.upper(), 20, color=P.CYAN, weight=700, ha="left", track=True)
+    c.text(0.06, y, kicker.upper(), 20, color=P.CYAN, weight=600, ha="left", track=True)       # brand: cyan tracked caps
     out = []
-    for k, line in enumerate(headline):
-        out.append(c.text(0.06, y - 0.062 - k * 0.056, line, 62, color=(colors or [P.TEXT] * 9)[k], weight=800, ha="left"))
+    for k, line in enumerate(headline):                                                         # brand: Inter Light
+        out.append(c.text(0.06, y - 0.062 - k * 0.056, line, 62, color=(colors or [P.TEXT] * 9)[k], weight=300, ha="left"))
     return out
 
 
-def _box(c, x, y, w, h, fc="#141923", ec="#232D3F"):
+def _box(c, x, y, w, h, fc="#0E121A", ec="#2A3242"):
     r = plt.Rectangle((x, y), w, h, transform=c.fig.transFigure, fc=fc, ec=ec, lw=1.2)
     c.fig.add_artist(r)
     return r
 
 
 def scene_title(c, s):
-    a = c.text(0.5, 0.58, s["a"].upper(), 92, color=s["ca"], weight=900)
-    v = c.text(0.5, 0.52, "vs", 28, color=P.MUTED, weight=400)
-    b = c.text(0.5, 0.46, s["b"].upper(), 92, color=s["cb"], weight=900)
+    a = c.text(0.5, 0.58, s["a"].upper(), 88, color=s["ca"], weight=200)
+    v = c.text(0.5, 0.52, "VS", 22, color=P.GOLD, weight=600, track=True)
+    b = c.text(0.5, 0.46, s["b"].upper(), 88, color=s["cb"], weight=200)
     sub = c.text(0.5, 0.38, s.get("sub", "").upper(), 20, color=P.CYAN, weight=600, track=True)
 
     def upd(e):
@@ -89,9 +89,10 @@ def scene_tiles(c, s):
     arts = []
     for (x, y, w), t in zip(spots, tiles):
         _box(c, x, y, w, 0.13)
-        c.fig.add_artist(plt.Line2D([x, x + w], [y + 0.13, y + 0.13], transform=c.fig.transFigure, color=t["color"], lw=5))
-        n = c.text(x + 0.03, y + 0.082, "", 76, color=t["color"], weight=800, ha="left")
-        lab = c.text(x + 0.03, y + 0.027, t["label"], 19, color=P.TEXT, weight=400, ha="left")
+        c.fig.add_artist(plt.Line2D([x, x + w], [y + 0.13, y + 0.13], transform=c.fig.transFigure, color=t["color"], lw=3))
+        n = c.text(x + 0.03, y + 0.082, "", 76, color=t["color"], weight=200, ha="left")
+        u = c.text(x + w - 0.03, y + 0.082, t.get("unit", "").upper(), 16, color=P.CYAN, weight=600, ha="right", track=True)
+        lab = c.text(x + 0.03, y + 0.027, t["label"], 19, color=P.MUTED, weight=300, ha="left")
         arts.append((n, lab, t))
 
     def upd(e):
@@ -109,13 +110,14 @@ def scene_duel(c, s):
     arts = []
     for k, r in enumerate(rows):
         y = 0.50 - k * 0.14
-        c.text(0.06, y + 0.045, r["name"].upper(), 24, color=r["color"], weight=800, ha="left", track=True)
-        _box(c, 0.06, y - 0.028, 0.88, 0.055, fc="#10151E", ec="#10151E")
+        c.text(0.06, y + 0.045, r["name"].upper(), 22, color=r["color"], weight=600, ha="left", track=True)
+        _box(c, 0.06, y - 0.028, 0.88, 0.055, fc="#0E121A", ec="#0E121A")
         bar = plt.Rectangle((0.06, y - 0.028), 0, 0.055, transform=c.fig.transFigure, fc=r["color"])
         c.fig.add_artist(bar)
-        val = c.text(0.94, y + 0.045, "", 40, color=P.TEXT, weight=800, ha="right")
+        val = c.text(0.86, y + 0.045, "", 44, color=P.TEXT, weight=200, ha="right")
+        c.text(0.94, y + 0.045, s.get("unit", "").upper(), 16, color=P.CYAN, weight=600, ha="right", track=True)
         arts.append((bar, val, r))
-    note = c.text(0.06, 0.26, s.get("note", ""), 20, color=P.MUTED, weight=400, ha="left")
+    note = c.text(0.06, 0.26, s.get("note", ""), 20, color=P.MUTED, weight=300, ha="left")
 
     def upd(e):
         for k, (bar, val, r) in enumerate(arts):
@@ -135,7 +137,7 @@ def scene_strip(c, s):
     S, lead = (S[keep_] - f0 * S[-1]) / (1 - f0), lead[keep_]
     L = S[-1] if S[-1] > 0 else 1
     x0, w, y, h = 0.06, 0.88, 0.42, 0.09
-    _box(c, x0, y, w, h, fc="#10151E", ec="#232D3F")
+    _box(c, x0, y, w, h, fc="#0E121A", ec="#2A3242")
     segs = []
     edges = np.flatnonzero(np.diff(lead)) + 1
     starts = np.concatenate([[0], edges])
@@ -151,14 +153,14 @@ def scene_strip(c, s):
             continue
         c.fig.add_artist(plt.Line2D([x0 + w * fr] * 2, [y - 0.012, y + h + 0.012], transform=c.fig.transFigure,
                                     color="#5D6573", lw=1))
-        c.text(x0 + w * fr, y - 0.03, lab, 16, color=P.MUTED, weight=600, track=True)
+        c.text(x0 + w * fr, y - 0.03, lab, 16, color=P.GOLD, weight=600, track=True)
     for j, (fr, lab, col) in enumerate(s.get("passes", [])):
         fr = (fr - f0) / (1 - f0)
-        t = c.text(x0 + w * fr, y + h + 0.040 + 0.035 * (j % 2), lab, 20, color=col, weight=800)
+        t = c.text(x0 + w * fr, y + h + 0.040 + 0.035 * (j % 2), lab, 18, color=col, weight=600, track=True)
         a_ = c.fig.add_artist(plt.Line2D([x0 + w * fr] * 2, [y + h, y + h + 0.025], transform=c.fig.transFigure, color=col, lw=3))
         marks.append((fr, t, a_))
-    legend = [c.text(0.06, 0.32, s["legend"][0][0], 22, color=s["legend"][0][1], weight=700, ha="left"),
-              c.text(0.94, 0.32, s["legend"][1][0], 22, color=s["legend"][1][1], weight=700, ha="right")]
+    legend = [c.text(0.06, 0.32, s["legend"][0][0].upper(), 18, color=s["legend"][0][1], weight=600, ha="left", track=True),
+              c.text(0.94, 0.32, s["legend"][1][0].upper(), 18, color=s["legend"][1][1], weight=600, ha="right", track=True)]
 
     def upd(e):
         f = _ease(e * 1.4)
@@ -174,9 +176,9 @@ def scene_strip(c, s):
 
 def scene_verdict(c, s):
     hs = _head(c, s["kicker"], [], y=0.60)
-    l1 = c.text(0.06, 0.52, s["lines"][0], 56, color=P.TEXT, weight=800, ha="left")
-    l2 = c.text(0.06, 0.465, s["lines"][1], 56, color=s["color"], weight=800, ha="left")
-    q = c.text(0.06, 0.34, s.get("question", ""), 28, color=P.MUTED, weight=400, ha="left")
+    l1 = c.text(0.06, 0.52, s["lines"][0], 58, color=P.TEXT, weight=300, ha="left")
+    l2 = c.text(0.06, 0.465, s["lines"][1], 58, color=s["color"], weight=300, ha="left")
+    q = c.text(0.06, 0.34, s.get("question", ""), 26, color=P.MUTED, weight=300, ha="left")
 
     def upd(e):
         l1.set_alpha(_ease(e * 3)), l2.set_alpha(_ease(e * 3 - 0.8)), q.set_alpha(_ease(e * 3 - 1.4))
@@ -276,14 +278,14 @@ def duel_scenes(D: dict, ref_len: float, segments: list, names: dict, race: str)
         {"type": "title", "a": nF, "b": nO, "ca": cF, "cb": cO, "sub": f"{race}, lap {D['lap']}", "dur": 2.6,
          "say": f"{nF} against {nO}. {race}, lap {words(D['lap'], 0)}."},
         {"type": "tiles", "kicker": f"Lap {D['lap']}", "headline": ["Passed, then", "back in front"], "dur": 4.5,
-         "tiles": [{"value": gO, "fmt": "+{:.1f}", "color": cO, "label": f"km/h {O} faster, {strip_nm}"},
-                   {"value": gF, "fmt": "+{:.1f}", "color": cF, "label": f"km/h {F} faster, {end_nm}"},
-                   {"value": gap, "fmt": "{:.2f} s", "color": cF if win == F else cO, "label": f"{win} ahead at the line"}],
+         "tiles": [{"value": gO, "fmt": "+{:.1f}", "unit": "km/h", "color": cO, "label": f"{O} faster, {strip_nm}"},
+                   {"value": gF, "fmt": "+{:.1f}", "unit": "km/h", "color": cF, "label": f"{F} faster, {end_nm}"},
+                   {"value": gap, "fmt": "{:.2f}", "unit": "s", "color": cF if win == F else cO, "label": f"{win} ahead at the line"}],
          "say": f"{nO} was {words(gO)} kilometres an hour faster on {strip_nm.lower().replace('the ', 'the ')}. "
                 f"{nF} was {words(gF)} faster from {end_nm.lower().replace('t16', 'turn sixteen')}."},
         {"type": "duel", "kicker": f"{strip_nm}, top speed", "headline": [f"{nO} flies", "down the Strip" if "Strip" in strip_nm else ""],
          "rows": [{"name": nO, "value": topO, "color": cO}, {"name": nF, "value": topF, "color": cF}],
-         "fmt": "{:.0f} km/h", "floor": 250.0, "dur": 4.0,
+         "fmt": "{:.0f}", "unit": "km/h", "floor": 250.0, "dur": 4.0,
          "say": f"Top speed on {strip_nm.lower()}: {nO} {words(topO, 0)}, {nF} {words(topF, 0)}."},
         {"type": "strip", "kicker": "Who led, metre by metre", "headline": ["One lap,", "two passes"],
          "dist": S.tolist(), "lead": lead.tolist(), "colors": [cF, cO], "marks": marks, "passes": passes,
@@ -291,7 +293,7 @@ def duel_scenes(D: dict, ref_len: float, segments: list, names: dict, race: str)
          "say": f"{nO} takes the lead on {strip_nm.lower()}. {nF} takes it back before turn seventeen."},
         {"type": "duel", "kicker": end_nm.replace("T16", "Turn 16") + ", top speed", "headline": [f"{nF} attacks", "at the end"],
          "rows": [{"name": nF, "value": eF, "color": cF}, {"name": nO, "value": eO, "color": cO}],
-         "fmt": "{:.0f} km/h", "floor": 250.0, "dur": 4.0,
+         "fmt": "{:.0f}", "unit": "km/h", "floor": 250.0, "dur": 4.0,
          "say": f"From turn sixteen to the line: {nF} {words(eF, 0)}, {nO} {words(eO, 0)}."},
         {"type": "verdict", "kicker": "The verdict", "lines": [f"Slower on {strip_nm.replace('The ', 'the ')}.", "Faster where it counted."],
          "color": cF, "question": "Who was your favourite driver today?", "dur": 4.0,
