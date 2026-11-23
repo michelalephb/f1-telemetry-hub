@@ -1660,6 +1660,10 @@ def battle_zone(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str,
     return r_.close()
 
 
+LAST_NAMES = {"VER": "Verstappen", "ANT": "Antonelli", "RUS": "Russell", "LEC": "Leclerc", "HAM": "Hamilton",
+              "NOR": "Norris", "PIA": "Piastri", "HAD": "Hadjar", "ALO": "Alonso", "GAS": "Gasly", "SAI": "Sainz",
+              "ALB": "Albon", "COL": "Colapinto", "LIN": "Lindblad", "BOR": "Bortoleto", "HUL": "Hulkenberg",
+              "BEA": "Bearman", "OCO": "Ocon", "LAW": "Lawson", "STR": "Stroll", "BOT": "Bottas", "PER": "Perez"}
 FIRST_NAMES = {"VER": "Max", "ANT": "Kimi", "RUS": "George", "LEC": "Charles", "HAM": "Lewis", "NOR": "Lando",
                "PIA": "Oscar", "HAD": "Isack", "ALO": "Fernando", "GAS": "Pierre", "SAI": "Carlos", "ALB": "Alex"}
 DEPLOY_SEGMENTS = {"LAS VEGAS": [("Main straight", 0.0, 0.045), ("The Strip", 0.53, 0.80),
@@ -2004,7 +2008,8 @@ def lap_chart_data(oc, year: int, ck: int) -> dict:
         series = [grid.get(c_)] + [v.get(L) for L in range(1, n + 1)]
         st = stints.get(c_, [])
         stops = [(a - 1, comp) for a, comp in st[1:]]
-        rows.append({"code": c_, "color": cols.get(c_), "dashed": sorted(mate[team]).index(c_) == 1,
+        fin = lambda q: (pos[q].get(n) or 99, -max(pos[q]))                       # finished ahead, else ran longer
+        rows.append({"code": c_, "color": cols.get(c_), "dashed": len(mate[team]) > 1 and c_ != min(mate[team], key=fin),
                      "pos": series, "stops": stops, "start": st[0][1] if st else None})
     return {"n": n, "rows": rows, "neutral": sorted(_neutral_laps(oc.get("race_control", session_key=sk)))}
 
@@ -2513,6 +2518,24 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             cap = _cap(p, kind, f"🛞 {name} {p.season}: every driver's tyres, lap by lap, in finishing order.",
                        f"⏱️ {sum(1 for s in stops if s == 1)} one stoppers, {sum(1 for s in stops if s == 2)} two stoppers, "
                        f"{sum(1 for s in stops if s >= 3)} on three or more.", "💬 Who was your favourite driver today?")
+    elif kind.startswith("story_duel_"):         # narrated story Reel, two cars, one lap (Michel, 22 Nov)
+        from . import story_reel
+        _, _, f_, o_ = kind.split("_")[:4]
+        try:
+            ref = lap_of(oc, p.season, ck, "Race", rot)
+            D = deploy_data(oc, p.season, ck, f_.upper(), o_.upper(), ref)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        if not D or not DEPLOY_SEGMENTS.get(p.title):
+            return None
+        log.info("STORY_JSON " + json.dumps({"D": D, "ref_len": ref["dist"][-1]}, separators=(",", ":")))
+        names = {c_: LAST_NAMES.get(c_, c_) for c_ in (D["focus"], D["other"])}
+        scenes = story_reel.duel_scenes(D, ref["dist"][-1], DEPLOY_SEGMENTS[p.title], names, name.replace(" GP", ""))
+        story_reel.build(p, scenes, video, "The duel", "Data: OpenF1")
+        cap = _cap(p, kind, f"🎙️ {names[D['focus']]} against {names[D['other']]}, lap {D['lap']} of {name} {p.season}, told in 30 seconds.",
+                   "📐 Speeds from official car data; positions from each car's speed trace pinned to its timing at every sector line.",
+                   "💬 Who was your favourite driver today?")
     elif kind == "lap_chart":                   # race position by lap, every driver (Michel, 22 Nov)
         from . import reels_cam
         try:
