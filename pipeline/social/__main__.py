@@ -167,6 +167,7 @@ def handle(sb, ig: Instagram | None, sid: str, kind: str, story: str, out: Path,
 
 
 REQUIRE_APPROVAL = True        # Michel, 21 Nov: "I need to see the Reels before publishing"
+REELS_ONLY = True              # Michel, 22 Nov: "moving forward it will be reels only" (no stories, no carousels)
 
 
 def approved(sb, sid: str) -> bool:
@@ -311,6 +312,10 @@ def publish_jobs(sb, ig, jobs: list, checks: dict) -> tuple[list, int]:
     report, failed = [], 0
     for jsid, kind, built in jobs:
         entry = {"session_id": jsid, "kind": kind, "story": "session", "checks": checks, "caption": built["caption"]}
+        if REELS_ONLY and kind != "reel":
+            log.info("reels only: %s %s not posted", kind, jsid)
+            report.append(entry | {"status": "skipped (reels only)"})
+            continue
         if ig is None:
             report.append(entry | {"status": "rendered (dry run)"})
             continue
