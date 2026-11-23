@@ -1,0 +1,106 @@
+{
+ "tag": "The circuit",
+ "src": "Data: formula1.com, Mercedes, Honda",
+ "caption": [
+  "\ud83c\udfc1 Lusail International Circuit in 30 seconds: 5.419 km a lap, 57 laps, 16 corners (10 right, 6 left), a main straight of over 1 km.",
+  "\u23f1\ufe0f Race lap record 1:22.384, Lando Norris, McLaren, 2024. Built for MotoGP in 2004; a full night race since 2023. Sources: formula1.com, Mercedes AMG F1, Honda."
+ ],
+ "question": "Who are you backing this weekend?",
+ "scenes": [
+  {
+   "type": "verdict",
+   "kicker": "Lusail International Circuit",
+   "lines": [
+    "Over 1 km of straight.",
+    "16 corners. One lap."
+   ],
+   "color": "#C9A96E",
+   "question": "",
+   "dur": 3.2,
+   "say": "Lusail. Over a kilometre of straight, sixteen corners, one lap."
+  },
+  {
+   "type": "tiles",
+   "kicker": "The numbers",
+   "headline": [
+    "Qatar GP",
+    "by the numbers"
+   ],
+   "dur": 5.0,
+   "tiles": [
+    {
+     "value": 5.419,
+     "fmt": "{:.3f}",
+     "unit": "km",
+     "color": "#F2F4F7",
+     "label": "One lap"
+    },
+    {
+     "value": 57,
+     "fmt": "{:.0f}",
+     "unit": "laps",
+     "color": "#F2F4F7",
+     "label": "Race distance"
+    },
+    {
+     "value": 16,
+     "fmt": "{:.0f}",
+     "unit": "corners",
+     "color": "#F2F4F7",
+     "label": "10 to the right, 6 to the left"
+    }
+   ],
+   "say": "Five point four one nine kilometres a lap. Fifty seven laps. Sixteen corners: ten right, six left."
+  },
+  {
+   "type": "tiles",
+   "kicker": "The record",
+   "headline": [
+    "Fastest race lap",
+    "ever here"
+   ],
+   "dur": 4.5,
+   "tiles": [
+    {
+     "value": 82.384,
+     "fmt": "lap",
+     "unit": "",
+     "color": "#FF8000",
+     "label": "Norris, McLaren, 2024"
+    },
+    {
+     "value": 1.068,
+     "fmt": "{:.3f}",
+     "unit": "km",
+     "color": "#F2F4F7",
+     "label": "Main straight"
+    }
+   ],
+   "say": "The race lap record: one minute twenty two point three eight four, Lando Norris, twenty twenty four."
+  },
+  {
+   "type": "verdict",
+   "kicker": "Built for bikes",
+   "lines": [
+    "MotoGP since 2004.",
+    "F1 under the lights."
+   ],
+   "color": "#C9A96E",
+   "question": "",
+   "dur": 3.6,
+   "say": "Built for MotoGP in two thousand four. Raced by Formula One at night."
+  },
+  {
+   "type": "verdict",
+   "kicker": "This Sunday",
+   "lines": [
+    "57 laps.",
+    "Under the lights."
+   ],
+   "color": "#C9A96E",
+   "question": "Who are you backing this weekend?",
+   "dur": 3.2,
+   "say": "Fifty seven laps, under the lights, this Sunday."
+  }
+ ]
+}

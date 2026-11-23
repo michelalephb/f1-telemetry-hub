@@ -98,7 +98,9 @@ def scene_tiles(c, s):
     def upd(e):
         for k, (n, lab, t) in enumerate(arts):
             q = _ease(e * 2.2 - k * 0.25)
-            n.set_text(t["fmt"].format(t["value"] * q) if q > 0 else "")
+            v_ = t["value"] * q
+            txt = f"{int(v_ // 60)}:{v_ % 60:06.3f}" if t["fmt"] == "lap" else t["fmt"].format(v_)   # lap times as m:ss.sss
+            n.set_text(txt if q > 0 else "")
             lab.set_alpha(q)
     return upd
 

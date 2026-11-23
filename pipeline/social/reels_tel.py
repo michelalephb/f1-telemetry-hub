@@ -2518,6 +2518,18 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             cap = _cap(p, kind, f"🛞 {name} {p.season}: every driver's tyres, lap by lap, in finishing order.",
                        f"⏱️ {sum(1 for s in stops if s == 1)} one stoppers, {sum(1 for s in stops if s == 2)} two stoppers, "
                        f"{sum(1 for s in stops if s >= 3)} on three or more.", "💬 Who was your favourite driver today?")
+    elif kind.startswith("story_spec_"):         # narrated story Reel written by Agent Binotto from checked sources
+        from . import story_reel
+        spec = json.loads((Path(__file__).parent / "stories" / f"{kind[len('story_spec_'):]}.json").read_text())
+        for s in spec["scenes"]:                  # colours by driver code, brand names allowed
+            for k_ in ("ca", "cb", "color"):
+                if isinstance(s.get(k_), str) and len(s[k_]) == 3 and s[k_].isupper():
+                    s[k_] = p.colors.get(s[k_], P.TEXT)
+            for t_ in s.get("tiles", []) + s.get("rows", []):
+                if isinstance(t_.get("color"), str) and len(t_["color"]) == 3 and t_["color"].isupper():
+                    t_["color"] = p.colors.get(t_["color"], P.TEXT)
+        story_reel.build(p, spec["scenes"], video, spec.get("tag", "The story"), spec.get("src", "Data: official results"))
+        cap = _cap(p, kind, *spec["caption"], "💬 " + spec.get("question", "Who are you backing this weekend?"))
     elif kind.startswith("story_duel_"):         # narrated story Reel, two cars, one lap (Michel, 22 Nov)
         from . import story_reel
         _, _, f_, o_ = kind.split("_")[:4]
