@@ -545,7 +545,8 @@ def cmd_reel(a) -> int:
         w = where_are_we(OpenF1(), datetime.now(TZ))
     p = preview.load(w["season"], w["round"])
     sid = f"{w['season']}_{w['round']:02d}_PREVIEW_REEL_{a.reel.upper().replace('@', '_Y')}"
-    if "@" in a.reel:                            # history Reel: same circuit, an earlier year ("lap_chart@2025")
+    history = "@" in a.reel
+    if history:                                  # history Reel: same circuit, an earlier year ("lap_chart@2025")
         base, yr = a.reel.split("@")
         from ..__main__ import schedule
         oc_ = OpenF1()
@@ -578,6 +579,9 @@ def cmd_reel(a) -> int:
         log.warning("reel %s: data not in yet, nothing posted", a.reel)
         return 0                                 # not a failure: no red run, no failure email (Michel, 21 Nov)
     video, cap = built
+    if history:                                  # history Reel in race week: ask who they back this weekend (23 Nov)
+        from .captions import FAN_QUESTIONS
+        cap = cap.replace(FAN_QUESTIONS[0], FAN_QUESTIONS[1])
     jobs = [(sid, "reel", {"video": video, "cover": video.parent / "cover.jpg", "files": [], "caption": cap})]
     report, failed = publish_jobs(sb, ig, jobs, {"reel": a.reel, "manual": True})
     if ig is not None:
