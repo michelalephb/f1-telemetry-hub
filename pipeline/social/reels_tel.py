@@ -1664,6 +1664,31 @@ LAST_NAMES = {"VER": "Verstappen", "ANT": "Antonelli", "RUS": "Russell", "LEC": 
               "NOR": "Norris", "PIA": "Piastri", "HAD": "Hadjar", "ALO": "Alonso", "GAS": "Gasly", "SAI": "Sainz",
               "ALB": "Albon", "COL": "Colapinto", "LIN": "Lindblad", "BOR": "Bortoleto", "HUL": "Hulkenberg",
               "BEA": "Bearman", "OCO": "Ocon", "LAW": "Lawson", "STR": "Stroll", "BOT": "Bottas", "PER": "Perez"}
+REPLAY_HOOKS = {                                 # (GP key, season, kind) -> two hook lines, anticipation (Qatar 2026 week)
+    ("LUSAIL", 2024, "replay_1_1"): ["Russell on pole.", "Watch turn 1."],
+    ("LUSAIL", 2025, "replay_7_8"): ["Lap 7. Safety car.", "Everyone pits. Except McLaren."],
+    ("LUSAIL", 2025, "replay_55_57"): ["Three laps to go.", "Can anyone catch him?"],
+    ("LUSAIL", 2023, "replay_1_1"): ["Verstappen on pole.", "Lights out."],
+    ("LUSAIL", 2023, "replay_57_57"): ["The last lap.", "Every lap led."],
+    ("LUSAIL", 2024, "replaysprint_19_19"): ["Last lap of the sprint.", "Watch the McLarens."],
+    ("LUSAIL", 2023, "replaysprint_19_19"): ["Last lap of the sprint.", "A rookie leads."],
+}
+REPLAY_LABELS = {                                # (GP key, season, kind) -> codes labelled on the map
+    ("LUSAIL", 2024, "replay_1_1"): ["RUS", "VER", "NOR"],
+    ("LUSAIL", 2025, "replay_7_8"): ["PIA", "NOR", "VER"],
+    ("LUSAIL", 2025, "replay_55_57"): ["VER", "PIA", "SAI"],
+    ("LUSAIL", 2023, "replay_1_1"): ["VER", "PIA", "NOR"],
+    ("LUSAIL", 2023, "replay_57_57"): ["VER", "PIA", "NOR"],
+    ("LUSAIL", 2024, "replaysprint_19_19"): ["NOR", "PIA", "RUS"],
+    ("LUSAIL", 2023, "replaysprint_19_19"): ["PIA", "VER", "NOR"],
+}
+
+
+def _tint(hexc: str, k: float) -> str:
+    """A lighter shade of a colour (k = share of white), for a second car of the same team."""
+    h = hexc.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return "#" + "".join(f"{int(v + (255 - v) * k):02X}" for v in (r, g, b))
 FIRST_NAMES = {"VER": "Max", "ANT": "Kimi", "RUS": "George", "LEC": "Charles", "HAM": "Lewis", "NOR": "Lando",
                "PIA": "Oscar", "HAD": "Isack", "ALO": "Fernando", "GAS": "Pierre", "SAI": "Carlos", "ALB": "Alex"}
 DEPLOY_SEGMENTS = {"LAS VEGAS": [("Main straight", 0.0, 0.045), ("The Strip", 0.53, 0.80),
@@ -2012,6 +2037,79 @@ def lap_chart_data(oc, year: int, ck: int) -> dict:
         rows.append({"code": c_, "color": cols.get(c_), "dashed": len(mate[team]) > 1 and c_ != min(mate[team], key=fin),
                      "pos": series, "stops": stops, "start": st[0][1] if st else None})
     return {"n": n, "rows": rows, "neutral": sorted(_neutral_laps(oc.get("race_control", session_key=sk)))}
+
+
+def replay_data(oc, year: int, ck: int, lap_from: int, lap_to: int, rot: float, session: str = "Race", dt: float = 0.33) -> dict:
+    """Every car between two laps (Michel, 23 Nov: race replays with cars and timers). Window: from the start of
+    lap_from (lap 1: the moment the polesitter's car moves off the grid, from its own speed trace) to the end of
+    lap_to, both taken from the leader's timing. Positions on track: OpenF1 location, interpolated on a common
+    clock, gaps over 2 s left empty. Tower: OpenF1 timing positions. PIT: pit timing. Safety car: race control."""
+    sk = _session(oc, year, ck, session)
+    codes, cols = _codes(oc, sk)
+    num = {v: k for k, v in codes.items()}
+    laps = oc.frame("laps", session_key=sk)
+    n_laps = int(laps["lap_number"].max())
+    st = pd.to_datetime(laps["date_start"], format="ISO8601", utc=True, errors="coerce")
+    laps = laps.assign(ts=st)
+    start2 = laps[laps["lap_number"] == 2]["ts"].min()
+    pos = oc.frame("position", session_key=sk)
+    pos["ts"] = pd.to_datetime(pos["date"], format="ISO8601", utc=True)
+    first = pos.sort_values("ts").groupby("driver_number").head(1)
+    pole = int(first.sort_values("position").iloc[0]["driver_number"])
+    car = oc.frame("car_data", [f"date>={(start2 - pd.Timedelta(seconds=240)).isoformat()}", f"date<={start2.isoformat()}"],
+                   session_key=sk, driver_number=pole)
+    ct = pd.to_datetime(car["date"], format="ISO8601", utc=True)
+    still = ct[car["speed"].to_numpy(float) < 3]
+    t_start = still.max() if len(still) else start2 - pd.Timedelta(seconds=100)
+    t0 = t_start - pd.Timedelta(seconds=3) if lap_from == 1 else laps[laps["lap_number"] == lap_from]["ts"].min()
+    if lap_to >= n_laps:
+        lead = laps[laps["lap_number"] == n_laps].sort_values("ts").iloc[0]
+        t1 = lead["ts"] + pd.Timedelta(seconds=float(lead["lap_duration"]) + 6)
+    else:
+        t1 = laps[laps["lap_number"] == lap_to + 1]["ts"].min()
+    T = (t1 - t0).total_seconds()
+    grid = np.arange(0.0, T, dt)
+    a = math.radians(rot)
+    cars = {}
+    for n_, code in codes.items():
+        loc = oc.frame("location", [f"date>={(t0 - pd.Timedelta(seconds=2)).isoformat()}", f"date<={(t1 + pd.Timedelta(seconds=2)).isoformat()}"],
+                       session_key=sk, driver_number=n_)
+        if loc.empty:
+            continue
+        lt = (pd.to_datetime(loc["date"], format="ISO8601", utc=True) - t0).dt.total_seconds().to_numpy()
+        x, y = loc["x"].to_numpy(float), loc["y"].to_numpy(float)
+        xr, yr = x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a)
+        gx, gy = np.interp(grid, lt, xr), np.interp(grid, lt, yr)
+        near = np.abs(lt[np.clip(np.searchsorted(lt, grid), 0, len(lt) - 1)] - grid) <= 2.0
+        gx[~near], gy[~near] = np.nan, np.nan
+        cars[code] = {"color": cols.get(code), "x": [None if q != q else round(float(q)) for q in gx],
+                      "y": [None if q != q else round(float(q)) for q in gy]}
+    order = []
+    for _, r in pos.iterrows():
+        tr = (r["ts"] - t0).total_seconds()
+        if tr <= T:
+            order.append({"t": round(max(tr, 0.0), 2), "code": codes.get(int(r["driver_number"])), "pos": int(r["position"])})
+    pits = []
+    for r in oc.get("pit", session_key=sk):
+        tr = (pd.Timestamp(r["date"]) - t0).total_seconds()
+        if 0 <= tr <= T:
+            pits.append({"t": round(tr, 2), "code": codes.get(int(r["driver_number"])), "dur": float(r.get("pit_duration") or 25),
+                         "lap": r.get("lap_number")})
+    sc, on = [], None
+    for r in sorted(oc.get("race_control", session_key=sk), key=lambda r: r["date"]):
+        msg = (r.get("message") or "").upper()
+        tr = (pd.Timestamp(r["date"]) - t0).total_seconds()
+        if "SAFETY CAR DEPLOYED" in msg and "VIRTUAL" not in msg:
+            on = tr
+        elif on is not None and ("SAFETY CAR IN THIS LAP" in msg or "TRACK CLEAR" in msg or "GREEN" in msg):
+            sc.append((round(max(on, 0.0), 2), round(min(tr, T), 2)))
+            on = None
+    sc = [w for w in sc if w[1] >= 0 and w[0] <= T]
+    lead_laps = [{"t": round((laps[laps["lap_number"] == L]["ts"].min() - t0).total_seconds(), 2), "lap": int(L)}
+                 for L in range(max(2, lap_from), min(lap_to, n_laps) + 1)]
+    return {"t": grid.round(2).tolist(), "cars": cars, "order": order, "pits": pits, "sc": sc, "laps": lead_laps,
+            "lap_from": lap_from, "n_laps": n_laps, "clock0": round((t0 - t_start).total_seconds(), 2),
+            "pole": codes.get(pole)}
 
 
 def L_code(Ls, k):
@@ -2518,6 +2616,53 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             cap = _cap(p, kind, f"🛞 {name} {p.season}: every driver's tyres, lap by lap, in finishing order.",
                        f"⏱️ {sum(1 for s in stops if s == 1)} one stoppers, {sum(1 for s in stops if s == 2)} two stoppers, "
                        f"{sum(1 for s in stops if s >= 3)} on three or more.", "💬 Who was your favourite driver today?")
+    elif kind.startswith("ghost_years_"):        # fastest laps of every year here, cars and timers (Michel, 23 Nov)
+        from . import reels_cam
+        sess = {"q": "Qualifying", "r": "Race", "sq": "Sprint Qualifying", "s": "Sprint"}[kind.split("_")[2]]
+        laps = []
+        for yr in range(2018, p.season + 1):
+            try:
+                L = lap_of(oc, yr, ck, sess, rot)
+            except Exception:
+                continue
+            laps.append(L | {"official": L["lap_s"]})
+        if len(laps) < 2:
+            return None
+        seen = {}
+        for L in laps:                            # same team colour twice: tint the older one
+            cc = (L["color"] or P.TEXT).lower()
+            if cc in seen:
+                L["color"] = _tint(cc, 0.45)
+            seen[L["color"].lower()] = 1
+        log.info("GHOST_JSON " + json.dumps([{k: L[k] for k in ("year", "code", "color", "t", "dist", "x", "y", "lap_s", "official")}
+                                             for L in laps], separators=(",", ":")))
+        what = "qualifying" if sess == "Qualifying" else sess.lower()
+        best = min(laps, key=lambda L: L["official"])
+        reels_cam.ghost_years(p, laps, video, [f"{len(laps)} years, one track.", "Who is fastest?"],
+                              f"{name}, fastest {what} lap of every year")
+        cap = _cap(p, kind, f"⏱️ The fastest {what} lap of every {name} on our data, racing on one track: " +
+                   ", ".join(f"{L['year']} {L['code']} {_clock(L['official'])}" for L in laps) + ".",
+                   f"🏁 Fastest of all: {best['code']} in {best['year']}.",
+                   "📐 Lap times: official timing via OpenF1. Each car runs on its own lap clock.")
+    elif kind.startswith("replay_") or kind.startswith("replaysprint_"):   # race replay, every car (Michel, 23 Nov)
+        from . import reels_cam
+        parts = kind.split("_")
+        lf, lt_ = int(parts[1]), int(parts[2])
+        sess = "Sprint" if kind.startswith("replaysprint_") else "Race"
+        try:
+            ref = lap_of(oc, p.season, ck, sess, rot)
+            RD = replay_data(oc, p.season, ck, lf, lt_, rot, sess)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        log.info("REPLAY_JSON " + json.dumps({"D": RD, "ref": {k: ref[k] for k in ("x", "y", "dist")}}, separators=(",", ":")))
+        hook = REPLAY_HOOKS.get((p.title, p.season, kind), [f"{name} {p.season}", f"laps {lf} to {lt_}, every car"])
+        what = "sprint" if sess == "Sprint" else "race"
+        sub_ = f"{name} {p.season} {what}, " + (f"lap {lf}" if lf == lt_ else f"laps {lf} to {lt_}")
+        reels_cam.race_replay(p, ref, RD, video, hook, sub_, label=REPLAY_LABELS.get((p.title, p.season, kind)))
+        cap = _cap(p, kind, f"🎬 {name} {p.season} {what}, " + (f"lap {lf}" if lf == lt_ else f"laps {lf} to {lt_}") +
+                   ", every car on the map, with the timing tower.",
+                   "📐 Positions: OpenF1 location and timing data, shown faster than real time.")
     elif kind.startswith("story_spec_"):         # narrated story Reel written by Agent Binotto from checked sources
         from . import story_reel
         spec = json.loads((Path(__file__).parent / "stories" / f"{kind[len('story_spec_'):]}.json").read_text())
