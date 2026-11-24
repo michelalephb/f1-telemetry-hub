@@ -21,6 +21,7 @@ PHASE = {"FULL THROTTLE": "#2EE6A6", "BRAKING": "#FF3B3B", "LIFT": "#F5C542"}
 
 
 def _clock(s: float) -> str:
+    s = max(0.0, s)                                        # a replay window can open a few seconds before lights out
     return f"{int(s // 60)}:{s % 60:06.3f}"
 
 
@@ -254,8 +255,10 @@ def ghost_years(p, laps: list[dict], out: Path, hook: list[str], sub: str, speed
         col = L["color"]
         dots.append(ax.plot([], [], "o", ms=20, color=col, mec="#05070A", mew=2.5, zorder=5 + k)[0])
         tags.append(ax.text(0, 0, f"{L['year']}", fontsize=15, color=col, family=P.FONT, weight=600, zorder=9,
-                            ha="left", va="bottom"))
+                            ha="left", va="center"))
     c.text(0.08, 0.360, "LAP TIMER", 12, color=P.MUTED, weight=600, ha="left", track=True)
+    big = c.text(0.92, 0.360, "", 22, color=P.TEXT, weight=200, ha="right")
+    c.text(0.5, 0.360, f"{speedup:g}X SPEED", 11, color=P.MUTED, weight=600, track=True)
     for k, L in enumerate(laps):
         y = 0.320 - k * 0.042
         rows.append((c.text(0.08, y, f"{L['year']}", 26, color=L["color"], weight=300, ha="left"),
@@ -273,17 +276,31 @@ def ghost_years(p, laps: list[dict], out: Path, hook: list[str], sub: str, speed
     n = int(T / speedup * FPS)
     for f in range(n + int(3.0 * FPS)):
         tt = min(T, T * f / n)
-        prog = []
+        prog, frac = [], []
         for k, L in enumerate(laps):
             s = float(np.interp(min(tt, offi[k]), tl[k], dl[k])) / dl[k][-1] * Lr if tt < offi[k] else Lr
             xx, yy = np.interp(s, D, X), np.interp(s, D, Y)
             dots[k].set_data([xx], [yy])
-            tags[k].set_position((xx + Lr * 0.004, yy + Lr * 0.004))
+            # stagger the year tags so cars running close together stay readable
+            tags[k].set_position((xx + Lr * 0.012, yy + Lr * (0.012 - 0.012 * k)))
             prog.append((-(s if tt < offi[k] else Lr + (T - offi[k])), k))
+            frac.append(s / Lr if tt < offi[k] else 1.0)
+        lead = max(range(len(laps)), key=lambda k: (frac[k], -offi[k]))
+        big.set_text(_clock(min(tt, T)))
+        for k, L in enumerate(laps):
             yr, cd, clk, gap = rows[k]
             done = tt >= offi[k]
-            clk.set_text(_clock(min(tt, offi[k]))), clk.set_color(L["color"] if done else P.TEXT)
-            gap.set_text(("FASTEST" if offi[k] == best else f"+{offi[k] - best:.3f}") if done else "")
+            if done:
+                clk.set_text(_clock(offi[k])), clk.set_color(L["color"])
+                gap.set_text("FASTEST" if offi[k] == best else f"+{offi[k] - best:.3f}")
+            else:
+                clk.set_text(""), gap.set_text("")
+                if k != lead and frac[k] > 0.002:
+                    # live gap on the road: time since the leading lap passed this car's point of the lap
+                    tl_at = float(np.interp(frac[k], dl[lead] / dl[lead][-1], tl[lead]))
+                    clk.set_text(f"+{max(0.0, tt - tl_at):.3f}"), clk.set_color(P.MUTED)
+                elif k == lead:
+                    clk.set_text("LEADS"), clk.set_color(L["color"])
         for j, (_, k) in enumerate(sorted(prog)):              # tower re-sorts by who is ahead on the road
             y = 0.320 - j * 0.042
             for a in rows[k]:

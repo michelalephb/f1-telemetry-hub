@@ -1684,6 +1684,13 @@ REPLAY_LABELS = {                                # (GP key, season, kind) -> cod
 }
 
 
+# facts the ghost reel alone would get wrong (checked: Wikipedia race articles, FIA decisions)
+GHOST_NOTES = {
+    ("LUSAIL", "ghost_years_q"): "ℹ️ 2024: Verstappen set the fastest time, but a one place grid penalty for driving "
+                                 "slowly put Russell on pole. 2021 is not shown: no car data for it (Hamilton, pole 1:20.827).",
+}
+
+
 def _tint(hexc: str, k: float) -> str:
     """A lighter shade of a colour (k = share of white), for a second car of the same team."""
     h = hexc.lstrip("#")
@@ -2640,9 +2647,10 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         best = min(laps, key=lambda L: L["official"])
         reels_cam.ghost_years(p, laps, video, [f"{len(laps)} years, one track.", "Who is fastest?"],
                               f"{name}, fastest {what} lap of every year")
-        cap = _cap(p, kind, f"⏱️ The fastest {what} lap of every {name} on our data, racing on one track: " +
-                   ", ".join(f"{L['year']} {L['code']} {_clock(L['official'])}" for L in laps) + ".",
+        cap = _cap(p, kind, f"⏱️ The fastest {what} lap at {name} in each year from {laps[0]['year']} to {laps[-1]['year']}, "
+                   "racing on one track: " + ", ".join(f"{L['year']} {L['code']} {_clock(L['official'])}" for L in laps) + ".",
                    f"🏁 Fastest of all: {best['code']} in {best['year']}.",
+                   GHOST_NOTES.get((p.title, kind), ""),
                    "📐 Lap times: official timing via OpenF1. Each car runs on its own lap clock.")
     elif kind.startswith("replay_") or kind.startswith("replaysprint_"):   # race replay, every car (Michel, 23 Nov)
         from . import reels_cam
