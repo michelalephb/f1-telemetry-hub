@@ -1450,7 +1450,8 @@ def tyre_stints(p, rows: list[dict], laps: int, out: Path, hook: list[str], sub:
 def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: list[str], sub: str,
                   colors: dict[str, str], corner_fracs: dict[str, float] | None = None,
                   src: str = "On track passes: OpenF1 position swaps, pit stop swaps and safety car laps removed",
-                  mark: str | None = None) -> Path:
+                  mark: str | None = None, counter_label: str = "POSITION SWAPS ON TRACK", legend: list | None = None,
+                  final: tuple[str, str] | None = None, show_laps: bool = True) -> Path:
     """Every on track pass of the race (Michel, 21 Nov): a big counter ticks up lap by lap and each pass pops onto
     the map where it happened, in the overtaking driver's colour, so the overtaking hot spots build up on their own.
     Ends on the total, the hot spot and the top overtaker. passes: [{lap, frac (share of the lap), who, whom}]."""
@@ -1465,8 +1466,12 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
     xs = np.interp([q["frac"] for q in passes], fr, R_["x"])
     ys = np.interp([q["frac"] for q in passes], fr, R_["y"])
     ring = mp.scatter([], [], s=[], facecolors="none", edgecolors=[], linewidths=2, zorder=6)
+    if legend:                                                     # e.g. one colour per year
+        w = 0.8 / len(legend)
+        for k, (lab, col_) in enumerate(legend):
+            c.text(0.1 + w * (k + 0.5), 0.705, lab, 20, color=col_, weight=600, track=True)
     cnt = c.text(0.5, 0.30, "0", 96, weight=200)
-    c.text(0.5, 0.258, "POSITION SWAPS ON TRACK", 13, color=P.MUTED, weight=600, track=True)
+    c.text(0.5, 0.258, counter_label, 13, color=P.MUTED, weight=600, track=True)
     lap_t = c.text(0.5, 0.228, "", 18, color=P.MUTED, weight=300)
     _foot(c, src)
     order = sorted(range(len(passes)), key=lambda k: passes[k]["lap"] + passes[k]["frac"])
@@ -1489,7 +1494,7 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
             ring.set_sizes(300 + 1600 * (1 - age[fresh] / (laps * 0.03)))
             ring.set_edgecolors([cols[k] for k in np.where(fresh)[0]])
         cnt.set_text(str(m))
-        lap_t.set_text(f"LAP {max(1, min(laps, int(np.ceil(x))))} OF {laps}")
+        lap_t.set_text(f"LAP {max(1, min(laps, int(np.ceil(x))))} OF {laps}" if show_laps else "")
         r_.add(c.fig)
     ring.set_offsets(np.empty((0, 2)))
     # hot spot: the busiest 6% of the lap; named after the nearest corner when known
@@ -1513,8 +1518,86 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
         tops[q["who"]] = tops.get(q["who"], 0) + 1
     best = max(tops, key=tops.get)
     cnt.set_color(P.GOLD)
-    lap_t.set_text(f"MOST PASSES: {best}, {tops[best]}")
-    lap_t.set_color(colors.get(best, P.TEXT))
+    lap_t.set_text(final[0] if final else f"MOST PASSES: {best}, {tops[best]}")
+    lap_t.set_color(final[1] if final else colors.get(best, P.TEXT))
+    r_.add(c.fig, int(3.5 * FPS))
+    plt.close(c.fig)
+    return r_.close()
+
+
+SPOT_YEAR_COLORS = ["#6692FF", "#A855F7", "#FF8000", "#27F4D2", "#E8002D"]   # one per year, oldest first
+
+
+def spot_passes(oc, season: int, ck: int, rot: float) -> dict:
+    """Where you can pass here (Michel, 24 Nov: show where the overtake spots are). Every earlier race at this track
+    we have data for, racing passes only: lap 1 is dropped (start shuffle), and so is any car passed by 4 or more
+    cars on one lap (a damaged or crawling car is not overtaking). Pass positions use each year's own race lap."""
+    out, years = [], []
+    for yr in range(2018, season):
+        try:
+            O = overtake_data(oc, yr, ck, rot)
+            ref = lap_of(oc, yr, ck, "Race", rot)
+        except Exception:
+            continue
+        R_ = {k: np.array(v, float) if isinstance(v, list) else v for k, v in ref.items()}
+        by = {}
+        for q in O["passes"]:
+            by.setdefault((q["lap"], q["whom"]), set()).add(q["who"])
+        keep = [q for q in O["passes"] if q["lap"] > 1 and len(by[(q["lap"], q["whom"])]) < 4]
+        for q in keep:
+            q["frac"] = float(np.interp(q["tfrac"] * R_["t"][-1], R_["t"], R_["dist"]) / R_["dist"][-1])
+            q["year"] = yr
+        out += keep
+        years.append({"year": yr, "n": len(keep), "laps": O["laps"]})
+    return {"passes": out, "years": years}
+
+
+def points_barrace(p, points: list[dict], names: dict, colors: dict, out: Path, hook: list[str], sub: str,
+                   src: str = "Official standings after each round (Jolpica)", per_round: float = 0.85) -> Path:
+    """The championship as a bar chart race (Michel, 24 Nov): every driver, bars grow and overtake round by round,
+    the round counter and the race name on screen, ends on the leader and the gap to second."""
+    P.set_event(p)
+    c = _card(p)
+    _hook(c, hook, sub, y0=0.83)
+    codes = sorted({cd for x in points for cd in x["pts"]})
+    n = len(codes)
+    ax = c.fig.add_axes([0.20, 0.25, 0.68, 0.47])
+    ax.set_facecolor("none"), ax.axis("off")
+    top = max(max(x["pts"].values()) for x in points)
+    rnd_t = c.text(0.08, 0.735, "", 22, color=P.TEXT, weight=300, ha="left")
+    race_t = c.text(0.92, 0.735, "", 14, color=P.MUTED, weight=600, ha="right", track=True)
+    verdict = c.text(0.5, 0.215, "", 24, color=P.GOLD, weight=400)
+    _foot(c, src)
+    bars = {cd: ax.barh(0, 0, height=0.72, color=colors.get(cd, P.TEXT))[0] for cd in codes}
+    labs = {cd: ax.text(0, 0, cd, fontsize=13, color=colors.get(cd, P.TEXT), family=P.FONT, weight=700, ha="right",
+                        va="center", transform=ax.transData) for cd in codes}
+    vals = {cd: ax.text(0, 0, "", fontsize=13, color=P.TEXT, family=P.FONT, weight=300, va="center") for cd in codes}
+    ax.set_ylim(n - 0.5, -0.5)
+    ax.set_xlim(0, top * 1.12)
+    pad = top * 0.015
+    seq = [{cd: 0.0 for cd in codes}] + [{cd: x["pts"].get(cd, 0.0) for cd in codes} for x in points]
+    r_ = Reel(out)
+    steps = int(per_round * FPS)
+    rank_prev = {cd: k for k, cd in enumerate(sorted(codes))}
+    for i in range(1, len(seq)):
+        a, b = seq[i - 1], seq[i]
+        rank_new = {cd: k for k, cd in enumerate(sorted(codes, key=lambda q: (-b[q], q)))}
+        for f in range(steps):
+            u = (f + 1) / steps
+            e = u * u * (3 - 2 * u)                              # smooth step: bars glide into their new places
+            for cd in codes:
+                v = a[cd] + (b[cd] - a[cd]) * e
+                y = rank_prev[cd] + (rank_new[cd] - rank_prev[cd]) * e
+                bars[cd].set_width(v), bars[cd].set_y(y - 0.36)
+                labs[cd].set_position((-pad, y))
+                vals[cd].set_position((v + pad, y)), vals[cd].set_text(f"{v:.0f}")
+            rnd_t.set_text(f"ROUND {points[i - 1]['round']} OF {points[-1]['round']}")
+            race_t.set_text(names.get(points[i - 1]["round"], "").upper())
+            r_.add(c.fig)
+        rank_prev = rank_new
+    last = seq[-1]
+    lead, second = sorted(codes, key=lambda q: -last[q])[:2]
+    verdict.set_text(f"{lead} leads {second} by {last[lead] - last[second]:.0f} points")
     r_.add(c.fig, int(3.5 * FPS))
     plt.close(c.fig)
     return r_.close()
@@ -2589,6 +2672,65 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "instant swap backs removed. Counts differ by method: we count every swap at a timing loop, including passes "
                    "that were reversed later in the lap, so our number is higher than most published totals.",
                    "💬 Who was your favourite driver today?")
+    elif kind in ("overtake_spots", "overtake_spots_q"):   # where you can pass here (Michel, 24 Nov, T1 and T2)
+        try:
+            S = spot_passes(oc, p.season, ck, rot)
+            ref = lap_of(oc, max(y["year"] for y in S["years"]), ck, "Race", rot)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        if len(S["passes"]) < 5:
+            return None
+        yrs = [y["year"] for y in S["years"]]
+        ycol = {str(y): SPOT_YEAR_COLORS[k % len(SPOT_YEAR_COLORS)] for k, y in enumerate(yrs)}
+        passes = [q | {"who": str(q["year"]), "lap": q["lap"]} for q in S["passes"]]
+        D = strength_data([ref, ref])
+        cn = CORNER_NAMES.get((p.title, len(D["fa"])))
+        cf = dict(zip(cn, D["fa"])) if cn else None
+        log.info("SPOTS_JSON " + json.dumps({"passes": passes, "years": S["years"], "colors": ycol,
+                                             "ref": {k: ref[k] for k in ("x", "y", "dist", "t", "speed", "code", "lap_s")}},
+                                            separators=(",", ":")))
+        N, k_ = len(passes), len(yrs)
+        hook = ([f"{N} passes in {k_} races.", "Here is where."] if kind == "overtake_spots" else
+                ["Where can you", f"overtake at {name}?"])
+        per = ", ".join(f"{y['year']}: {y['n']}" for y in S["years"])
+        overtakes_map(p, ref, passes, max(y["laps"] for y in S["years"]), video, hook,
+                      f"{name} races {yrs[0]} to {yrs[-1]}, every pass after lap 1", ycol, cf,
+                      src="Passes: OpenF1 position swaps. Lap 1, pit stops, safety cars and damaged cars removed",
+                      counter_label="RACING PASSES", legend=[(str(y), ycol[str(y)]) for y in yrs],
+                      final=(per.upper(), P.MUTED), show_laps=True)
+        cap = _cap(p, kind, f"📍 Where you can pass at {name}: every racing pass in the last {k_} races here, on the map where it happened.",
+                   f"🔢 {N} passes in total ({per}).",
+                   "🎯 The gold ring marks the busiest spot. Watch it on Sunday.",
+                   "📐 Our count from OpenF1 position swaps: lap 1, pit stop swaps, safety car laps, swaps reversed within "
+                   "3 s and cars passed by 4 or more cars on one lap (damaged or slow) are removed. Other counts use other rules.",
+                   "💬 Where will the race be won this weekend?")
+    elif kind == "points_race_all":              # championship bar chart race, every driver (Michel, 24 Nov, T4)
+        from .. import jolpica
+        try:
+            from . import news
+            st = news.standings(p.season)
+            pts = []
+            for rnd in range(1, st["after_round"] + 1):
+                ds = jolpica._get(f"{p.season}/{rnd}/driverStandings.json?limit=40")["StandingsTable"]["StandingsLists"]
+                if ds:
+                    pts.append({"round": rnd, "pts": {x["Driver"].get("code"): float(x["points"]) for x in ds[0]["DriverStandings"]}})
+            sched = jolpica._get(f"{p.season}.json?limit=40")["RaceTable"]["Races"]
+            names = {int(r["round"]): r["raceName"].replace(" Grand Prix", " GP") for r in sched}
+        except Exception as e:
+            log.warning("points_race_all: data not in: %s", e)
+            return None
+        if len(pts) < 3:
+            return None
+        cols = _colors_now(oc, p.season, p.colors)
+        log.info("POINTSALL_JSON " + json.dumps({"pts": pts, "names": names, "colors": cols}, separators=(",", ":")))
+        last = pts[-1]["pts"]
+        lead, second = sorted(last, key=lambda q: -last[q])[:2]
+        points_barrace(p, pts, names, cols, video, [f"{len(pts)} rounds.", "Watch the title fight."],
+                       f"{p.season} drivers championship, every driver")
+        cap = _cap(p, kind, f"🏆 The {p.season} drivers championship, round by round, every driver.",
+                   f"{drv(lead, p.colors)} {last[lead]:.0f} pts\n{drv(second, p.colors)} {last[second]:.0f} pts",
+                   f"ℹ️ Official standings after round {pts[-1]['round']}.", "💬 Find your driver. Where did the season turn?")
     elif kind in ("race_trace", "tyre_stints"):  # the race in one chart / every strategy (Michel, 21 Nov)
         try:
             RR = race_rows(oc, p.season, ck)
