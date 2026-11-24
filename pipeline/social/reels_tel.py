@@ -1507,6 +1507,8 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
     name = None
     if corner_fracs:
         name = min(corner_fracs, key=lambda k: abs(corner_fracs[k] - hot))
+        if abs(corner_fracs[name] - hot) > 0.04:                 # too far from any named corner: leave it unnamed
+            name = None
     hx, hy = np.interp(hot, fr, R_["x"]), np.interp(hot, fr, R_["y"])
     mp.scatter([hx], [hy], s=2600, facecolors="none", edgecolors=P.GOLD, linewidths=3, zorder=7)
     x_lo, x_hi = mp.get_xlim()
@@ -1561,24 +1563,24 @@ def points_barrace(p, points: list[dict], names: dict, colors: dict, out: Path, 
     _hook(c, hook, sub, y0=0.83)
     codes = sorted({cd for x in points for cd in x["pts"]})
     n = len(codes)
-    ax = c.fig.add_axes([0.20, 0.25, 0.68, 0.47])
+    ax = c.fig.add_axes([0.17, 0.24, 0.71, 0.44])
     ax.set_facecolor("none"), ax.axis("off")
     top = max(max(x["pts"].values()) for x in points)
-    rnd_t = c.text(0.08, 0.735, "", 22, color=P.TEXT, weight=300, ha="left")
-    race_t = c.text(0.92, 0.735, "", 14, color=P.MUTED, weight=600, ha="right", track=True)
+    rnd_t = c.text(0.08, 0.700, "", 22, color=P.TEXT, weight=300, ha="left")
+    race_t = c.text(0.92, 0.700, "", 15, color=P.MUTED, weight=600, ha="right", track=True)
     verdict = c.text(0.5, 0.215, "", 24, color=P.GOLD, weight=400)
     _foot(c, src)
     bars = {cd: ax.barh(0, 0, height=0.72, color=colors.get(cd, P.TEXT))[0] for cd in codes}
-    labs = {cd: ax.text(0, 0, cd, fontsize=13, color=colors.get(cd, P.TEXT), family=P.FONT, weight=700, ha="right",
+    labs = {cd: ax.text(0, 0, cd, fontsize=16, color=colors.get(cd, P.TEXT), family=P.FONT, weight=700, ha="right",
                         va="center", transform=ax.transData) for cd in codes}
-    vals = {cd: ax.text(0, 0, "", fontsize=13, color=P.TEXT, family=P.FONT, weight=300, va="center") for cd in codes}
+    vals = {cd: ax.text(0, 0, "", fontsize=15, color=P.TEXT, family=P.FONT, weight=300, va="center") for cd in codes}
     ax.set_ylim(n - 0.5, -0.5)
     ax.set_xlim(0, top * 1.12)
     pad = top * 0.015
     seq = [{cd: 0.0 for cd in codes}] + [{cd: x["pts"].get(cd, 0.0) for cd in codes} for x in points]
     r_ = Reel(out)
     steps = int(per_round * FPS)
-    rank_prev = {cd: k for k, cd in enumerate(sorted(codes))}
+    rank_prev = {cd: k for k, cd in enumerate(sorted(codes, key=lambda q: (-seq[1][q], q)))}   # start in round 1 order
     for i in range(1, len(seq)):
         a, b = seq[i - 1], seq[i]
         rank_new = {cd: k for k, cd in enumerate(sorted(codes, key=lambda q: (-b[q], q)))}
@@ -2687,6 +2689,13 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         D = strength_data([ref, ref])
         cn = CORNER_NAMES.get((p.title, len(D["fa"])))
         cf = dict(zip(cn, D["fa"])) if cn else None
+        if not cf:                                # no corner map here: name turn 1, the first big stop after the line
+            dd, vv = np.asarray(ref["dist"], float), np.asarray(ref["speed"], float)
+            m = dd < 0.35 * dd[-1]
+            i0 = int(np.argmax(vv[m]))
+            i1 = i0 + int(np.argmin(vv[m][i0:]))
+            if vv[i0] - vv[i1] > 80:
+                cf = {"TURN 1": float(dd[i1] / dd[-1])}
         log.info("SPOTS_JSON " + json.dumps({"passes": passes, "years": S["years"], "colors": ycol,
                                              "ref": {k: ref[k] for k in ("x", "y", "dist", "t", "speed", "code", "lap_s")}},
                                             separators=(",", ":")))
@@ -2704,7 +2713,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "🎯 The gold ring marks the busiest spot. Watch it on Sunday.",
                    "📐 Our count from OpenF1 position swaps: lap 1, pit stop swaps, safety car laps, swaps reversed within "
                    "3 s and cars passed by 4 or more cars on one lap (damaged or slow) are removed. Other counts use other rules.",
-                   "💬 Where will the race be won this weekend?")
+                   "💬 Who are you backing this weekend?")
     elif kind == "points_race_all":              # championship bar chart race, every driver (Michel, 24 Nov, T4)
         from .. import jolpica
         try:
@@ -2730,7 +2739,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                        f"{p.season} drivers championship, every driver")
         cap = _cap(p, kind, f"🏆 The {p.season} drivers championship, round by round, every driver.",
                    f"{drv(lead, p.colors)} {last[lead]:.0f} pts\n{drv(second, p.colors)} {last[second]:.0f} pts",
-                   f"ℹ️ Official standings after round {pts[-1]['round']}.", "💬 Find your driver. Where did the season turn?")
+                   f"ℹ️ Official standings after round {pts[-1]['round']}.", "💬 Who are you backing this weekend?")
     elif kind in ("race_trace", "tyre_stints"):  # the race in one chart / every strategy (Michel, 21 Nov)
         try:
             RR = race_rows(oc, p.season, ck)
