@@ -204,8 +204,10 @@ class UploadPost:
         return [("user", self.user), ("platform[]", "instagram"), ("title", caption), ("instagram_title", caption),
                 ("async_upload", "true"), ("request_id", request_id)]
 
-    def send_reel(self, video: str, cover: str | None, caption: str, request_id: str) -> None:
-        data = self._common(caption, request_id) + [("media_type", "REELS"), ("share_to_feed", "true")]
+    def send_reel(self, video: str, cover: str | None, caption: str, request_id: str, trial: bool = False) -> None:
+        # Trial Reel: Upload-Post share_mode; Instagram shows it to non followers and shares it with followers if liked
+        data = self._common(caption, request_id) + [("media_type", "REELS")] + (
+            [("share_mode", "TRIAL_REELS_SHARE_TO_FOLLOWERS_IF_LIKED")] if trial else [("share_to_feed", "true")])
         with open(video, "rb") as v:
             files = [("video", ("reel.mp4", v, "video/mp4"))]
             if cover:

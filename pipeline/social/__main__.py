@@ -174,6 +174,13 @@ def approved(sb, sid: str) -> bool:
     return bool(sb.table("ig_approvals").select("session_id").eq("session_id", sid).execute().data)
 
 
+def is_trial(sb, sid: str) -> bool:
+    """Michel, 24 Nov: test Reels as Instagram Trial Reels (shown to non followers first). An approval whose note
+    starts with TRIAL publishes the Reel as a trial; Instagram shares it with followers only if it performs."""
+    rows = sb.table("ig_approvals").select("note").eq("session_id", sid).execute().data or []
+    return any((r.get("note") or "").strip().upper().startswith("TRIAL") for r in rows)
+
+
 def send_files(sb, ig: UploadPost, sid: str, kind: str, story: str, built: dict, attempts: int, entry: dict, report: list) -> bool:
     """Upload-Post: send the local files. The request id is saved first, so a crash or timeout is
     picked up by resume() on the next run instead of being sent again.
@@ -199,7 +206,8 @@ def send_files(sb, ig: UploadPost, sid: str, kind: str, story: str, built: dict,
     save_row(sb, key | {"status": "queued", "container_id": f"up:{rid}", "attempts": attempts, "error": None})
     try:
         if kind == "reel":
-            ig.send_reel(str(built["video"]), str(built["cover"]) if built["cover"] else None, built["caption"], rid)
+            ig.send_reel(str(built["video"]), str(built["cover"]) if built["cover"] else None, built["caption"], rid,
+                         trial=is_trial(sb, sid))
         elif kind == "story":
             ig.send_story(str(built["files"][0]), rid)
         else:
