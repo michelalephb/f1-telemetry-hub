@@ -1527,6 +1527,9 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
     return r_.close()
 
 
+# checked facts for the championship Reel caption (Michel, 24 Nov). Source: crash.net, standings after the Mexico City GP
+TITLE_NOTES = {2026: "👑 Antonelli sealed the title in Mexico City, the youngest champion in F1 history."}
+
 SPOT_YEAR_COLORS = ["#6692FF", "#A855F7", "#FF8000", "#27F4D2", "#E8002D"]   # one per year, oldest first
 
 
@@ -2735,9 +2738,10 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         log.info("POINTSALL_JSON " + json.dumps({"pts": pts, "names": names, "colors": cols}, separators=(",", ":")))
         last = pts[-1]["pts"]
         lead, second = sorted(last, key=lambda q: -last[q])[:2]
-        points_barrace(p, pts, names, cols, video, [f"{len(pts)} rounds.", "Watch the title fight."],
+        points_barrace(p, pts, names, cols, video, [f"{len(pts)} rounds.", "Find your driver."],
                        f"{p.season} drivers championship, every driver")
         cap = _cap(p, kind, f"🏆 The {p.season} drivers championship, round by round, every driver.",
+                   TITLE_NOTES.get(p.season, ""),
                    f"{drv(lead, p.colors)} {last[lead]:.0f} pts\n{drv(second, p.colors)} {last[second]:.0f} pts",
                    f"ℹ️ Official standings after round {pts[-1]['round']}.", "💬 Who are you backing this weekend?")
     elif kind in ("race_trace", "tyre_stints"):  # the race in one chart / every strategy (Michel, 21 Nov)
