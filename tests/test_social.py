@@ -698,3 +698,14 @@ def test_caption_keeps_race_week_question():
     assert "💬 Who are you backing this weekend?" in s and "favourite driver" not in s
     s = clean("🏁 Q3 in 30 seconds.\n\n💬 Where would you find the time?\n\n#F1")
     assert "💬 Who was your favourite driver today?" in s and "find the time" not in s
+
+
+def test_history_reel_captions_ask_one_fan_question():
+    """Ghost years and race replay Reels (race week history) end on the one plain race week question (24 Nov)."""
+    import re
+    from pathlib import Path
+    src = (Path(__file__).parent.parent / "pipeline" / "social" / "reels_tel.py").read_text()
+    for start in ('elif kind.startswith("ghost_years_")', 'elif kind.startswith("replay_") or kind.startswith("replaysprint_")'):
+        block = src[src.index(start):]
+        block = block[:block.index("\n    elif ", 10)]
+        assert len(re.findall(r"💬 Who are you backing this weekend\?", block)) == 1, start

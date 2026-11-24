@@ -2651,7 +2651,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "racing on one track: " + ", ".join(f"{L['year']} {L['code']} {_clock(L['official'])}" for L in laps) + ".",
                    f"🏁 Fastest of all: {best['code']} in {best['year']}.",
                    GHOST_NOTES.get((p.title, kind), ""),
-                   "📐 Lap times: official timing via OpenF1. Each car runs on its own lap clock.")
+                   "📐 Lap times: official timing via OpenF1. Each car runs on its own lap clock.",
+                   "💬 Who are you backing this weekend?")              # one plain fan question (Michel, 20 Nov)
     elif kind.startswith("replay_") or kind.startswith("replaysprint_"):   # race replay, every car (Michel, 23 Nov)
         from . import reels_cam
         parts = kind.split("_")
@@ -2670,7 +2671,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         reels_cam.race_replay(p, ref, RD, video, hook, sub_, label=REPLAY_LABELS.get((p.title, p.season, kind)))
         cap = _cap(p, kind, f"🎬 {name} {p.season} {what}, " + (f"lap {lf}" if lf == lt_ else f"laps {lf} to {lt_}") +
                    ", every car on the map, with the timing tower.",
-                   "📐 Positions: OpenF1 location and timing data, shown faster than real time.")
+                   "📐 Positions: OpenF1 location and timing data, shown faster than real time.",
+                   "💬 Who are you backing this weekend?")              # one plain fan question (Michel, 20 Nov)
     elif kind.startswith("story_spec_"):         # narrated story Reel written by Agent Binotto from checked sources
         from . import story_reel
         spec = json.loads((Path(__file__).parent / "stories" / f"{kind[len('story_spec_'):]}.json").read_text())
