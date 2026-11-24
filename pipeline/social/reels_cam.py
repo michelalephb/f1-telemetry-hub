@@ -214,3 +214,161 @@ def lap_chart(p, D: dict, out: Path, sub: str, window: int = 12, per_lap: float 
         r_.add(c.fig)
     plt.close(c.fig)
     return r_.close()
+
+
+def _ref_path(ref: dict):
+    d, x, y = (np.asarray(ref[k], float) for k in ("dist", "x", "y"))
+    keep = np.concatenate([[True], np.diff(d) > 0.05])
+    return d[keep], x[keep], y[keep]
+
+
+def _map(c, rect, x, y, lw=10):
+    ax = c.fig.add_axes(rect)
+    ax.set_aspect("equal"), ax.axis("off")
+    pad = 0.05 * max(np.ptp(x), np.ptp(y))
+    ax.set_xlim(x.min() - pad, x.max() + pad), ax.set_ylim(y.min() - pad, y.max() + pad)
+    ax.plot(x, y, color="#2A3242", lw=lw, solid_capstyle="round", zorder=1)
+    ax.plot(x, y, color="#3A4458", lw=1.2, zorder=2)
+    return ax
+
+
+def ghost_years(p, laps: list[dict], out: Path, hook: list[str], sub: str, speedup: float = 2.6,
+                src: str = "Lap times: official timing. Positions: OpenF1 car data") -> Path:
+    """Fastest laps from different years on one track (Michel, 23 Nov: animated history with cars and timers).
+    Every car runs on its own clock: its position is its own distance along the lap mapped onto one reference
+    line, so years with slightly different coordinates still share one track. A timer per car runs and stops on
+    the official lap time; the tower re-sorts live by who is ahead on the road."""
+    P.set_event(p)
+    ref = max(laps, key=lambda L: L["year"])
+    D, X, Y = _ref_path(ref)
+    Lr = D[-1]
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    c.text(0.5, 0.835, hook[0], 46, weight=300)
+    if len(hook) > 1:
+        c.text(0.5, 0.800, hook[1], 46, color=P.GOLD, weight=300)
+    c.text(0.5, 0.772, sub.upper(), 14, color=P.CYAN, weight=600, track=True)
+    ax = _map(c, [0.05, 0.40, 0.90, 0.35], X, Y)
+    dots, tags, rows = [], [], []
+    for k, L in enumerate(laps):
+        col = L["color"]
+        dots.append(ax.plot([], [], "o", ms=20, color=col, mec="#05070A", mew=2.5, zorder=5 + k)[0])
+        tags.append(ax.text(0, 0, f"{L['year']}", fontsize=15, color=col, family=P.FONT, weight=600, zorder=9,
+                            ha="left", va="bottom"))
+    c.text(0.08, 0.360, "LAP TIMER", 12, color=P.MUTED, weight=600, ha="left", track=True)
+    for k, L in enumerate(laps):
+        y = 0.320 - k * 0.042
+        rows.append((c.text(0.08, y, f"{L['year']}", 26, color=L["color"], weight=300, ha="left"),
+                     c.text(0.25, y, f"{L['code']}", 24, color=L["color"], weight=600, ha="left", track=True),
+                     c.text(0.60, y, "", 30, weight=200, ha="right"),
+                     c.text(0.92, y, "", 20, color=P.MUTED, weight=300, ha="right")))
+    c.text(0.5, 0.175, src, 12, color=P.MUTED, weight=300)
+    c.footer()
+    tl = [np.asarray(L["t"], float) for L in laps]
+    dl = [np.asarray(L["dist"], float) for L in laps]
+    offi = [float(L.get("official") or L["lap_s"]) for L in laps]
+    best = min(offi)
+    T = max(offi)
+    r_ = Reel(out)
+    n = int(T / speedup * FPS)
+    for f in range(n + int(3.0 * FPS)):
+        tt = min(T, T * f / n)
+        prog = []
+        for k, L in enumerate(laps):
+            s = float(np.interp(min(tt, offi[k]), tl[k], dl[k])) / dl[k][-1] * Lr if tt < offi[k] else Lr
+            xx, yy = np.interp(s, D, X), np.interp(s, D, Y)
+            dots[k].set_data([xx], [yy])
+            tags[k].set_position((xx + Lr * 0.004, yy + Lr * 0.004))
+            prog.append((-(s if tt < offi[k] else Lr + (T - offi[k])), k))
+            yr, cd, clk, gap = rows[k]
+            done = tt >= offi[k]
+            clk.set_text(_clock(min(tt, offi[k]))), clk.set_color(L["color"] if done else P.TEXT)
+            gap.set_text(("FASTEST" if offi[k] == best else f"+{offi[k] - best:.3f}") if done else "")
+        for j, (_, k) in enumerate(sorted(prog)):              # tower re-sorts by who is ahead on the road
+            y = 0.320 - j * 0.042
+            for a in rows[k]:
+                a.set_y(y)
+        r_.add(c.fig)
+    plt.close(c.fig)
+    return r_.close()
+
+
+def race_replay(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, speedup: float = 3.0, label: list[str] | None = None,
+                src: str = "Positions: OpenF1 location and timing data") -> Path:
+    """Race replay (Michel, 23 Nov): every car as a dot in team colour on the track map, a race clock, the lap
+    counter, a live P1 to P10 tower from official timing positions, PIT tags from pit timing and a SAFETY CAR
+    banner from race control. Shown faster than real time; the speed is on screen."""
+    P.set_event(p)
+    _, X, Y = _ref_path(ref)
+    t = np.asarray(D["t"], float)
+    cars = D["cars"]
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    c.text(0.5, 0.835, hook[0], 46, weight=300)
+    if len(hook) > 1:
+        c.text(0.5, 0.800, hook[1], 46, color=P.GOLD, weight=300)
+    c.text(0.5, 0.772, sub.upper(), 14, color=P.CYAN, weight=600, track=True)
+    ax = c.fig.add_axes([0.04, 0.395, 0.92, 0.36])
+    ax.set_aspect("equal"), ax.axis("off")
+    allx = np.concatenate([np.asarray(v["x"], float) for v in cars.values()] + [X])
+    ally = np.concatenate([np.asarray(v["y"], float) for v in cars.values()] + [Y])
+    pad = 0.04 * max(np.ptp(X), np.ptp(Y))
+    ax.set_xlim(X.min() - pad, X.max() + pad), ax.set_ylim(Y.min() - pad, Y.max() + pad)
+    ax.plot(X, Y, color="#2A3242", lw=12, solid_capstyle="round", zorder=1)
+    label = set(label or [])
+    dots, tags = {}, {}
+    for k, (code, v) in enumerate(cars.items()):
+        dots[code] = ax.plot([], [], "o", ms=13 if code in label else 10, color=v["color"], mec="#05070A", mew=1.5, zorder=5)[0]
+        if code in label:
+            tags[code] = ax.text(0, 0, code, fontsize=13, color=v["color"], family=P.FONT, weight=600, zorder=9)
+    lap_t = c.text(0.08, 0.372, "", 22, color=P.TEXT, weight=300, ha="left")
+    clk = c.text(0.92, 0.372, "", 22, color=P.TEXT, weight=200, ha="right")
+    c.text(0.5, 0.372, f"{speedup:g}X SPEED", 11, color=P.MUTED, weight=600, track=True)
+    sc = c.text(0.5, 0.745, "", 16, color=P.GOLD, weight=600, track=True)
+    tower = []
+    for j in range(10):
+        col, row = j // 5, j % 5
+        x0, y0 = 0.08 + col * 0.44, 0.335 - row * 0.030
+        tower.append((c.text(x0, y0, f"P{j + 1}", 15, color=P.MUTED, weight=600, ha="left"),
+                      c.text(x0 + 0.07, y0, "", 18, weight=600, ha="left", track=True),
+                      c.text(x0 + 0.38, y0, "", 13, color=P.GOLD, weight=600, ha="right", track=True)))
+    c.text(0.5, 0.175, src, 12, color=P.MUTED, weight=300)
+    c.footer()
+    order = sorted(D["order"], key=lambda e: e["t"])
+    pits = D.get("pits", [])
+    scw = D.get("sc", [])
+    laps_at = sorted(D.get("laps", []), key=lambda e: e["t"])
+    xs = {k: np.asarray(v["x"], float) for k, v in cars.items()}
+    ys = {k: np.asarray(v["y"], float) for k, v in cars.items()}
+    r_ = Reel(out)
+    T = t[-1]
+    n = int(T / speedup * FPS)
+    pos = {}
+    oi = 0
+    for f in range(n + int(2.5 * FPS)):
+        tt = min(T, T * f / n)
+        i = int(min(np.searchsorted(t, tt), len(t) - 1))
+        for code in cars:
+            if np.isnan(xs[code][i]):
+                dots[code].set_data([], [])
+                continue
+            dots[code].set_data([xs[code][i]], [ys[code][i]])
+            if code in tags:
+                tags[code].set_position((xs[code][i] + pad * 0.25, ys[code][i] + pad * 0.25))
+        while oi < len(order) and order[oi]["t"] <= tt:
+            pos[order[oi]["code"]] = order[oi]["pos"]
+            oi += 1
+        ranked = sorted(pos, key=lambda c_: pos[c_])[:10]
+        inpit = {e["code"] for e in pits if e["t"] <= tt <= e["t"] + e.get("dur", 25)}
+        for j, (pl, cd, tg) in enumerate(tower):
+            if j < len(ranked):
+                code = ranked[j]
+                cd.set_text(code), cd.set_color(cars.get(code, {}).get("color", P.TEXT))
+                tg.set_text("PIT" if code in inpit else "")
+        lap_now = max([e["lap"] for e in laps_at if e["t"] <= tt] or [D.get("lap_from", 1)])
+        lap_t.set_text(f"LAP {lap_now} / {D['n_laps']}")
+        clk.set_text(_clock(D.get("clock0", 0.0) + tt))
+        sc.set_text("SAFETY CAR" if any(a <= tt <= b for a, b in scw) else "")
+        r_.add(c.fig)
+    plt.close(c.fig)
+    return r_.close()
