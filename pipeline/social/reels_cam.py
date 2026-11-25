@@ -389,3 +389,133 @@ def race_replay(p, ref: dict, D: dict, out: Path, hook: list[str], sub: str, spe
         r_.add(c.fig)
     plt.close(c.fig)
     return r_.close()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Lap DNA (Michel, 24 Nov): throttle, brake and gear at every part of one lap, shown in a new way.
+# Top: the track is painted as the car drives it, colour = what the driver does (full throttle, part throttle,
+# coasting, braking), line width = speed, and the gear at each slow corner stamped on the map.
+# Bottom: the lap as a wheel. 360 degrees = one lap. The outer ring fills clockwise with the same input colours,
+# the inner ring is a "gear skyline" (taller = higher gear). Centre: gear, speed, lap clock.
+# End: the lap's share of full throttle, braking and coasting, from the official channels only.
+# ---------------------------------------------------------------------------------------------------------------
+DNA = {"FULL THROTTLE": "#10B981", "PART THROTTLE": "#F5B942", "COAST": "#566074", "BRAKING": "#EF4444"}
+
+
+def _phase(th: float, br: float) -> str:
+    if br > 0:
+        return "BRAKING"
+    if th >= 95:
+        return "FULL THROTTLE"
+    return "PART THROTTLE" if th >= 10 else "COAST"
+
+
+def lap_dna(p, lap: dict, out: Path, hook: list[str], sub: str, official: str | None = None, target_s: float = 22.0,
+            src: str = "Telemetry: OpenF1 car data (throttle, brake on or off, gear). Lap time: official timing") -> Path:
+    from matplotlib.patches import Wedge
+    P.set_event(p)
+    L = {k: np.asarray(v, float) if isinstance(v, list) else v for k, v in lap.items()}
+    T, D = L["t"], L["dist"]
+    Lm, lap_s = float(D[-1]), float(L["lap_s"])
+    speedup = max(2, round(lap_s / target_s))
+    ph = [_phase(float(a), float(b)) for a, b in zip(L["throttle"], L["brake"])]
+    gear = np.clip(np.round(L["gear"]), 0, 8)
+
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    for k, s in enumerate(hook):
+        c.text(0.5, 0.83 - k * 0.042, s, 44, weight=300)
+    c.text(0.5, 0.83 - len(hook) * 0.042 - 0.005, f"{sub}, {speedup}x speed".upper(), 15, color=P.CYAN, weight=600, track=True)
+
+    # legend row
+    xs = [0.16, 0.39, 0.61, 0.82]
+    for x0, (lab, col) in zip(xs, DNA.items()):
+        c.text(x0, 0.712, lab, 12, color=col, weight=700, track=True)
+
+    # painted track
+    ax = c.fig.add_axes([0.07, 0.505, 0.86, 0.195])
+    ax.set_aspect("equal"), ax.axis("off")
+    pad = 0.07 * max(np.ptp(L["x"]), np.ptp(L["y"]))
+    ax.set_xlim(L["x"].min() - pad, L["x"].max() + pad), ax.set_ylim(L["y"].min() - pad, L["y"].max() + pad)
+    ax.plot(L["x"], L["y"], color=P.BASE, lw=5, solid_capstyle="round", zorder=1)
+    pts = np.column_stack([L["x"], L["y"]]).reshape(-1, 1, 2)
+    segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
+    vmin, vmax = float(np.nanmin(L["speed"])), float(np.nanmax(L["speed"]))
+    widths = 2.5 + 7.5 * (L["speed"][:-1] - vmin) / max(1.0, vmax - vmin)
+    seg_cols = [DNA[ph[i]] for i in range(len(segs))]
+    lc = LineCollection([], linewidths=[], colors=[], capstyle="round", zorder=3)
+    ax.add_collection(lc)
+    dot, = ax.plot([], [], "o", ms=15, color=P.TEXT, mec="#0B0E14", mew=3, zorder=6)
+    # gear at each slow corner: local speed minima under 200 km/h, at least 150 m apart
+    sp = L["speed"]
+    mins = []
+    for i in range(3, len(sp) - 3):
+        if sp[i] < 200 and sp[i] == sp[i - 3:i + 4].min() and (not mins or D[i] - D[mins[-1]] > 150):
+            mins.append(i)
+    tags = []
+    for i in mins:
+        tags.append((i, ax.text(L["x"][i], L["y"][i], f"{gear[i]:.0f}", fontsize=15, color=P.TEXT, family=P.FONT,
+                                weight=700, ha="center", va="center", zorder=7, visible=False,
+                                bbox=dict(boxstyle="circle,pad=0.25", fc="#141923", ec=P.GOLD, lw=1.5))))
+
+    # the lap wheel
+    wx = c.fig.add_axes([0.25, 0.215, 0.5, 0.5 * 1080 / 1920])
+    wx.set_aspect("equal"), wx.axis("off"), wx.set_xlim(-1.08, 1.08), wx.set_ylim(-1.08, 1.08)
+    wx.add_patch(Wedge((0, 0), 1.0, 0, 360, width=0.16, fc="#141923", ec="none"))
+    wx.add_patch(Wedge((0, 0), 0.80, 0, 360, width=0.22, fc="#10141C", ec="none"))
+    nb = 360
+    edges = np.linspace(0, Lm, nb + 1)
+    bin_i = np.clip(np.searchsorted(D, (edges[:-1] + edges[1:]) / 2), 0, len(D) - 1)
+    outer, inner = [], []
+    for b in range(nb):
+        a1 = 90 - b * 360 / nb                                     # clockwise from 12 o'clock
+        a0 = a1 - 360 / nb - 0.15
+        i = bin_i[b]
+        w = Wedge((0, 0), 1.0, a0, a1, width=0.16, fc=DNA[ph[i]], ec="none", visible=False)
+        g = max(gear[i], 1)
+        wi = Wedge((0, 0), 0.58 + 0.22 * g / 8, a0, a1, width=0.22 * g / 8, fc="#C9D1DC", alpha=0.25 + 0.6 * g / 8,
+                   ec="none", visible=False)
+        wx.add_patch(w), wx.add_patch(wi)
+        outer.append(w), inner.append(wi)
+    hand, = wx.plot([0, 0], [0, 1.04], color=P.TEXT, lw=2, zorder=5)
+    wx.text(0, 1.06, "START", fontsize=10, color=P.MUTED, family=P.FONT, weight=700, ha="center", va="bottom")
+    g_t = wx.text(0, 0.12, "", fontsize=96, color=P.TEXT, family=P.FONT, weight=200, ha="center", va="center")
+    wx.text(0, -0.13, "GEAR", fontsize=11, color=P.MUTED, family=P.FONT, weight=700, ha="center")
+    s_t = wx.text(0, -0.27, "", fontsize=24, color=P.TEXT, family=P.FONT, weight=300, ha="center", va="center")
+    clk = wx.text(0, -0.43, "", fontsize=17, color=P.MUTED, family=P.FONT, weight=300, ha="center", va="center")
+    c.text(0.5, 0.197, "OUTER RING: WHAT THE DRIVER DOES   INNER RING: GEAR", 11, color=P.MUTED, weight=600, track=True)
+    c.text(0.5, 0.175, src, 13, color=P.MUTED, weight=300)
+    c.footer()
+
+    r = Reel(out)
+    n = int(lap_s / speedup * FPS)
+    for f in range(n + 1):
+        t = min(lap_s, f / FPS * speedup)
+        j = min(len(T) - 1, int(np.searchsorted(T, t)))
+        lc.set_segments(segs[:j]), lc.set_color(seg_cols[:j]), lc.set_linewidth(widths[:j])
+        dot.set_data([L["x"][j]], [L["y"][j]])
+        for i, tg in tags:
+            tg.set_visible(i <= j)
+        frac = D[j] / Lm
+        nb_on = int(frac * nb)
+        for b in range(nb_on):
+            outer[b].set_visible(True), inner[b].set_visible(True)
+        ang = np.deg2rad(90 - frac * 360)
+        hand.set_data([0, 1.04 * np.cos(ang)], [0, 1.04 * np.sin(ang)])
+        g_t.set_text(f"{gear[j]:.0f}"), g_t.set_color(DNA[ph[j]])
+        s_t.set_text(f"{L['speed'][j]:.0f} km/h")
+        clk.set_text(_clock(t))
+        r.add(c.fig)
+    for w in outer + inner:
+        w.set_visible(True)
+    hand.set_visible(False)
+    dt = np.diff(T, append=T[-1])                                      # time weighted, not sample counted
+    share = {k: 100.0 * float(sum(d for d, q in zip(dt, ph) if q == k)) / float(dt.sum()) for k in DNA}
+    clk.set_text(official or _clock(lap_s)), clk.set_color(P.GOLD), clk.set_fontsize(22)
+    g_t.set_text(f"{share['FULL THROTTLE']:.0f}%"), g_t.set_color(DNA["FULL THROTTLE"]), g_t.set_fontsize(80)
+    s_t.set_text("FLAT OUT"), s_t.set_fontsize(16)
+    r.add(c.fig, int(1.6 * FPS))
+    s_t.set_text(f"BRAKING {share['BRAKING']:.0f}%   COASTING {share['COAST']:.0f}%")
+    r.add(c.fig, int(2.4 * FPS))
+    plt.close(c.fig)
+    return r.close()
