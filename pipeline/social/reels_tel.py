@@ -2195,6 +2195,15 @@ def lap_chart_data(oc, year: int, ck: int) -> dict:
     return {"n": n, "rows": rows, "neutral": sorted(_neutral_laps(oc.get("race_control", session_key=sk)))}
 
 
+def race_laps(laps: pd.DataFrame) -> int:
+    """Race distance in laps: the last lap timed for at least three drivers. OpenF1 can carry one stray lap past
+    the flag (Lusail 2023 lists lap 58 of a 57 lap race)."""
+    t = laps[laps["lap_duration"].notna()] if "lap_duration" in laps else laps
+    per = t.groupby("lap_number")["driver_number"].nunique()
+    full = per[per >= 3]
+    return int(full.index.max()) if len(full) else int(laps["lap_number"].max())
+
+
 def replay_data(oc, year: int, ck: int, lap_from: int, lap_to: int, rot: float, session: str = "Race", dt: float = 0.33) -> dict:
     """Every car between two laps (Michel, 23 Nov: race replays with cars and timers). Window: from the start of
     lap_from (lap 1: the moment the polesitter's car moves off the grid, from its own speed trace) to the end of
@@ -2204,7 +2213,7 @@ def replay_data(oc, year: int, ck: int, lap_from: int, lap_to: int, rot: float, 
     codes, cols = _codes(oc, sk)
     num = {v: k for k, v in codes.items()}
     laps = oc.frame("laps", session_key=sk)
-    n_laps = int(laps["lap_number"].max())
+    n_laps = race_laps(laps)
     st = pd.to_datetime(laps["date_start"], format="ISO8601", utc=True, errors="coerce")
     laps = laps.assign(ts=st)
     start2 = laps[laps["lap_number"] == 2]["ts"].min()
@@ -2238,6 +2247,9 @@ def replay_data(oc, year: int, ck: int, lap_from: int, lap_to: int, rot: float, 
         gx, gy = np.interp(grid, lt, xr), np.interp(grid, lt, yr)
         near = np.abs(lt[np.clip(np.searchsorted(lt, grid), 0, len(lt) - 1)] - grid) <= 2.0
         gx[~near], gy[~near] = np.nan, np.nan
+        ok = np.isfinite(gx)
+        if not ok.any() or np.ptp(gx[ok]) + np.ptp(gy[ok]) < 200:
+            continue                              # never moved in the window: did not start (Sainz, Lusail 2023)
         cars[code] = {"color": cols.get(code), "x": [None if q != q else round(float(q)) for q in gx],
                       "y": [None if q != q else round(float(q)) for q in gy]}
     order = []
