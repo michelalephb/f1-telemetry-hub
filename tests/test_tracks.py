@@ -37,3 +37,34 @@ def test_fastest_complete_lap_is_used():
     })
     out = tracks.lap_xy_from_trace(tr)
     assert len(out) == 400 and out[0, 1] == xy[0, 1] + 7  # lap 2: complete and fastest
+
+
+class _Bucket:
+    def __init__(self, files):
+        self.files = dict(files)
+
+    def list(self, prefix, opts=None):
+        return [{"name": k.split("/")[-1]} for k in self.files if k.startswith(prefix + "/")]
+
+    def upload(self, path, data, opts):
+        self.files[path] = data
+
+
+class _Store:
+    def __init__(self, b):
+        self.b = b
+        self.storage = self
+
+    def from_(self, bucket):
+        return self.b
+
+
+def test_build_upcoming_fills_only_missing_rounds(monkeypatch):
+    b = _Bucket({"tracks/2026/21.json": b"real"})
+    monkeypatch.setattr(tracks, "multiviewer_xy", lambda season, key: (ellipse(), 61.0) if key == 150 else None)
+    done = tracks.build_upcoming(_Store(b), 2026, {21: 152, 22: 150, 23: 70}, "web")
+    assert done == ["tracks/2026/22.json"]                 # 21 kept, 23 has no map
+    assert b.files["tracks/2026/21.json"] == b"real"
+    import json
+    o = json.loads(b.files["tracks/2026/22.json"])
+    assert o["rot"] == 61.0 and o["w"] == 100

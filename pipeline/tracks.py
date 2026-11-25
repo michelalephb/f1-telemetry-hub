@@ -81,3 +81,47 @@ def upload(sb, season: int, rnd: int, data: dict, bucket: str) -> str:
 
 def read_trace(sb, bucket: str, path: str) -> pd.DataFrame:
     return pd.read_parquet(io.BytesIO(sb.storage.from_(bucket).download(path)))
+
+
+def multiviewer_xy(season: int, circuit_key) -> tuple[np.ndarray, float] | None:
+    """Circuit map (x, y in the position data frame, driving order from the line) and rotation
+    from MultiViewer, for rounds not raced yet. Tries the season, then the year before."""
+    from fastf1.mvapi.api import get_circuit
+    if circuit_key is None or pd.isna(circuit_key):
+        return None
+    for year in (season, season - 1):
+        try:
+            j = get_circuit(year=year, circuit_key=int(circuit_key))
+        except Exception as e:
+            log.warning("MultiViewer circuit %s/%s failed: %s", circuit_key, year, e)
+            j = None
+        if j and len(j.get("x") or []) >= 20 and len(j["x"]) == len(j.get("y") or []):
+            return np.column_stack([j["x"], j["y"]]).astype(float), float(j.get("rotation") or 0.0)
+    return None
+
+
+def build_upcoming(sb, season: int, keys: dict[int, object], bucket: str) -> list[str]:
+    """Outline for every round that has none yet, from the MultiViewer circuit map.
+
+    Only fills gaps: a round with an outline keeps it, and the outline built from real laps at
+    ingest replaces this one after the session (same path, upsert). Never raises.
+    """
+    try:
+        have = {f["name"] for f in sb.storage.from_(bucket).list(f"tracks/{season}", {"limit": 100})}
+    except Exception as e:
+        log.warning("listing tracks/%s failed: %s", season, e)
+        return []
+    done = []
+    for rnd, key in sorted(keys.items()):
+        if f"{rnd}.json" in have:
+            continue
+        try:
+            got = multiviewer_xy(season, key)
+            if got is None:
+                log.info("round %s: no MultiViewer map for circuit %s", rnd, key)
+                continue
+            done.append(upload(sb, season, rnd, outline(*got), bucket))
+            log.info("round %s: outline from the MultiViewer map (circuit %s)", rnd, key)
+        except Exception as e:
+            log.warning("round %s upcoming outline failed: %s", rnd, e)
+    return done

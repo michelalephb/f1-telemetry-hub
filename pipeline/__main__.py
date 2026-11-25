@@ -192,7 +192,10 @@ def main(argv=None) -> int:
         return 0
 
     if a.cmd == "tracks":
-        return build_tracks(store.client(), oc, a.season)
+        sb = store.client()
+        rc = build_tracks(sb, oc, a.season)
+        tracks.build_upcoming(sb, a.season, {s["round"]: s.get("circuit_key") for s in schedule(oc, a.season)}, store.WEB_BUCKET)
+        return rc
     if a.cmd == "replay":
         return build_replays(store.client(), a.season)
     if a.cmd == "f1db":
@@ -212,6 +215,8 @@ def main(argv=None) -> int:
     else:
         sb = store.client()
     sess = schedule(oc, a.season) if a.no_sync else sync_calendar(sb, oc, a.season)
+    if not a.dry_run and not a.no_sync:  # layouts for rounds not raced yet (landing page cards)
+        tracks.build_upcoming(sb, a.season, {s["round"]: s.get("circuit_key") for s in sess}, store.WEB_BUCKET)
     if a.cmd == "calendar":
         return 0
 
