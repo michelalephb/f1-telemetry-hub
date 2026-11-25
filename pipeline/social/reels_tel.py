@@ -2602,7 +2602,9 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         if len(D["rows"]) < 10:
             return None
         log.info("TOPSPEED_JSON " + json.dumps(D, separators=(",", ":")))
-        reels_cam.speed_swarm(p, D, video, ["Every lap.", "Who is really fastest?"], f"{name} {p.season} race, speed trap, every lap")
+        drs = p.season < 2026                                   # DRS was dropped from 2026
+        reels_cam.speed_swarm(p, D, video, ["Every lap.", "Who is really fastest?"], f"{name} {p.season} race, speed trap, every lap",
+                              tow="TOW, DRS" if drs else "TOW")
         cl = lambda r: float(np.median([q[1] for q in r["pts"] if not q[2]] or [0]))
         med = max(D["rows"], key=cl)
         tow_all = [q[1] for r in D["rows"] for q in r["pts"] if q[2]]
@@ -2611,7 +2613,8 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         cap = _cap(p, kind, f"💨 Every lap's speed trap reading at {name} {p.season}, one dot per lap, every driver.",
                    f"🥇 Fastest in clean air: {drv(med['code'], p.colors)} {cl(med):.0f} km/h (median)\n"
                    f"🌀 Being within 1 s of another car was worth about {gain_:.0f} km/h at the trap",
-                   "⚪ Hollow dots: within 1 s of the car ahead as that lap began (tow, and DRS range). "
+                   ("⚪ Hollow dots: within 1 s of the car ahead as that lap began (tow, and DRS range). " if drs else
+                    "⚪ Hollow dots: within 1 s of the car ahead as that lap began (a tow). ") +
                    "Lap 1, pit laps and safety car laps are left out.",
                    "📐 OpenF1 speed trap and interval data.",
                    "💬 Who are you backing this weekend?")

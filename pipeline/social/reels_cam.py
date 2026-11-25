@@ -775,7 +775,7 @@ def team_ghost(p, laps: list[dict], out: Path, hook: list[str], sub: str, n_sec:
     return r.close()
 
 
-def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: float = 0.32,
+def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: float = 0.32, tow: str = "TOW, DRS",
                 src: str = "Speed trap: OpenF1. Lap 1, pit laps and safety car laps removed. Tow: within 1 s of the car ahead") -> Path:
     """Top speed swarm (Michel, 24 Nov, from a static violin chart): one row per driver, one dot per lap appearing
     lap by lap, so the answer only shows at the end. Then the rows re-sort by median, medians tick in gold and the
@@ -811,7 +811,7 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
     ax.grid(axis="x", color="#232D3F", lw=1)
     ax.set_xlabel("KM/H", color=P.MUTED, fontsize=12)
     lap_t = c.text(0.94, 0.722, "", 16, color=P.TEXT, weight=300, ha="right")
-    c.text(0.5, 0.192, "FILLED: CLEAN AIR    HOLLOW: WITHIN 1 S OF A CAR (TOW, DRS)", 12, color=P.MUTED, weight=600,
+    c.text(0.5, 0.192, f"FILLED: CLEAN AIR    HOLLOW: WITHIN 1 S OF A CAR ({tow})", 12, color=P.MUTED, weight=600,
            track=True)
     verdict = c.text(0.5, 0.214, "", 20, color=P.GOLD, weight=500)
     c.text(0.5, 0.173, src, 12, color=P.MUTED, weight=300)
