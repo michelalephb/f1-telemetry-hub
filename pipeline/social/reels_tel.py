@@ -2507,6 +2507,33 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "the gear at each slow corner. The wheel is the whole lap, its inner ring the gear.",
                    "📐 OpenF1 car data at about 4 samples a second: brake is on or off, not pressure.",
                    "💬 Who are you backing this weekend?")
+    elif kind == "lap_dna_duel_q":               # pole vs P2 as two Lap DNA wheels (Michel, 24 Nov, idea 5)
+        from . import reels_cam
+        res = _q_official(p)
+        if len(res) < 2:
+            return None
+
+        def _ms2(r):
+            t = r["q3"] or r["q2"] or r["q1"]
+            m_, _, sec = t.rpartition(":")
+            return (int(m_ or 0) * 60 + float(sec)), t
+        try:
+            (sa, ta_), (sb, tb_) = _ms2(res[0]), _ms2(res[1])
+            a = lap_of(oc, p.season, ck, "Qualifying", rot, res[0]["code"], sa * 1000) | {"official_s": sa, "official": ta_}
+            b = lap_of(oc, p.season, ck, "Qualifying", rot, res[1]["code"], sb * 1000) | {"official_s": sb, "official": tb_}
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        need = ("throttle", "brake", "gear", "speed", "x", "y", "dist", "t")
+        dump = lambda L: {k: (list(map(float, L[k])) if k in need else L[k]) for k in need + ("lap_s", "code", "color", "official_s", "official")}
+        log.info("DUEL_JSON " + json.dumps({"a": dump(a), "b": dump(b)}, separators=(",", ":")))
+        reels_cam.lap_dna_duel(p, a, b, video, ["Pole vs P2.", "Where was it won?"],
+                               f"{a['code']} vs {b['code']}, {name} {p.season} qualifying")
+        cap = _cap(p, kind, f"🧬 Pole vs P2 at {name} {p.season}: {drv(a['code'], p.colors)} {ta_} vs {drv(b['code'], p.colors)} {tb_}, "
+                            "both laps as Lap DNA wheels on one clock. The wheel that trails is the slower lap.",
+                   "🗺️ The track fills in the colour of whoever was quicker in each mini sector. The gold ring marks the biggest swing.",
+                   "📐 OpenF1 car data at about 4 samples a second, brake on or off. Gaps measured along the lap, scaled to the official times.",
+                   "💬 Who are you backing this weekend?")
     elif kind == "ghost_q":                      # this year's pole lap vs P2, official qualifying times
         res = _q_official(p)
         if len(res) < 2:
