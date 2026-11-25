@@ -267,6 +267,49 @@ def race_pace(p, D: dict, out: Path, hook: list[str], sub: str,
     return r_.close()
 
 
+def topspeed_data(oc, year: int, ck: int) -> dict:
+    """Speed trap reading of every racing lap for every driver (OpenF1 laps.st_speed). Lap 1, laps with a pit stop
+    and safety car, VSC or red flag laps are dropped. 'tow': within 1 s of the car ahead when the lap began
+    (OpenF1 intervals, nearest reading within 10 s), a proxy for slipstream on the straight."""
+    sk = _session(oc, year, ck, "Race")
+    codes, cols = _codes(oc, sk)
+    laps = oc.frame("laps", session_key=sk)
+    laps = laps[laps["st_speed"].notna() & laps["date_start"].notna()].copy()
+    laps["t0"] = pd.to_datetime(laps["date_start"], utc=True, format="ISO8601")
+    pit_laps = {}
+    for r in oc.get("pit", session_key=sk):
+        pit_laps.setdefault(int(r["driver_number"]), set()).update({int(r["lap_number"]), int(r["lap_number"]) + 1})
+    neutral = _neutral_laps(oc.get("race_control", session_key=sk))
+    iv = oc.frame("intervals", session_key=sk)
+    iv = iv[iv["interval"].notna()].copy() if len(iv) else iv
+    if len(iv):
+        iv["t"] = pd.to_datetime(iv["date"], utc=True, format="ISO8601")
+        iv["interval"] = pd.to_numeric(iv["interval"], errors="coerce")
+    n_laps = int(laps["lap_number"].max())
+    rows = []
+    for dn, g in laps.groupby("driver_number"):
+        dn = int(dn)
+        code = codes.get(dn)
+        if not code:
+            continue
+        ivd = iv[iv["driver_number"] == dn].sort_values("t") if len(iv) else iv
+        pts = []
+        for _, L in g.iterrows():
+            ln = int(L["lap_number"])
+            if ln <= 1 or ln in neutral or ln in pit_laps.get(dn, set()) or L.get("is_pit_out_lap") is True:
+                continue
+            tow = False
+            if len(ivd):
+                k = int(np.argmin(np.abs((ivd["t"] - L["t0"]).dt.total_seconds().to_numpy())))
+                if abs((ivd["t"].iloc[k] - L["t0"]).total_seconds()) < 10 and pd.notna(ivd["interval"].iloc[k]):
+                    tow = float(ivd["interval"].iloc[k]) < 1.0
+            pts.append([ln, float(L["st_speed"]), bool(tow)])
+        if len(pts) >= 10:
+            v = np.array([q[1] for q in pts])
+            rows.append({"code": code, "color": cols.get(code), "pts": pts, "median": float(np.median(v)), "max": float(v.max())})
+    return {"rows": rows, "laps": n_laps}
+
+
 def overtake_data(oc, year: int, ck: int, rot: float) -> dict:
     """On track passes of a race from OpenF1 (Michel, 21 Nov: a template for every race). OpenF1's overtakes are
     every position swap, pit stops and penalties included, and may be incomplete; we keep on track passes only:
@@ -2518,9 +2561,11 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         from . import reels_cam
         res = _q_official(p)
         seen, pick = set(), []
+        big4 = ("McLaren", "Red Bull", "Mercedes", "Ferrari")          # Michel: one driver per top team
         for r_ in res:
-            if r_.get("team") and r_["team"] not in seen and (r_.get("q3") or r_.get("q2") or r_.get("q1")):
-                seen.add(r_["team"]), pick.append(r_)
+            tm = r_.get("team") or ""
+            if tm in big4 and tm not in seen and (r_.get("q3") or r_.get("q2") or r_.get("q1")):
+                seen.add(tm), pick.append(r_)
             if len(pick) == 4:
                 break
         if len(pick) < 4:
@@ -2546,6 +2591,26 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "\n".join(lines),
                    "🗺️ The track fills in with the quickest team in each mini sector; the gaps move once per mini sector.",
                    "📐 OpenF1 telemetry, scaled to the official lap times. Sector winners from official timing.",
+                   "💬 Who are you backing this weekend?")
+    elif kind == "topspeed_race":                # every lap's speed trap, dot by dot (Michel, 24 Nov)
+        from . import reels_cam
+        try:
+            D = topspeed_data(oc, p.season, ck)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        if len(D["rows"]) < 10:
+            return None
+        log.info("TOPSPEED_JSON " + json.dumps(D, separators=(",", ":")))
+        reels_cam.speed_swarm(p, D, video, ["Every lap.", "Who is fastest?"], f"{name} {p.season} race, speed trap, every lap")
+        top = max(D["rows"], key=lambda r: r["max"])
+        med = max(D["rows"], key=lambda r: r["median"])
+        cap = _cap(p, kind, f"💨 Every lap's speed trap reading at {name} {p.season}, one dot per lap, every driver.",
+                   f"🥇 Highest median: {drv(med['code'], p.colors)} {med['median']:.0f} km/h\n"
+                   f"🚀 Single fastest reading: {drv(top['code'], p.colors)} {top['max']:.0f} km/h",
+                   "🟡 Gold ringed dots: the car was within 1 s of the car ahead as that lap began (likely a tow). "
+                   "Lap 1, pit laps and safety car laps are left out.",
+                   "📐 OpenF1 speed trap and interval data.",
                    "💬 Who are you backing this weekend?")
     elif kind == "lap_dna_duel_q" or kind.startswith("lap_dna_duel_q_"):   # two laps as Lap DNA wheels (Michel, 24 Nov)
         from . import reels_cam

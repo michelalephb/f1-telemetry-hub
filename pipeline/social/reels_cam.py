@@ -773,3 +773,90 @@ def team_ghost(p, laps: list[dict], out: Path, hook: list[str], sub: str, n_sec:
     r.add(c.fig, int(2.5 * FPS))
     plt.close(c.fig)
     return r.close()
+
+
+def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: float = 0.32,
+                src: str = "Speed trap: OpenF1. Lap 1, pit laps and safety car laps removed. Tow: within 1 s of the car ahead") -> Path:
+    """Top speed swarm (Michel, 24 Nov, from a static violin chart): one row per driver, one dot per lap appearing
+    lap by lap, so the answer only shows at the end. Then the rows re-sort by median, medians tick in gold and the
+    single fastest reading is ringed."""
+    P.set_event(p)
+    rows = D["rows"]
+    n = len(rows)
+    rng = np.random.default_rng(7)
+    start_order = sorted(range(n), key=lambda i: rows[i]["code"])          # neutral start order: alphabetical
+    end_order = sorted(range(n), key=lambda i: -rows[i]["median"])
+    allv = np.array([q[1] for r in rows for q in r["pts"]])
+    lo, hi = np.percentile(allv, 1) - 2, allv.max() + 3
+
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    for k, s in enumerate(hook):
+        c.text(0.5, 0.83 - k * 0.042, s, 44, weight=300)
+    c.text(0.5, 0.83 - len(hook) * 0.042 - 0.005, sub.upper(), 15, color=P.CYAN, weight=600, track=True)
+    ax = c.fig.add_axes([0.16, 0.235, 0.78, 0.485])
+    ax.set_facecolor("none")
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.set_xlim(lo, hi), ax.set_ylim(n - 0.5, -0.5)
+    ax.tick_params(axis="x", colors=P.MUTED, labelsize=12, length=0)
+    ax.set_yticks([])
+    ax.grid(axis="x", color="#232D3F", lw=1)
+    ax.set_xlabel("KM/H", color=P.MUTED, fontsize=12)
+    lap_t = c.text(0.94, 0.728, "", 16, color=P.TEXT, weight=300, ha="right")
+    c.text(0.06, 0.728, "TOW", 12, color=P.GOLD, weight=700, ha="left", track=True)
+    c.text(0.105, 0.728, "= WITHIN 1 S OF THE CAR AHEAD", 12, color=P.MUTED, weight=600, ha="left", track=True)
+    verdict = c.text(0.5, 0.205, "", 20, color=P.GOLD, weight=500)
+    c.text(0.5, 0.175, src, 12, color=P.MUTED, weight=300)
+    c.footer()
+
+    jit = {i: rng.uniform(-0.32, 0.32, len(rows[i]["pts"])) for i in range(n)}
+    rank = {i: start_order.index(i) for i in range(n)}
+    labs = {i: ax.text(lo - (hi - lo) * 0.015, rank[i], rows[i]["code"], fontsize=13, color=rows[i]["color"] or P.TEXT,
+                       family=P.FONT, weight=700, ha="right", va="center") for i in range(n)}
+    scat = {i: ax.scatter([], [], s=34, c=rows[i]["color"] or P.TEXT, edgecolors="none", zorder=3) for i in range(n)}
+    tow_s = {i: ax.scatter([], [], s=34, facecolors="none", edgecolors=P.GOLD, linewidths=1.6, zorder=4) for i in range(n)}
+    meds = {i: ax.plot([], [], color=P.GOLD, lw=3, zorder=5)[0] for i in range(n)}
+
+    def draw(upto, y_of):
+        for i in range(n):
+            pts = [(q, j) for j, q in enumerate(rows[i]["pts"]) if q[0] <= upto]
+            if not pts:
+                continue
+            xy = np.array([[q[1], y_of[i] + jit[i][j]] for q, j in pts])
+            scat[i].set_offsets(xy)
+            tw = np.array([[q[1], y_of[i] + jit[i][j]] for q, j in pts if q[2]]).reshape(-1, 2)
+            tow_s[i].set_offsets(tw)
+            labs[i].set_y(y_of[i])
+
+    r = Reel(out)
+    L = D["laps"]
+    per = max(1, int(sec_per_lap * FPS))
+    y0 = {i: float(rank[i]) for i in range(n)}
+    for lap in range(2, L + 1):
+        draw(lap, y0)
+        lap_t.set_text(f"LAP {lap} OF {L}")
+        for _ in range(per):
+            r.add(c.fig)
+    r.add(c.fig, int(0.6 * FPS))
+    # re-sort by median
+    y1 = {i: float(end_order.index(i)) for i in range(n)}
+    steps = int(1.2 * FPS)
+    for f_ in range(steps):
+        u = (f_ + 1) / steps
+        e = u * u * (3 - 2 * u)
+        draw(L, {i: y0[i] + (y1[i] - y0[i]) * e for i in range(n)})
+        r.add(c.fig)
+    lap_t.set_text("SORTED BY MEDIAN")
+    for i in range(n):
+        m = rows[i]["median"]
+        meds[i].set_data([m, m], [y1[i] - 0.38, y1[i] + 0.38])
+    top = max(range(n), key=lambda i: rows[i]["max"])
+    j = int(np.argmax([q[1] for q in rows[top]["pts"]]))
+    ax.scatter([rows[top]["max"]], [y1[top] + jit[top][j]], s=420, facecolors="none", edgecolors=P.GOLD, linewidths=2.5, zorder=6)
+    best = end_order[0]
+    verdict.set_text(f"{rows[best]['code']} highest median {rows[best]['median']:.0f} km/h.  "
+                     f"Top reading: {rows[top]['code']} {rows[top]['max']:.0f}")
+    r.add(c.fig, int(3.5 * FPS))
+    plt.close(c.fig)
+    return r.close()
