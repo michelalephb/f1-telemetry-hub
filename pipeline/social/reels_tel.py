@@ -2485,6 +2485,28 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                              if gp else f"🎥 Inside the {name} pole lap: {drv(lap['code'], p.colors)}, {official}."),
                    "👀 Every input on the lap, live on the map, shown faster than real time.",
                    "💾 Save it.\n💬 Who beats it in the race? Tell us below.")
+    elif kind in ("lap_dna_q", "lap_dna_r"):     # throttle, brake and gear, every metre of one lap (Michel, 24 Nov)
+        from . import reels_cam
+        sess, what = ("Qualifying", "qualifying") if kind == "lap_dna_q" else ("Race", "race")
+        try:
+            lap = lap_of(oc, p.season, ck, sess, rot)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        need = ("throttle", "brake", "gear", "speed", "x", "y", "dist", "t")
+        if any(k not in lap for k in need):
+            return None
+        off = _clock(lap["lap_s"])
+        log.info("LAPDNA_JSON " + json.dumps({k: (list(map(float, lap[k])) if k in need else lap[k])
+                                              for k in need + ("lap_s", "code", "color", "compound")}, separators=(",", ":")))
+        reels_cam.lap_dna(p, lap, video, ["Every input.", "One lap."],
+                          f"{lap['code']}, fastest {what} lap, {name} {p.season}, {off}", official=off)
+        cap = _cap(p, kind, f"🧬 The fastest {what} lap at {name} in {p.season}: {drv(lap['code'], p.colors)}, {off}. "
+                            "Every input, painted on the track as it happens.",
+                   "🟢 full throttle  🟡 part throttle  ⚪ coasting  🔴 braking. Line width is speed, the circled numbers are "
+                   "the gear at each slow corner. The wheel is the whole lap, its inner ring the gear.",
+                   "📐 OpenF1 car data at about 4 samples a second: brake is on or off, not pressure.",
+                   "💬 Who are you backing this weekend?")
     elif kind == "ghost_q":                      # this year's pole lap vs P2, official qualifying times
         res = _q_official(p)
         if len(res) < 2:
