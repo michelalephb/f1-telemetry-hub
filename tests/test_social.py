@@ -724,3 +724,27 @@ def test_ghost_years_race_lap_hook_and_note():
     from pipeline.social.reels_tel import GHOST_HOOKS, GHOST_NOTES
     assert GHOST_HOOKS[("LUSAIL", "ghost_years_r")] == ["The race lap record.", "Which year set it?"]
     assert "1:22.384" in GHOST_NOTES[("LUSAIL", "ghost_years_r")]
+
+
+def test_preview_load_skips_a_year_without_a_race(monkeypatch):
+    """Lusail had no race in 2022: a 2023 history Reel takes the reference lap from the next race with data (25 Nov)."""
+    import pandas as pd
+    import pytest
+    import pipeline.__main__ as pm
+    import pipeline.openf1 as po
+    from pipeline.social import preview
+
+    class Picked(Exception):
+        pass
+
+    class FakeOC:
+        def frame(self, what, *a, **kw):
+            if what == "sessions":
+                return pd.DataFrame([{"session_key": 9000 + kw["year"]}]) if kw["year"] == 2023 else pd.DataFrame()
+            raise Picked(kw.get("session_key"))
+
+    monkeypatch.setattr(po, "OpenF1", FakeOC)
+    monkeypatch.setattr(pm, "schedule", lambda oc, season: [{"round": 18, "circuit_key": 150, "location": "Lusail"}])
+    with pytest.raises(Picked) as e:
+        preview.load(2023, 18)
+    assert e.value.args[0] == 11023

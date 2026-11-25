@@ -175,9 +175,16 @@ def load(season: int, rnd: int) -> Preview:
     location = sess[0].get("location") or sess[0].get("meeting_name") or f"Round {rnd}"
     event = sess[0].get("meeting_name") or f"{location} Grand Prix"
 
-    prev = oc.frame("sessions", year=season - 1, circuit_key=int(ck), session_name="Race")
-    if prev.empty:
-        raise ValueError(f"no {season - 1} race at circuit {ck}")
+    # reference lap: last year's race here; if there was none (Lusail 2022), the latest earlier one with OpenF1 data,
+    # else this season's own race (history Reels such as replay_1_1@2023 load a finished season, 25 Nov)
+    ref_year, prev = None, None
+    for yr in (season - 1, season - 2, season - 3, season):
+        prev = oc.frame("sessions", year=yr, circuit_key=int(ck), session_name="Race")
+        if not prev.empty:
+            ref_year = yr
+            break
+    if ref_year is None:
+        raise ValueError(f"no race at circuit {ck} from {season - 3} to {season}")
     ps = prev.iloc[0]
     laps = oc.frame("laps", session_key=int(ps["session_key"]))
     laps = laps[laps["lap_duration"].notna() & (laps["lap_number"] > 1) & ~laps["is_pit_out_lap"].fillna(False).astype(bool)]
@@ -200,7 +207,7 @@ def load(season: int, rnd: int) -> Preview:
     car, ct = car[keep], ct[keep]
     sp = car["speed"].to_numpy(float)
     dist = np.concatenate([[0.0], np.cumsum(np.diff(ct) * (sp[1:] + sp[:-1]) / 2 / 3.6)])
-    markers = corner_markers(season - 1, ck)
+    markers = corner_markers(ref_year, ck)
     rot = markers.attrs.get("rotation", 0.0) if len(markers) else 0.0
     x, y = np.interp(ct, lt, loc["x"].to_numpy(float)), np.interp(ct, lt, loc["y"].to_numpy(float))
     a = math.radians(rot)
@@ -212,7 +219,7 @@ def load(season: int, rnd: int) -> Preview:
         if s["session_code"] in ("Q", "R", "SQ", "S"):
             local = pd.Timestamp(s["start_utc"]).tz_convert(None) + off
             times[s["session_code"]] = local.strftime("%a %-I %p") if local.minute == 0 else local.strftime("%a %-I:%M %p")
-    p = Preview(location.upper(), event, season, rnd, season - 1, code, float(best["lap_duration"]),
+    p = Preview(location.upper(), event, season, rnd, ref_year, code, float(best["lap_duration"]),
                 ct, dist, sp, car["throttle"].to_numpy(float), car["brake"].to_numpy(float),
                 car["n_gear"].to_numpy(float), xr, yr, times)
     p.stats = lap_stats(p)
@@ -229,7 +236,7 @@ def load(season: int, rnd: int) -> Preview:
     except Exception as e:  # the fact cards still work without it
         log.warning("last year's results unavailable: %s", e)
     try:
-        p.last_year |= quali_conditions(oc, season - 1, ck, p.last_year.get("pole"))
+        p.last_year |= quali_conditions(oc, ref_year, ck, p.last_year.get("pole"))
     except Exception as e:  # no conditions, no pole comparison card
         log.warning("last year's qualifying conditions unavailable: %s", e)
     log.info("preview %s: %s %s lap %.3f s, stats %s, sessions %s", p.title, p.ref_year, p.driver, p.lap_s, p.stats, p.sessions)
