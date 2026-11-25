@@ -787,7 +787,7 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
     start_order = sorted(range(n), key=lambda i: rows[i]["code"])          # neutral start order: alphabetical
     def cmed(i):                                                        # clean air median: no car within 1 s
         v = [q[1] for q in rows[i]["pts"] if not q[2]]
-        return float(np.median(v)) if v else float("nan")
+        return float(np.median(v)) if len(v) >= 8 else float("nan")   # fewer than 8 clean laps: not ranked
     cm = {i: cmed(i) for i in range(n)}
     end_order = sorted(range(n), key=lambda i: -(cm[i] if cm[i] == cm[i] else 0))
     tow_all = [q[1] for r_ in rows for q in r_["pts"] if q[2]]
@@ -864,9 +864,13 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
     j = int(np.argmax([q[1] for q in rows[top]["pts"]]))
     ax.scatter([rows[top]["max"]], [y1[top] + jit[top][j]], s=420, facecolors="none", edgecolors=P.GOLD, linewidths=2.5, zorder=6)
     best = end_order[0]
-    verdict.set_text(f"Clean air: {rows[best]['code']} {cm[best]:.0f} km/h")
-    r.add(c.fig, int(2.0 * FPS))
-    verdict.set_text(f"A car within 1 s ahead was worth about {tow_gain:.0f} km/h")
-    r.add(c.fig, int(2.5 * FPS))
+    tied = [i for i in end_order if cm[i] == cm[i] and round(cm[i]) == round(cm[best])]
+    verdict.set_text(f"Clean air: {' and '.join(rows[i]['code'] for i in tied[:3])} {cm[best]:.0f} km/h")
+    if tow_gain >= 3:                                   # only claim a tow effect when the data shows a clear one
+        r.add(c.fig, int(2.0 * FPS))
+        verdict.set_text(f"A car within 1 s ahead was worth about {tow_gain:.0f} km/h")
+        r.add(c.fig, int(2.5 * FPS))
+    else:
+        r.add(c.fig, int(3.5 * FPS))
     plt.close(c.fig)
     return r.close()
