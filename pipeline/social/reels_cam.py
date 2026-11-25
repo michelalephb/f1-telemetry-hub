@@ -669,3 +669,107 @@ def lap_dna_duel(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, n_se
         r.add(c.fig, int(3.0 * FPS))
     plt.close(c.fig)
     return r.close()
+
+
+def team_ghost(p, laps: list[dict], out: Path, hook: list[str], sub: str, n_sec: int = 25, target_s: float = 26.0,
+               src: str = "Telemetry: OpenF1. Lap and sector times: official timing. Gaps along the lap, scaled to official times") -> Path:
+    """Four teams, one lap (Michel, 24 Nov): the best qualifying lap of each team as four cars on one map. Kept
+    simple: a dot per team, the track filling in the colour of the quickest team in each mini sector, and a four
+    row tower whose gap bars move once per mini sector. Ends on the official times and the official sector winners."""
+    P.set_event(p)
+    Ls = [{k: np.asarray(v, float) if isinstance(v, list) else v for k, v in L.items()} for L in laps]
+    off = [float(L["official_s"]) for L in Ls]
+    T = max(off)
+    speedup = max(2, round(T / target_s))
+    ref = Ls[int(np.argmin(off))]
+    X, Y, Dm = ref["x"], ref["y"], ref["dist"]
+    fr = Dm / Dm[-1]
+    F = np.linspace(0, 1, 2001)
+    tF = []
+    for L, o in zip(Ls, off):
+        tt = _t_of_frac(L, F)
+        tF.append(tt * o / tt[-1])
+    tF = np.array(tF)
+    edges = np.linspace(0, 1, n_sec + 1)
+    ie = np.searchsorted(F, edges).clip(0, len(F) - 1)
+    at_line = tF[:, ie]                                            # time of each car at each mini sector line
+    sec_t = np.diff(at_line, axis=1)
+    owner = np.argmin(sec_t, axis=0)                               # quickest team in each mini sector
+    cols = [L.get("color") or P.TEXT for L in Ls]
+
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    for k, s in enumerate(hook):
+        c.text(0.5, 0.83 - k * 0.042, s, 44, weight=300)
+    c.text(0.5, 0.83 - len(hook) * 0.042 - 0.005, f"{sub}, {speedup}x speed".upper(), 15, color=P.CYAN, weight=600, track=True)
+
+    ax = c.fig.add_axes([0.04, 0.445, 0.92, 0.27])
+    ax.set_aspect("equal"), ax.axis("off")
+    pad = 0.07 * max(np.ptp(X), np.ptp(Y))
+    ax.set_xlim(X.min() - pad, X.max() + pad), ax.set_ylim(Y.min() - pad, Y.max() + pad)
+    ax.plot(X, Y, color=P.BASE, lw=8, solid_capstyle="round", zorder=1)
+    seg = []
+    for k in range(n_sec):
+        m = (fr >= edges[k]) & (fr <= edges[k + 1] + 1e-3)
+        ln, = ax.plot(X[m], Y[m], color=cols[owner[k]], lw=9, solid_capstyle="butt", zorder=2, visible=False)
+        seg.append(ln)
+    dots = [ax.plot([], [], "o", ms=15, color=col, mec="#0B0E14", mew=2.5, zorder=6 + i)[0] for i, col in enumerate(cols)]
+
+    # tower: fixed rows in official order
+    order = list(np.argsort(off))
+    head = c.text(0.08, 0.415, "", 14, color=P.MUTED, weight=600, ha="left", track=True)
+    rows = {}
+    for r_, i in enumerate(order):
+        y = 0.375 - r_ * 0.045
+        c.fig.add_artist(plt.Rectangle((0.08, y - 0.013), 0.012, 0.026, transform=c.fig.transFigure, fc=cols[i]))
+        c.text(0.105, y, Ls[i].get("team", "").upper(), 17, color=P.TEXT, weight=600, ha="left", track=True)
+        c.text(0.105, y - 0.017, Ls[i]["code"], 12, color=P.MUTED, weight=600, ha="left", track=True)
+        bar = plt.Rectangle((0.42, y - 0.009), 0.0, 0.018, transform=c.fig.transFigure, fc=cols[i], alpha=0.85)
+        c.fig.add_artist(bar)
+        val = c.text(0.92, y, "", 18, color=P.TEXT, weight=300, ha="right")
+        rows[i] = (bar, val)
+    fin = c.text(0.5, 0.205, "", 16, color=P.GOLD, weight=600, track=True)
+    c.text(0.5, 0.188, "TRACK: QUICKEST TEAM IN EACH MINI SECTOR", 11, color=P.MUTED, weight=600, track=True)
+    c.text(0.5, 0.172, src, 12, color=P.MUTED, weight=300)
+    c.footer()
+    span = 0.33                                                    # bar width for the largest gap
+
+    def show(k):
+        g = at_line[:, k] - at_line[:, k].min()
+        gmax = max(0.05, float(g.max()))
+        for i, (bar, val) in rows.items():
+            bar.set_width(span * g[i] / gmax)
+            val.set_text("LEADS" if g[i] < 0.0005 else f"+{g[i]:.3f}")
+            val.set_color(cols[i] if g[i] < 0.0005 else P.TEXT)
+
+    r = Reel(out)
+    n = int(T / speedup * FPS)
+    shown = 0
+    for f_ in range(n + 1):
+        t = min(T, f_ / FPS * speedup)
+        fs = []
+        for i, L in enumerate(Ls):
+            fi = float(np.interp(min(t, off[i]), tF[i], F))
+            fs.append(fi)
+            dots[i].set_data([np.interp(fi, fr, X)], [np.interp(fi, fr, Y)])
+        done = sum(1 for k in range(n_sec) if min(fs) >= edges[k + 1] - 1e-6)
+        for k in range(n_sec):
+            seg[k].set_visible(k < done)
+        if done != shown and done > 0:
+            show(done)
+            shown = done
+        head.set_text(f"GAP AT MINI SECTOR {max(done, 0)} OF {n_sec}" if done else "GAP UPDATES EVERY MINI SECTOR")
+        r.add(c.fig)
+    show(n_sec)
+    head.set_text("OFFICIAL LAP TIMES")
+    best = min(off)
+    for i, (bar, val) in rows.items():
+        val.set_text(Ls[i]["official"] if off[i] == best else f"{Ls[i]['official']}  +{off[i] - best:.3f}")
+        val.set_color(P.GOLD if off[i] == best else P.TEXT)
+    r.add(c.fig, int(2.0 * FPS))
+    if all(L.get("sectors") for L in laps):
+        win = [int(np.argmin([L["sectors"][s] for L in laps])) for s in range(3)]
+        fin.set_text("   ".join(f"S{s + 1} {laps[w].get('team', laps[w]['code']).upper()}" for s, w in enumerate(win)))
+    r.add(c.fig, int(2.5 * FPS))
+    plt.close(c.fig)
+    return r.close()
