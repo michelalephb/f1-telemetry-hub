@@ -533,7 +533,7 @@ def lap_dna_duel(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, n_se
     """DNA duel (Michel, 24 Nov, idea 5): two laps as two Lap DNA wheels, run on one clock, so the slower wheel
     visibly trails. The map fills mini sector by mini sector in the colour of whoever was quicker there. Ends on the
     single mini sector with the biggest swing, ringed on the map."""
-    from matplotlib.patches import Circle, Wedge
+    from matplotlib.patches import Wedge
     P.set_event(p)
     A = {k: np.asarray(v, float) if isinstance(v, list) else v for k, v in a.items()}
     B = {k: np.asarray(v, float) if isinstance(v, list) else v for k, v in b.items()}
@@ -552,8 +552,8 @@ def lap_dna_duel(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, n_se
     tb *= offb / tb[-1]
     edges = np.linspace(0, 1, n_sec + 1)
     ia = np.searchsorted(F, edges).clip(0, len(F) - 1)
-    gain = np.diff((tb - ta)[ia])                                 # > 0: A gained in this mini sector
-    best = int(np.argmax(np.abs(gain)))
+    cum = (tb - ta)[ia]                                           # gap at each mini sector line, > 0: A ahead
+    gain = np.diff(cum)                                           # > 0: A gained in this mini sector
 
     c = P.Card(H_REEL, story=True)
     c.header(p)
@@ -564,7 +564,7 @@ def lap_dna_duel(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, n_se
     c.text(0.73, 0.712, f"{b['code']}  {b['official']}", 20, color=cb, weight=600)
 
     # map: each mini sector painted in the colour of whoever was quicker there, once both cars are through it
-    ax = c.fig.add_axes([0.04, 0.47, 0.92, 0.23])
+    ax = c.fig.add_axes([0.04, 0.48, 0.92, 0.22])
     ax.set_aspect("equal"), ax.axis("off")
     X, Y, Dm = A["x"], A["y"], A["dist"]
     pad = 0.07 * max(np.ptp(X), np.ptp(Y))
@@ -578,12 +578,8 @@ def lap_dna_duel(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, n_se
         sec_lines.append(ln)
     da, = ax.plot([], [], "o", ms=14, color=ca, mec="#0B0E14", mew=2.5, zorder=6)
     db, = ax.plot([], [], "o", ms=14, color=cb, mec="#0B0E14", mew=2.5, zorder=5)
-    mid = (fr >= edges[best]) & (fr <= edges[best + 1])
-    bx, by = float(np.mean(X[mid])), float(np.mean(Y[mid]))
-    ring = Circle((bx, by), 0.06 * max(np.ptp(X), np.ptp(Y)), fill=False, ec=P.GOLD, lw=3, zorder=8, visible=False)
-    ax.add_patch(ring)
-
-    gap_t = c.text(0.5, 0.452, "", 22, color=P.TEXT, weight=300)
+    gap_t = c.text(0.5, 0.464, "", 20, color=P.TEXT, weight=300)
+    sec_t = [c.text(x0, 0.464, "", 20, color=P.TEXT, weight=400) for x0 in (0.2, 0.5, 0.8)]
 
     def wheel(rect, L, col):
         wx = c.fig.add_axes(rect)
@@ -618,39 +614,42 @@ def lap_dna_duel(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, n_se
     c.footer()
 
     def pos(L, off, t):
-        """Fraction of the lap and sample index at time t, with the lap clock scaled to the official time."""
+        """Fraction of the lap at time t, interpolated between samples so the cars glide instead of stepping,
+        and the nearest sample for gear and inputs. The lap clock is scaled to the official time."""
         tt = np.asarray(L["t"], float)
         tt = tt * off / tt[-1]
-        j = min(len(tt) - 1, int(np.searchsorted(tt, min(t, off))))
-        return float(L["dist"][j] / L["dist"][-1]), j
+        tq = min(t, off)
+        frc = float(np.interp(tq, tt, L["dist"]) / L["dist"][-1])
+        j = min(len(tt) - 1, int(np.argmin(np.abs(tt - tq))))
+        return frc, j, float(np.interp(tq, tt, L["speed"]))
 
     r = Reel(out)
     n = int(T / speedup * FPS)
     for f_ in range(n + 1):
         t = min(T, f_ / FPS * speedup)
-        fa, ja = pos(A, offa, t)
-        fb, jb = pos(B, offb, t)
-        da.set_data([A["x"][ja]], [A["y"][ja]])
-        jbx = min(len(X) - 1, int(np.searchsorted(fr, fb)))
-        db.set_data([X[jbx]], [Y[jbx]])
+        fa, ja, va = pos(A, offa, t)
+        fb, jb, vb = pos(B, offb, t)
+        da.set_data([np.interp(fa, fr, X)], [np.interp(fa, fr, Y)])
+        db.set_data([np.interp(fb, fr, X)], [np.interp(fb, fr, Y)])
+        done = 0
         for k in range(n_sec):
-            sec_lines[k].set_visible(min(fa, fb) >= edges[k + 1] - 1e-6)
-        for wd, L, frc, j in ((wa, A, fa, ja), (wb, B, fb, jb)):
+            vis = min(fa, fb) >= edges[k + 1] - 1e-6
+            sec_lines[k].set_visible(vis)
+            done += vis
+        if done:                                    # the gap moves only when both cars finish a mini sector
+            g_ = float(cum[done])
+            who_ = a if g_ > 0 else b
+            gap_t.set_text(f"MINI SECTOR {done} OF {n_sec}:  " + ("LEVEL" if abs(g_) < 0.0005 else
+                           f"{who_['code']} AHEAD BY {abs(g_):.3f} s"))
+            gap_t.set_color(P.TEXT if abs(g_) < 0.0005 else (ca if g_ > 0 else cb))
+        for wd, L, frc, j, v in ((wa, A, fa, ja, va), (wb, B, fb, jb, vb)):
             on = int(frc * wd["nb"])
             for k in range(on):
                 wd["outer"][k].set_visible(True), wd["inner"][k].set_visible(True)
             ang = np.deg2rad(90 - frc * 360)
             wd["hand"].set_data([0.56 * np.cos(ang), 1.07 * np.cos(ang)], [0.56 * np.sin(ang), 1.07 * np.sin(ang)])
             wd["gt"].set_text(f"{wd['g'][j]:.0f}"), wd["gt"].set_color(DNA[wd["ph"][j]])
-            wd["st"].set_text(f"{L['speed'][j]:.0f} km/h")
-        lead_f = max(fa, fb)
-        if t > 0.5 and t < min(offa, offb):
-            if fa >= fb:
-                gap = t - float(np.interp(fb, F, ta))
-                gap_t.set_text(f"{a['code']} AHEAD BY {max(0.0, gap):.3f} s"), gap_t.set_color(ca)
-            else:
-                gap = t - float(np.interp(fa, F, tb))
-                gap_t.set_text(f"{b['code']} AHEAD BY {max(0.0, gap):.3f} s"), gap_t.set_color(cb)
+            wd["st"].set_text(f"{v:.0f} km/h")
         r.add(c.fig)
     for wd in (wa, wb):
         for w in wd["outer"] + wd["inner"]:
@@ -658,13 +657,15 @@ def lap_dna_duel(p, a: dict, b: dict, out: Path, hook: list[str], sub: str, n_se
         wd["hand"].set_visible(False)
     for ln in sec_lines:
         ln.set_visible(True)
-    win, lose = (a, b) if offa <= offb else (b, a)
-    gap_t.set_text(f"{win['code']} BY {abs(offb - offa):.3f} s"), gap_t.set_color(P.GOLD)
-    r.add(c.fig, int(1.4 * FPS))
-    who = a if gain[best] > 0 else b
-    ring.set_visible(True)
-    gap_t.set_text(f"BIGGEST SWING: {who['code']} {abs(gain[best]):.3f} s IN ONE MINI SECTOR")
-    gap_t.set_fontsize(17)
-    r.add(c.fig, int(2.8 * FPS))
+    win = a if offa <= offb else b
+    gap_t.set_text(f"{win['code']} BY {abs(offb - offa):.3f} s"), gap_t.set_color(P.GOLD), gap_t.set_fontsize(26)
+    r.add(c.fig, int(1.6 * FPS))
+    if a.get("sectors") and b.get("sectors"):           # the official split, three timing sectors
+        gap_t.set_visible(False)
+        for k, (x_, y_) in enumerate(zip(a["sectors"], b["sectors"])):
+            w_ = a if x_ <= y_ else b
+            sec_t[k].set_text(f"S{k + 1}  {w_['code']} {abs(x_ - y_):.3f}")
+            sec_t[k].set_color(ca if w_ is a else cb)
+        r.add(c.fig, int(3.0 * FPS))
     plt.close(c.fig)
     return r.close()
