@@ -433,7 +433,7 @@ def lap_dna(p, lap: dict, out: Path, hook: list[str], sub: str, official: str | 
         c.text(x0, 0.712, lab, 12, color=col, weight=700, track=True)
 
     # painted track
-    ax = c.fig.add_axes([0.07, 0.505, 0.86, 0.195])
+    ax = c.fig.add_axes([0.04, 0.47, 0.92, 0.235])
     ax.set_aspect("equal"), ax.axis("off")
     pad = 0.07 * max(np.ptp(L["x"]), np.ptp(L["y"]))
     ax.set_xlim(L["x"].min() - pad, L["x"].max() + pad), ax.set_ylim(L["y"].min() - pad, L["y"].max() + pad)
@@ -459,7 +459,7 @@ def lap_dna(p, lap: dict, out: Path, hook: list[str], sub: str, official: str | 
                                 bbox=dict(boxstyle="circle,pad=0.25", fc="#141923", ec=P.GOLD, lw=1.5))))
 
     # the lap wheel
-    wx = c.fig.add_axes([0.25, 0.215, 0.5, 0.5 * 1080 / 1920])
+    wx = c.fig.add_axes([0.28, 0.212, 0.44, 0.44 * 1080 / 1920])
     wx.set_aspect("equal"), wx.axis("off"), wx.set_xlim(-1.08, 1.08), wx.set_ylim(-1.08, 1.08)
     wx.add_patch(Wedge((0, 0), 1.0, 0, 360, width=0.16, fc="#141923", ec="none"))
     wx.add_patch(Wedge((0, 0), 0.80, 0, 360, width=0.22, fc="#10141C", ec="none"))
@@ -477,10 +477,10 @@ def lap_dna(p, lap: dict, out: Path, hook: list[str], sub: str, official: str | 
                    ec="none", visible=False)
         wx.add_patch(w), wx.add_patch(wi)
         outer.append(w), inner.append(wi)
-    hand, = wx.plot([0, 0], [0, 1.04], color=P.TEXT, lw=2, zorder=5)
+    hand, = wx.plot([0, 0], [0.56, 1.06], color=P.TEXT, lw=2.5, zorder=5)    # a rim marker, clear of the centre text
     wx.text(0, 1.06, "START", fontsize=10, color=P.MUTED, family=P.FONT, weight=700, ha="center", va="bottom")
-    g_t = wx.text(0, 0.12, "", fontsize=96, color=P.TEXT, family=P.FONT, weight=200, ha="center", va="center")
-    wx.text(0, -0.13, "GEAR", fontsize=11, color=P.MUTED, family=P.FONT, weight=700, ha="center")
+    g_t = wx.text(0, 0.16, "", fontsize=84, color=P.TEXT, family=P.FONT, weight=200, ha="center", va="center")
+    g_lab = wx.text(0, -0.10, "GEAR", fontsize=11, color=P.MUTED, family=P.FONT, weight=700, ha="center")
     s_t = wx.text(0, -0.27, "", fontsize=24, color=P.TEXT, family=P.FONT, weight=300, ha="center", va="center")
     clk = wx.text(0, -0.43, "", fontsize=17, color=P.MUTED, family=P.FONT, weight=300, ha="center", va="center")
     c.text(0.5, 0.197, "OUTER RING: WHAT THE DRIVER DOES   INNER RING: GEAR", 11, color=P.MUTED, weight=600, track=True)
@@ -501,21 +501,22 @@ def lap_dna(p, lap: dict, out: Path, hook: list[str], sub: str, official: str | 
         for b in range(nb_on):
             outer[b].set_visible(True), inner[b].set_visible(True)
         ang = np.deg2rad(90 - frac * 360)
-        hand.set_data([0, 1.04 * np.cos(ang)], [0, 1.04 * np.sin(ang)])
+        hand.set_data([0.56 * np.cos(ang), 1.06 * np.cos(ang)], [0.56 * np.sin(ang), 1.06 * np.sin(ang)])
         g_t.set_text(f"{gear[j]:.0f}"), g_t.set_color(DNA[ph[j]])
         s_t.set_text(f"{L['speed'][j]:.0f} km/h")
         clk.set_text(_clock(t))
         r.add(c.fig)
     for w in outer + inner:
         w.set_visible(True)
-    hand.set_visible(False)
+    hand.set_visible(False), g_lab.set_visible(False)
     dt = np.diff(T, append=T[-1])                                      # time weighted, not sample counted
     share = {k: 100.0 * float(sum(d for d, q in zip(dt, ph) if q == k)) / float(dt.sum()) for k in DNA}
     clk.set_text(official or _clock(lap_s)), clk.set_color(P.GOLD), clk.set_fontsize(22)
-    g_t.set_text(f"{share['FULL THROTTLE']:.0f}%"), g_t.set_color(DNA["FULL THROTTLE"]), g_t.set_fontsize(80)
+    g_t.set_text(f"{share['FULL THROTTLE']:.0f}%"), g_t.set_color(DNA["FULL THROTTLE"]), g_t.set_fontsize(70)
     s_t.set_text("FLAT OUT"), s_t.set_fontsize(16)
     r.add(c.fig, int(1.6 * FPS))
-    s_t.set_text(f"BRAKING {share['BRAKING']:.0f}%   COASTING {share['COAST']:.0f}%")
+    g_t.set_text(f"{share['BRAKING']:.0f}%"), g_t.set_color(DNA["BRAKING"])
+    s_t.set_text("ON THE BRAKES")
     r.add(c.fig, int(2.4 * FPS))
     plt.close(c.fig)
     return r.close()
