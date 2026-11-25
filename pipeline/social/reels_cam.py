@@ -254,8 +254,10 @@ def ghost_years(p, laps: list[dict], out: Path, hook: list[str], sub: str, speed
     for k, L in enumerate(laps):
         col = L["color"]
         dots.append(ax.plot([], [], "o", ms=20, color=col, mec="#05070A", mew=2.5, zorder=5 + k)[0])
-        tags.append(ax.text(0, 0, f"{L['year']}", fontsize=15, color=col, family=P.FONT, weight=600, zorder=9,
-                            ha="left", va="center"))
+        # each year tag sits in its own lane (screen points, not track units), so cars running close stay readable
+        tags.append(ax.annotate(f"{L['year']}", xy=(0, 0), xytext=(16, 22 * (len(laps) - 1) / 2 - 22 * k),
+                                textcoords="offset points", fontsize=15, color=col, family=P.FONT, weight=600,
+                                zorder=9, ha="left", va="center"))
     c.text(0.08, 0.360, "LAP TIMER", 12, color=P.MUTED, weight=600, ha="left", track=True)
     big = c.text(0.92, 0.360, "", 22, color=P.TEXT, weight=200, ha="right")
     c.text(0.5, 0.360, f"{speedup:g}X SPEED", 11, color=P.MUTED, weight=600, track=True)
@@ -281,8 +283,7 @@ def ghost_years(p, laps: list[dict], out: Path, hook: list[str], sub: str, speed
             s = float(np.interp(min(tt, offi[k]), tl[k], dl[k])) / dl[k][-1] * Lr if tt < offi[k] else Lr
             xx, yy = np.interp(s, D, X), np.interp(s, D, Y)
             dots[k].set_data([xx], [yy])
-            # stagger the year tags so cars running close together stay readable
-            tags[k].set_position((xx + Lr * 0.012, yy + Lr * (0.012 - 0.012 * k)))
+            tags[k].xy = (xx, yy)
             prog.append((-(s if tt < offi[k] else Lr + (T - offi[k])), k))
             frac.append(s / Lr if tt < offi[k] else 1.0)
         lead = max(range(len(laps)), key=lambda k: (frac[k], -offi[k]))

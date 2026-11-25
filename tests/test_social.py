@@ -709,3 +709,18 @@ def test_history_reel_captions_ask_one_fan_question():
         block = src[src.index(start):]
         block = block[:block.index("\n    elif ", 10)]
         assert len(re.findall(r"💬 Who are you backing this weekend\?", block)) == 1, start
+
+
+def test_ghost_years_tints_near_identical_team_colours():
+    """McLaren 2024 (#FF8000) and 2025 (#F47600) read as one colour on the map: the older lap is tinted (25 Nov)."""
+    from pipeline.social.reels_tel import _same_team, _tint
+    assert _same_team("#FF8000", "#F47600")
+    assert not _same_team("#FF8000", "#3671C6")
+    assert not _same_team(_tint("#ff8000", 0.45), "#f47600")
+
+
+def test_ghost_years_race_lap_hook_and_note():
+    """The race lap version has its own truthful hook and names the lap record source (25 Nov)."""
+    from pipeline.social.reels_tel import GHOST_HOOKS, GHOST_NOTES
+    assert GHOST_HOOKS[("LUSAIL", "ghost_years_r")] == ["The race lap record.", "Which year set it?"]
+    assert "1:22.384" in GHOST_NOTES[("LUSAIL", "ghost_years_r")]
