@@ -956,6 +956,75 @@ def speed_ribbon(p, lap: dict, out: Path, hook: list[str], sub: str, src: str = 
     return r.close()
 
 
+def apex_of(lap: dict, frm: float = 0.70, to: float = 0.95) -> dict:
+    """Slowest point of the lap between `frm` and `to` of the lap time (late in the lap, so the pause comes
+    after the hook has been read). Speed and position are the car_data samples (lap_of)."""
+    t, v = np.asarray(lap["t"], float), np.asarray(lap["speed"], float)
+    m = (t >= frm * lap["lap_s"]) & (t <= to * lap["lap_s"])
+    k = int(np.flatnonzero(m)[np.argmin(v[m])]) if m.any() else int(np.argmin(v[5:-5])) + 5
+    return {"t": float(t[k]), "v": float(v[k]), "x": float(np.interp(t[k], t, lap["x"])),
+            "y": float(np.interp(t[k], t, lap["y"]))}
+
+
+def pause_apex(p, lap: dict, out: Path, hook: list[str], sub: str, apex: dict | None = None,
+               window: int = 3, target_s: float = 9.0, src: str = SRC_TEL, hold_s: float = 2.5) -> Path:
+    """Pause challenge (Michel, 25 Nov, from a viral 'only 1% can pause at the right time' Reel). One car dot
+    runs the lap at N x speed; a champagne ring sits on the apex of the slowest late corner. The ring is sized
+    so the dot sits fully inside it for exactly `window` frames (3 at 30 fps = 0.1 s), so almost nobody pauses
+    it first time and people replay. Ends on the perfect frame: apex speed and the official lap time."""
+    P.set_event(p)
+    L = {k: np.array(v, float) if isinstance(v, list) else v for k, v in lap.items()}
+    A = apex or apex_of(lap)
+    factor = max(1, round(L["lap_s"] / target_s))
+    n = int(L["lap_s"] / factor * FPS)
+    ts = np.minimum(L["lap_s"], np.arange(n + 1) / FPS * factor)
+    fx, fy = np.interp(ts, L["t"], L["x"]), np.interp(ts, L["t"], L["y"])
+    fv = np.interp(ts, L["t"], L["speed"])
+    col = L.get("color") or P.TEXT
+    c = _card(p)
+    hk = _hook(c, hook, f"{sub}, shown at {factor}x speed")
+    ax = _track(c, [0.10, 0.345, 0.80, 0.355], L["x"], L["y"], lw=9)
+    c.fig.canvas.draw()
+    px = ax.transData.transform(np.column_stack([fx, fy]))
+    cpx = ax.transData.transform([[A["x"], A["y"]]])[0]
+    d = np.hypot(*(px - cpx).T)
+    dot_ms, dot_mew = 18, 3
+    r_dot = (dot_ms + dot_mew) / 2 * c.fig.dpi / 72              # marker radius in pixels
+    order = np.sort(d)
+    R = r_dot + (order[window - 1] + order[window]) / 2          # exactly `window` frames fully inside
+    inside = np.flatnonzero(d <= R - r_dot)
+    best = int(np.argmin(d))
+    ring_ms = 2 * R * 72 / c.fig.dpi
+    glow, = ax.plot([A["x"]], [A["y"]], "o", ms=ring_ms * 1.9, color=P.GOLD, alpha=0.10, mew=0, zorder=2)
+    ring, = ax.plot([A["x"]], [A["y"]], "o", ms=ring_ms, mfc="none", mec=P.GOLD, mew=3, zorder=4)
+    dot, = ax.plot([], [], "o", ms=dot_ms, color=col, mec=P.TEXT, mew=dot_mew, zorder=5)
+    spd = c.text(0.5, 0.285, "", 96, weight=200)
+    unit = c.text(0.5, 0.242, "KM/H", 14, color=P.MUTED, weight=600, track=True)
+    clock = c.text(0.5, 0.215, "", 22, color=P.MUTED, weight=300)
+    _foot(c, src)
+    r = Reel(out)
+    for i in range(n + 1):
+        dot.set_data([fx[i]], [fy[i]])
+        spd.set_text(f"{fv[i]:.0f}")
+        clock.set_text(_clock(ts[i]))
+        r.add(c.fig)
+    # the perfect pause: frozen on the frame closest to the apex
+    dot.set_data([fx[best]], [fy[best]])
+    glow.set_alpha(0.28)
+    ring.set_markeredgewidth(5)
+    spd.set_text(f"{A['v']:.0f}")
+    spd.set_color(P.GOLD)
+    unit.set_text(P.tracked("KM/H AT THE APEX"))
+    clock.set_text(f"{L.get('code', '')}  {L.get('official') or _clock(L['lap_s'])}".strip())
+    clock.set_color(P.TEXT)
+    hk[0].set_text("The perfect pause")
+    hk[1].set_text(f"{len(inside)} frames. {len(inside) / FPS:.1f} s.")
+    r.add(c.fig, int(hold_s * FPS))
+    plt.close(c.fig)
+    log.info("pause_apex: %d frames inside (%s), best frame %d of %d, ring %.0f px", len(inside), inside.tolist(), best, n, R)
+    return r.close()
+
+
 def delta_map(p, a: dict, b: dict, out: Path, hook: list[str] | None, sub: str, official: tuple[float, float],
               n_sec: int = 25, src: str = "Lap times: official timing. Mini sectors: OpenF1 telemetry") -> Path:
     """Two laps, one map, no dots racing: a single runner paints each of n_sec mini sectors in the colour of the
@@ -2680,6 +2749,19 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                              if gp else f"👻 Pole vs P2 in {name}, replayed on one map: {drv(a['code'], p.colors)} {ta} vs {drv(b['code'], p.colors)} {tb}."),
                    f"⏱️ The gap: {abs(ma - mb) / 1000:.3f} s (official qualifying times).",
                    "💬 Where was pole won? Tell us below.")
+    elif kind == "pause_apex":                   # pause challenge on the race fastest lap (Michel, 25 Nov)
+        from .captions import FAN_QUESTIONS
+        try:
+            lap = lap_of(oc, p.season, ck, "Race", rot)
+        except Exception:
+            return None
+        A = apex_of(lap)
+        sub = f"{lap['code']}, {name} {p.season} race, fastest lap"
+        pause_apex(p, lap, video, ["Can you pause", "on the apex?"], sub, apex=A)
+        cap = _cap(p, kind, f"⏸️ Can you pause on the apex? {drv(lap['code'], p.colors)}, fastest lap of the {name} {p.season} race, {_clock(lap['lap_s'])}.",
+                   f"🎯 The dot sits fully inside the ring for 3 frames, a 0.1 s window, shown at {max(1, round(lap['lap_s'] / 9.0))}x speed.",
+                   f"⚡ Apex speed {A['v']:.0f} km/h (OpenF1 telemetry, sampled).",
+                   FAN_QUESTIONS[0])
     elif kind == "pedal_fp3":                    # this year's fastest FP3 lap
         try:
             lap = lap_of(oc, p.season, ck, "Practice 3", rot)
