@@ -748,3 +748,13 @@ def test_preview_load_skips_a_year_without_a_race(monkeypatch):
     with pytest.raises(Picked) as e:
         preview.load(2023, 18)
     assert e.value.args[0] == 11023
+
+
+def test_race_laps_ignores_a_stray_lap_past_the_flag():
+    """OpenF1 lists a lap 58 at Lusail 2023 (57 lap race): the replay counts laps timed for three drivers (25 Nov)."""
+    import pandas as pd
+    from pipeline.social.reels_tel import race_laps
+    rows = [{"driver_number": d, "lap_number": L, "lap_duration": 85.0} for d in (1, 11, 44) for L in range(1, 58)]
+    rows.append({"driver_number": 1, "lap_number": 58, "lap_duration": None})
+    rows.append({"driver_number": 11, "lap_number": 58, "lap_duration": 120.0})
+    assert race_laps(pd.DataFrame(rows)) == 57
