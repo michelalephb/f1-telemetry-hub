@@ -1826,7 +1826,18 @@ REPLAY_LABELS = {                                # (GP key, season, kind) -> cod
 GHOST_NOTES = {
     ("LUSAIL", "ghost_years_q"): "ℹ️ 2024: Verstappen set the fastest time, but a one place grid penalty for driving "
                                  "slowly put Russell on pole. 2021 is not shown: no car data for it (Hamilton, pole 1:20.827).",
+    ("LUSAIL", "ghost_years_r"): "ℹ️ Norris's 1:22.384 in 2024 is the race lap record at Lusail (formula1.com). "
+                                 "2021 is not shown: no car data for it.",
 }
+GHOST_HOOKS = {                                  # (GP key, kind) -> two hook lines; default "N years, one track."
+    ("LUSAIL", "ghost_years_r"): ["The race lap record.", "Which year set it?"],
+}
+
+
+def _same_team(a: str, b: str, tol: int = 40) -> bool:
+    """Two team colours close enough to read as one on the map (McLaren #FF8000 in 2024, #F47600 in 2025)."""
+    ra, rb = (tuple(int(h.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)) for h in (a, b))
+    return sum((x - y) ** 2 for x, y in zip(ra, rb)) ** 0.5 <= tol
 
 
 def _tint(hexc: str, k: float) -> str:
@@ -2963,17 +2974,20 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             laps.append(L | {"official": L["lap_s"]})
         if len(laps) < 2:
             return None
-        seen = {}
-        for L in laps:                            # same team colour twice: tint the older one
+        seen = []
+        for L in reversed(laps):                  # same team colour twice (or nearly): tint the older one
             cc = (L["color"] or P.TEXT).lower()
-            if cc in seen:
-                L["color"] = _tint(cc, 0.45)
-            seen[L["color"].lower()] = 1
+            for _ in range(3):                    # at most three shades, never an endless loop
+                if not any(_same_team(cc, s_) for s_ in seen):
+                    break
+                cc = _tint(cc, 0.45)
+            L["color"] = cc
+            seen.append(cc)
         log.info("GHOST_JSON " + json.dumps([{k: L[k] for k in ("year", "code", "color", "t", "dist", "x", "y", "lap_s", "official")}
                                              for L in laps], separators=(",", ":")))
         what = "qualifying" if sess == "Qualifying" else sess.lower()
         best = min(laps, key=lambda L: L["official"])
-        reels_cam.ghost_years(p, laps, video, [f"{len(laps)} years, one track.", "Who is fastest?"],
+        reels_cam.ghost_years(p, laps, video, GHOST_HOOKS.get((p.title, kind), [f"{len(laps)} years, one track.", "Who is fastest?"]),
                               f"{name}, fastest {what} lap of every year")
         cap = _cap(p, kind, f"⏱️ The fastest {what} lap at {name} in each year from {laps[0]['year']} to {laps[-1]['year']}, "
                    "racing on one track: " + ", ".join(f"{L['year']} {L['code']} {_clock(L['official'])}" for L in laps) + ".",
