@@ -1533,6 +1533,10 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
 # checked facts for the championship Reel caption (Michel, 24 Nov). Source: crash.net, standings after the Mexico City GP
 TITLE_NOTES = {2026: "👑 Antonelli sealed the title in Mexico City, the youngest champion in F1 history."}
 
+TEAM_SHORT = {"McLaren": "McLaren", "Red Bull": "Red Bull", "Mercedes": "Mercedes", "Ferrari": "Ferrari",
+              "Williams": "Williams", "Aston Martin": "Aston Martin", "Alpine F1 Team": "Alpine", "Haas F1 Team": "Haas",
+              "RB F1 Team": "Racing Bulls", "Sauber": "Sauber", "Cadillac F1 Team": "Cadillac", "Audi": "Audi"}
+
 SPOT_YEAR_COLORS = ["#6692FF", "#A855F7", "#FF8000", "#27F4D2", "#E8002D"]   # one per year, oldest first
 
 
@@ -2509,6 +2513,39 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "🟢 full throttle  🟡 part throttle  ⚪ coasting  🔴 braking. Line width is speed, the circled numbers are "
                    "the gear at each slow corner. The wheel is the whole lap, its inner ring the gear.",
                    "📐 OpenF1 car data at about 4 samples a second: brake is on or off, not pressure.",
+                   "💬 Who are you backing this weekend?")
+    elif kind == "team_ghost_q":                 # best lap of each of the 4 quickest teams, one map (Michel, 24 Nov)
+        from . import reels_cam
+        res = _q_official(p)
+        seen, pick = set(), []
+        for r_ in res:
+            if r_.get("team") and r_["team"] not in seen and (r_.get("q3") or r_.get("q2") or r_.get("q1")):
+                seen.add(r_["team"]), pick.append(r_)
+            if len(pick) == 4:
+                break
+        if len(pick) < 4:
+            return None
+        laps = []
+        try:
+            for r_ in pick:
+                t_ = r_["q3"] or r_["q2"] or r_["q1"]
+                m_, _, sec = t_.rpartition(":")
+                s_ = int(m_ or 0) * 60 + float(sec)
+                laps.append(lap_of(oc, p.season, ck, "Qualifying", rot, r_["code"], s_ * 1000)
+                            | {"official_s": s_, "official": t_, "team": TEAM_SHORT.get(r_["team"], r_["team"])})
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        need = ("speed", "x", "y", "dist", "t")
+        log.info("TEAMS_JSON " + json.dumps([{k: (list(map(float, L[k])) if k in need else L.get(k)) for k in
+                                               need + ("lap_s", "code", "color", "official_s", "official", "sectors", "team")}
+                                              for L in laps], separators=(",", ":")))
+        reels_cam.team_ghost(p, laps, video, ["4 teams.", "One lap."], f"Best lap of each team, {name} {p.season} qualifying")
+        lines = [f"{L['team']}: {drv(L['code'], p.colors)} {L['official']}" for L in laps]
+        cap = _cap(p, kind, f"🏁 The best qualifying lap of the four quickest teams at {name} {p.season}, on one map.",
+                   "\n".join(lines),
+                   "🗺️ The track fills in with the quickest team in each mini sector; the gaps move once per mini sector.",
+                   "📐 OpenF1 telemetry, scaled to the official lap times. Sector winners from official timing.",
                    "💬 Who are you backing this weekend?")
     elif kind == "lap_dna_duel_q" or kind.startswith("lap_dna_duel_q_"):   # two laps as Lap DNA wheels (Michel, 24 Nov)
         from . import reels_cam
