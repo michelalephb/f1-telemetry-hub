@@ -732,7 +732,7 @@ def team_ghost(p, laps: list[dict], out: Path, hook: list[str], sub: str, n_sec:
     c.text(0.5, 0.188, "TRACK: QUICKEST TEAM IN EACH MINI SECTOR", 11, color=P.MUTED, weight=600, track=True)
     c.text(0.5, 0.172, src, 12, color=P.MUTED, weight=300)
     c.footer()
-    span = 0.33                                                    # bar width for the largest gap
+    span = 0.30                                                    # bar width for the largest gap
 
     def show(k):
         g = at_line[:, k] - at_line[:, k].min()
@@ -764,7 +764,7 @@ def team_ghost(p, laps: list[dict], out: Path, hook: list[str], sub: str, n_sec:
     head.set_text("OFFICIAL LAP TIMES")
     best = min(off)
     for i, (bar, val) in rows.items():
-        val.set_text(Ls[i]["official"] if off[i] == best else f"{Ls[i]['official']}  +{off[i] - best:.3f}")
+        val.set_text(Ls[i]["official"] if off[i] == best else f"+{off[i] - best:.3f}")
         val.set_color(P.GOLD if off[i] == best else P.TEXT)
     r.add(c.fig, int(2.0 * FPS))
     if all(L.get("sectors") for L in laps):
@@ -785,7 +785,14 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
     n = len(rows)
     rng = np.random.default_rng(7)
     start_order = sorted(range(n), key=lambda i: rows[i]["code"])          # neutral start order: alphabetical
-    end_order = sorted(range(n), key=lambda i: -rows[i]["median"])
+    def cmed(i):                                                        # clean air median: no car within 1 s
+        v = [q[1] for q in rows[i]["pts"] if not q[2]]
+        return float(np.median(v)) if v else float("nan")
+    cm = {i: cmed(i) for i in range(n)}
+    end_order = sorted(range(n), key=lambda i: -(cm[i] if cm[i] == cm[i] else 0))
+    tow_all = [q[1] for r_ in rows for q in r_["pts"] if q[2]]
+    clean_all = [q[1] for r_ in rows for q in r_["pts"] if not q[2]]
+    tow_gain = float(np.median(tow_all) - np.median(clean_all)) if tow_all and clean_all else 0.0
     allv = np.array([q[1] for r in rows for q in r["pts"]])
     lo, hi = np.percentile(allv, 1) - 2, allv.max() + 3
 
@@ -794,7 +801,7 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
     for k, s in enumerate(hook):
         c.text(0.5, 0.83 - k * 0.042, s, 44, weight=300)
     c.text(0.5, 0.83 - len(hook) * 0.042 - 0.005, sub.upper(), 15, color=P.CYAN, weight=600, track=True)
-    ax = c.fig.add_axes([0.16, 0.235, 0.78, 0.485])
+    ax = c.fig.add_axes([0.16, 0.262, 0.78, 0.448])
     ax.set_facecolor("none")
     for sp in ax.spines.values():
         sp.set_visible(False)
@@ -803,19 +810,20 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
     ax.set_yticks([])
     ax.grid(axis="x", color="#232D3F", lw=1)
     ax.set_xlabel("KM/H", color=P.MUTED, fontsize=12)
-    lap_t = c.text(0.94, 0.728, "", 16, color=P.TEXT, weight=300, ha="right")
-    c.text(0.06, 0.728, "TOW", 12, color=P.GOLD, weight=700, ha="left", track=True)
-    c.text(0.105, 0.728, "= WITHIN 1 S OF THE CAR AHEAD", 12, color=P.MUTED, weight=600, ha="left", track=True)
-    verdict = c.text(0.5, 0.205, "", 20, color=P.GOLD, weight=500)
-    c.text(0.5, 0.175, src, 12, color=P.MUTED, weight=300)
+    lap_t = c.text(0.94, 0.722, "", 16, color=P.TEXT, weight=300, ha="right")
+    c.text(0.5, 0.192, "FILLED: CLEAN AIR    HOLLOW: WITHIN 1 S OF A CAR (TOW, DRS)", 12, color=P.MUTED, weight=600,
+           track=True)
+    verdict = c.text(0.5, 0.214, "", 20, color=P.GOLD, weight=500)
+    c.text(0.5, 0.173, src, 12, color=P.MUTED, weight=300)
     c.footer()
 
     jit = {i: rng.uniform(-0.32, 0.32, len(rows[i]["pts"])) for i in range(n)}
     rank = {i: start_order.index(i) for i in range(n)}
     labs = {i: ax.text(lo - (hi - lo) * 0.015, rank[i], rows[i]["code"], fontsize=13, color=rows[i]["color"] or P.TEXT,
                        family=P.FONT, weight=700, ha="right", va="center") for i in range(n)}
-    scat = {i: ax.scatter([], [], s=34, c=rows[i]["color"] or P.TEXT, edgecolors="none", zorder=3) for i in range(n)}
-    tow_s = {i: ax.scatter([], [], s=34, facecolors="none", edgecolors=P.GOLD, linewidths=1.6, zorder=4) for i in range(n)}
+    scat = {i: ax.scatter([], [], s=38, c=rows[i]["color"] or P.TEXT, edgecolors="none", zorder=3) for i in range(n)}
+    tow_s = {i: ax.scatter([], [], s=38, facecolors="none", edgecolors=rows[i]["color"] or P.TEXT, linewidths=1.6, zorder=4)
+             for i in range(n)}
     meds = {i: ax.plot([], [], color=P.GOLD, lw=3, zorder=5)[0] for i in range(n)}
 
     def draw(upto, y_of):
@@ -823,7 +831,7 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
             pts = [(q, j) for j, q in enumerate(rows[i]["pts"]) if q[0] <= upto]
             if not pts:
                 continue
-            xy = np.array([[q[1], y_of[i] + jit[i][j]] for q, j in pts])
+            xy = np.array([[q[1], y_of[i] + jit[i][j]] for q, j in pts if not q[2]]).reshape(-1, 2)
             scat[i].set_offsets(xy)
             tw = np.array([[q[1], y_of[i] + jit[i][j]] for q, j in pts if q[2]]).reshape(-1, 2)
             tow_s[i].set_offsets(tw)
@@ -847,16 +855,18 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
         e = u * u * (3 - 2 * u)
         draw(L, {i: y0[i] + (y1[i] - y0[i]) * e for i in range(n)})
         r.add(c.fig)
-    lap_t.set_text("SORTED BY MEDIAN")
+    lap_t.set_text("SORTED BY CLEAN AIR MEDIAN")
     for i in range(n):
-        m = rows[i]["median"]
-        meds[i].set_data([m, m], [y1[i] - 0.38, y1[i] + 0.38])
+        m = cm[i]
+        if m == m:
+            meds[i].set_data([m, m], [y1[i] - 0.38, y1[i] + 0.38])
     top = max(range(n), key=lambda i: rows[i]["max"])
     j = int(np.argmax([q[1] for q in rows[top]["pts"]]))
     ax.scatter([rows[top]["max"]], [y1[top] + jit[top][j]], s=420, facecolors="none", edgecolors=P.GOLD, linewidths=2.5, zorder=6)
     best = end_order[0]
-    verdict.set_text(f"{rows[best]['code']} highest median {rows[best]['median']:.0f} km/h.  "
-                     f"Top reading: {rows[top]['code']} {rows[top]['max']:.0f}")
-    r.add(c.fig, int(3.5 * FPS))
+    verdict.set_text(f"Clean air: {rows[best]['code']} {cm[best]:.0f} km/h")
+    r.add(c.fig, int(2.0 * FPS))
+    verdict.set_text(f"A car within 1 s ahead was worth about {tow_gain:.0f} km/h")
+    r.add(c.fig, int(2.5 * FPS))
     plt.close(c.fig)
     return r.close()
