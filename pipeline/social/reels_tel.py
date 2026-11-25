@@ -979,10 +979,11 @@ def brake_point(lap: dict, after_s: float = 2.0) -> dict:
 
 def pause_reel(p, lap: dict, out: Path, hook: list[str], sub: str, target: dict, reveal: tuple[str, str, str],
                window: int = 3, factor: int = 9, lead_s: float = 3.0, tail_s: float = 2.0, hold_s: float = 2.5,
-               src: str = SRC_TEL) -> Path:
+               src: str = SRC_TEL, scored: tuple[str, str] = ("You nailed it.", "Perfect pause.")) -> Path:
     """Pause challenge (Michel, 25 Nov, from a viral 'only 1% can pause at the right time' Reel). One car dot
     runs the lap at `factor` x speed; a champagne ring sits on the target. The ring is sized so the dot is
-    fully inside it for exactly `window` frames (3 at 30 fps = 0.1 s). The target comes `lead_s` seconds in
+    fully inside it for exactly `window` frames (3 at 30 fps = 0.1 s). On those frames only, the hook turns gold
+    and says `scored`, so anyone who pauses inside sees it. The target comes `lead_s` seconds in
     (Michel: do not make them wait): playback starts that far before it, wrapping round the same lap, so no
     lap clock is shown. Ends frozen on the perfect frame with `reveal` = (number, unit, line)."""
     P.set_event(p)
@@ -990,7 +991,8 @@ def pause_reel(p, lap: dict, out: Path, hook: list[str], sub: str, target: dict,
     n = int((lead_s + tail_s) * FPS)
     tau = (target["t"] - lead_s * factor + np.arange(n + 1) / FPS * factor) % L["lap_s"]
     fx, fy = np.interp(tau, L["t"], L["x"]), np.interp(tau, L["t"], L["y"])
-    fv = np.interp(tau, L["t"], L["speed"])
+    k = np.clip(np.searchsorted(L["t"], tau, side="right") - 1, 0, len(L["t"]) - 1)
+    fv = L["speed"][k]                                           # real readings only (held), never interpolated
     col = L.get("color") or P.TEXT
     c = _card(p)
     hk = _hook(c, hook, f"{sub}, shown at {factor}x speed")
@@ -1014,10 +1016,18 @@ def pause_reel(p, lap: dict, out: Path, hook: list[str], sub: str, target: dict,
     line = c.text(0.5, 0.215, "", 22, color=P.TEXT, weight=300)
     _foot(c, src)
     r = Reel(out)
+    base = [(h.get_text(), h.get_color()) for h in hk[:2]]
     for i in range(n + 1):
         dot.set_data([fx[i]], [fy[i]])
         spd.set_text(f"{fv[i]:.0f}")
+        hit = i in inside                                        # Michel, 25 Nov: say something if they pause inside
+        for h, (txt, colr), msg in zip(hk[:2], base, scored):
+            h.set_text(msg if hit else txt)
+            h.set_color(P.GOLD if hit else colr)
+        glow.set_alpha(0.28 if hit else 0.10)
         r.add(c.fig)
+    for h, (_, colr) in zip(hk[:2], base):
+        h.set_color(colr)
     dot.set_data([fx[best]], [fy[best]])                         # the perfect pause
     glow.set_alpha(0.28)
     ring.set_markeredgewidth(5)
