@@ -2599,20 +2599,22 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         except Exception as e:
             log.warning("%s: data not in: %s", kind, e)
             return None
-        if len(D["rows"]) < 10:
-            return None
+        if len(D["rows"]) < 10 or sum(1 for r in D["rows"] if sum(1 for q in r["pts"] if not q[2]) >= 8) < 5:
+            return None                                     # too few clean air laps to rank anyone honestly
         log.info("TOPSPEED_JSON " + json.dumps(D, separators=(",", ":")))
         drs = p.season < 2026                                   # DRS was dropped from 2026
         reels_cam.speed_swarm(p, D, video, ["Every lap.", "Who is really fastest?"], f"{name} {p.season} race, speed trap, every lap",
                               tow="TOW, DRS" if drs else "TOW")
-        cl = lambda r: float(np.median([q[1] for q in r["pts"] if not q[2]] or [0]))
+        cl = lambda r: (float(np.median([q[1] for q in r["pts"] if not q[2]]))
+                        if sum(1 for q in r["pts"] if not q[2]) >= 8 else 0.0)
         med = max(D["rows"], key=cl)
         tow_all = [q[1] for r in D["rows"] for q in r["pts"] if q[2]]
         cln_all = [q[1] for r in D["rows"] for q in r["pts"] if not q[2]]
         gain_ = float(np.median(tow_all) - np.median(cln_all)) if tow_all and cln_all else 0.0
         cap = _cap(p, kind, f"💨 Every lap's speed trap reading at {name} {p.season}, one dot per lap, every driver.",
-                   f"🥇 Fastest in clean air: {drv(med['code'], p.colors)} {cl(med):.0f} km/h (median)\n"
-                   f"🌀 Being within 1 s of another car was worth about {gain_:.0f} km/h at the trap",
+                   f"🥇 Fastest in clean air: {drv(med['code'], p.colors)} {cl(med):.0f} km/h (median)\n" +
+                   (f"🌀 Being within 1 s of another car was worth about {gain_:.0f} km/h at the trap" if gain_ >= 3 else
+                    "🌀 Running within 1 s of another car gave no clear speed gain at the trap here"),
                    ("⚪ Hollow dots: within 1 s of the car ahead as that lap began (tow, and DRS range). " if drs else
                     "⚪ Hollow dots: within 1 s of the car ahead as that lap began (a tow). ") +
                    "Lap 1, pit laps and safety car laps are left out.",
