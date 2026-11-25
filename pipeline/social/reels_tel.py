@@ -95,6 +95,9 @@ def lap_of(oc, year: int, ck: int, session_name: str, rot: float, code: str | No
             laps = m
     lap = laps.sort_values("lap_duration").iloc[0]
     tel = _lap_tel(oc, sk, lap, rot)
+    sec = [lap.get(f"duration_sector_{k}") for k in (1, 2, 3)]
+    if all(v is not None and pd.notna(v) for v in sec):
+        tel["sectors"] = [float(v) for v in sec]                # official sector splits from timing
     tel |= {"code": lap["code"], "color": cols.get(lap["code"]), "year": year, "session": session_name,
             "compound": _compound(oc, sk, int(lap["driver_number"]), int(lap["lap_number"]))}
     return tel
@@ -2507,11 +2510,20 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "the gear at each slow corner. The wheel is the whole lap, its inner ring the gear.",
                    "📐 OpenF1 car data at about 4 samples a second: brake is on or off, not pressure.",
                    "💬 Who are you backing this weekend?")
-    elif kind == "lap_dna_duel_q":               # pole vs P2 as two Lap DNA wheels (Michel, 24 Nov, idea 5)
+    elif kind == "lap_dna_duel_q" or kind.startswith("lap_dna_duel_q_"):   # two laps as Lap DNA wheels (Michel, 24 Nov)
         from . import reels_cam
         res = _q_official(p)
         if len(res) < 2:
             return None
+        want = kind.split("_")[4:] if kind != "lap_dna_duel_q" else []      # e.g. lap_dna_duel_q_pia_ver
+        if want:
+            pick = [r for w in want for r in res if r["code"] == w.upper()]
+            if len(pick) < 2:
+                return None
+            pos_ = [res.index(r) + 1 for r in pick]
+            res = pick
+        else:
+            pos_ = [1, 2]
 
         def _ms2(r):
             t = r["q3"] or r["q2"] or r["q1"]
@@ -2525,14 +2537,16 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             log.warning("%s: data not in: %s", kind, e)
             return None
         need = ("throttle", "brake", "gear", "speed", "x", "y", "dist", "t")
-        dump = lambda L: {k: (list(map(float, L[k])) if k in need else L[k]) for k in need + ("lap_s", "code", "color", "official_s", "official")}
-        log.info("DUEL_JSON " + json.dumps({"a": dump(a), "b": dump(b)}, separators=(",", ":")))
-        reels_cam.lap_dna_duel(p, a, b, video, ["Pole vs P2.", "Where was it won?"],
+        dump = lambda L: {k: (list(map(float, L[k])) if k in need else L.get(k)) for k in need + ("lap_s", "code", "color", "official_s", "official", "sectors")}
+        log.info("DUEL_JSON " + json.dumps({"a": dump(a), "b": dump(b), "pos": pos_}, separators=(",", ":")))
+        lab = lambda q: "Pole" if q == 1 else f"P{q}"
+        reels_cam.lap_dna_duel(p, a, b, video, [f"{lab(pos_[0])} vs {lab(pos_[1])}.", "Where was it won?"],
                                f"{a['code']} vs {b['code']}, {name} {p.season} qualifying")
-        cap = _cap(p, kind, f"🧬 Pole vs P2 at {name} {p.season}: {drv(a['code'], p.colors)} {ta_} vs {drv(b['code'], p.colors)} {tb_}, "
+        cap = _cap(p, kind, f"🧬 {lab(pos_[0])} vs {lab(pos_[1])} at {name} {p.season}: {drv(a['code'], p.colors)} {ta_} vs {drv(b['code'], p.colors)} {tb_}, "
                             "both laps as Lap DNA wheels on one clock. The wheel that trails is the slower lap.",
-                   "🗺️ The track fills in the colour of whoever was quicker in each mini sector. The gold ring marks the biggest swing.",
-                   "📐 OpenF1 car data at about 4 samples a second, brake on or off. Gaps measured along the lap, scaled to the official times.",
+                   "🗺️ The track fills in, mini sector by mini sector, in the colour of whoever was quicker there. "
+                   "The final split is by the three official timing sectors.",
+                   "📐 OpenF1 car data at about 4 samples a second, brake on or off. Mini sector gaps measured along the lap, scaled to the official times.",
                    "💬 Who are you backing this weekend?")
     elif kind == "ghost_q":                      # this year's pole lap vs P2, official qualifying times
         res = _q_official(p)
