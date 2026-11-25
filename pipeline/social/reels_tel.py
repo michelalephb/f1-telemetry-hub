@@ -2602,13 +2602,16 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         if len(D["rows"]) < 10:
             return None
         log.info("TOPSPEED_JSON " + json.dumps(D, separators=(",", ":")))
-        reels_cam.speed_swarm(p, D, video, ["Every lap.", "Who is fastest?"], f"{name} {p.season} race, speed trap, every lap")
-        top = max(D["rows"], key=lambda r: r["max"])
-        med = max(D["rows"], key=lambda r: r["median"])
+        reels_cam.speed_swarm(p, D, video, ["Every lap.", "Who is really fastest?"], f"{name} {p.season} race, speed trap, every lap")
+        cl = lambda r: float(np.median([q[1] for q in r["pts"] if not q[2]] or [0]))
+        med = max(D["rows"], key=cl)
+        tow_all = [q[1] for r in D["rows"] for q in r["pts"] if q[2]]
+        cln_all = [q[1] for r in D["rows"] for q in r["pts"] if not q[2]]
+        gain_ = float(np.median(tow_all) - np.median(cln_all)) if tow_all and cln_all else 0.0
         cap = _cap(p, kind, f"💨 Every lap's speed trap reading at {name} {p.season}, one dot per lap, every driver.",
-                   f"🥇 Highest median: {drv(med['code'], p.colors)} {med['median']:.0f} km/h\n"
-                   f"🚀 Single fastest reading: {drv(top['code'], p.colors)} {top['max']:.0f} km/h",
-                   "🟡 Gold ringed dots: the car was within 1 s of the car ahead as that lap began (likely a tow). "
+                   f"🥇 Fastest in clean air: {drv(med['code'], p.colors)} {cl(med):.0f} km/h (median)\n"
+                   f"🌀 Being within 1 s of another car was worth about {gain_:.0f} km/h at the trap",
+                   "⚪ Hollow dots: within 1 s of the car ahead as that lap began (tow, and DRS range). "
                    "Lap 1, pit laps and safety car laps are left out.",
                    "📐 OpenF1 speed trap and interval data.",
                    "💬 Who are you backing this weekend?")
