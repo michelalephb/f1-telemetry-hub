@@ -1822,6 +1822,13 @@ REPLAY_LABELS = {                                # (GP key, season, kind) -> cod
 }
 
 
+REPLAY_NOTES = {                                 # (GP key, season, kind) -> caption line where the tower (order on the road)
+    ("LUSAIL", 2023, "replay_57_57"):            # differs from the official result after penalties
+        "ℹ️ The tower shows the order on the road at the flag. After track limits penalties the official result "
+        "has Zhou 9th and Perez 10th (formula1.com).",
+}
+
+
 # facts the ghost reel alone would get wrong (checked: Wikipedia race articles, FIA decisions)
 GHOST_NOTES = {
     ("LUSAIL", "ghost_years_q"): "ℹ️ 2024: Verstappen set the fastest time, but a one place grid penalty for driving "
@@ -3027,6 +3034,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         reels_cam.race_replay(p, ref, RD, video, hook, sub_, label=REPLAY_LABELS.get((p.title, p.season, kind)))
         cap = _cap(p, kind, f"🎬 {name} {p.season} {what}, " + (f"lap {lf}" if lf == lt_ else f"laps {lf} to {lt_}") +
                    ", every car on the map, with the timing tower.",
+                   REPLAY_NOTES.get((p.title, p.season, kind), ""),
                    "📐 Positions: OpenF1 location and timing data, shown faster than real time.",
                    "💬 Who are you backing this weekend?")              # one plain fan question (Michel, 20 Nov)
     elif kind.startswith("story_spec_"):         # narrated story Reel written by Agent Binotto from checked sources
