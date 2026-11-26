@@ -1828,9 +1828,11 @@ GHOST_NOTES = {
                                  "slowly put Russell on pole. 2021 is not shown: no car data for it (Hamilton, pole 1:20.827).",
     ("LUSAIL", "ghost_years_r"): "ℹ️ Norris's 1:22.384 in 2024 is the race lap record at Lusail (formula1.com). "
                                  "2021 is not shown: no car data for it.",
+    ("LUSAIL", "ghost_years_sq"): "ℹ️ 2023 was a Sprint Shootout, 2024 and 2025 Sprint Qualifying; no sprint here in 2021.",
 }
 GHOST_HOOKS = {                                  # (GP key, kind) -> two hook lines; default "N years, one track."
     ("LUSAIL", "ghost_years_r"): ["The race lap record.", "Which year set it?"],
+    ("LUSAIL", "ghost_years_sq"): ["Three sprint poles, all McLaren.", "Which one is fastest?"],   # not the ghost_years_q hook again
 }
 
 
