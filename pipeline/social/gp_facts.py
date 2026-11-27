@@ -272,6 +272,17 @@ NEWS: dict = {
             ],
         },
     },
+    "LUSAIL": {
+        2026: {
+            "penalties": [
+                {
+                    "driver": "PER", "code": "PER", "team": "Cadillac",
+                    "places": 5, "reason": "Caused collision with Camara in Las Vegas",
+                    "source": "Source: FIA stewards decision, document 61",
+                },
+            ],
+        },
+    },
 }
 
 
