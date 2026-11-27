@@ -956,7 +956,7 @@ def longrun_dots(p, teams: list[dict], out: Path, hook: list[str], sub: str, rac
     start = sorted(range(n), key=lambda i: T[i]["team"])
     end = sorted(range(n), key=lambda i: med[i])
     allv = np.array([x for t in T for x in t["run"]["laps"]])
-    lo, hi = min(med) - 1.2, min(max(med) + 2.0, allv.max() + 0.3)
+    lo, hi = min(min(med) - 1.2, allv.min() - 0.3), min(max(med) + 2.0, allv.max() + 0.3)   # no dot off the axis
     c = P.Card(H_REEL, story=True)
     c.header(p)
     for k, s in enumerate(hook):
