@@ -678,7 +678,7 @@ def braker(p, rows: list[dict], zone: dict, out: Path, year: int, label: str = "
     _foot(c, f"{year} {label}. Brake onset taken between two telemetry samples. OpenF1")
     if lead is not None:
         n_tie = sum(1 for r, l in zip(rows, low) if not l and r is not lead and r["m"] - r["err"] <= lead["m"] + lead["err"])
-        vtxt = (f"{lead['code']} leads, but {n_tie} others are within the data's error" if n_tie
+        vtxt = (f"{lead['code']} leads, but {n_tie} {'other is' if n_tie == 1 else 'others are'} within the data's error" if n_tie
                 else f"{lead['code']} brakes latest, clear of the error band")
     else:
         vtxt = "Too close to call: every row is inside the data's error"
