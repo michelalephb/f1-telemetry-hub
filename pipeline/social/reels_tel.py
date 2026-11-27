@@ -313,6 +313,48 @@ def topspeed_data(oc, year: int, ck: int) -> dict:
 FP_NAMES = {"fp1": "Practice 1", "fp2": "Practice 2", "fp3": "Practice 3"}
 
 
+def practice_data_ff1(year: int, event: str, fp: str) -> dict:
+    """Same output as practice_data, from FastF1 (F1 live timing archive). Used when OpenF1 locks anonymous access
+    during a live session, which also blocks past sessions (Qatar 2026 FP1 during FP2)."""
+    import os
+    import fastf1
+    os.makedirs(".ff1_cache", exist_ok=True)
+    fastf1.Cache.enable_cache(".ff1_cache")
+    ss = fastf1.get_session(year, event, fp.upper())         # by name: round numbers differ between sources
+    if event.split()[0].lower() not in str(ss.event["EventName"]).lower():
+        raise RuntimeError(f"FastF1 matched {ss.event['EventName']} for {event}")
+    ss.load(laps=True, telemetry=False, weather=False, messages=False)
+    L = ss.laps
+    L = L[L["LapTime"].notna()].copy()
+    L["t"] = L["LapTime"].dt.total_seconds()
+    res = ss.results
+    team = {r["Abbreviation"]: str(r["TeamName"]) for _, r in res.iterrows()}
+    col = {r["Abbreviation"]: "#" + str(r.get("TeamColor") or "888888").lstrip("#") for _, r in res.iterrows()}
+    out = {}
+    for c, g in L.groupby("Driver"):
+        tm = team.get(c)
+        if not tm:
+            continue
+        k = g["t"].idxmin()
+        b_ = {"code": c, "lap_s": float(g.loc[k, "t"]), "compound": str(g.loc[k, "Compound"] or "").upper()}
+        t = out.setdefault(tm, {"team": tm, "color": col.get(c), "best": b_, "run": None})
+        if b_["lap_s"] < t["best"]["lap_s"]:
+            t["best"], t["color"] = b_, col.get(c)
+        for (stn, cp), h in g.groupby(["Stint", "Compound"]):
+            h = h[h["PitOutTime"].isna() & h["PitInTime"].isna()]
+            v = h["t"].to_numpy(float)
+            if len(v) < 6:
+                continue
+            keep = v[v <= np.median(v) * 1.03]
+            if len(keep) < 6:
+                continue
+            rn = {"code": c, "compound": str(cp).upper(), "laps": [float(x) for x in keep], "median": float(np.median(keep))}
+            cur = t["run"]
+            if cur is None or len(rn["laps"]) > len(cur["laps"]) or (len(rn["laps"]) == len(cur["laps"]) and rn["median"] < cur["median"]):
+                t["run"] = rn
+    return {"teams": list(out.values()), "session": fp.upper(), "source": "FastF1"}
+
+
 def practice_data(oc, year: int, ck: int, sess: str) -> dict:
     """Practice per team (Michel, 27 Nov): short runs = each team's best lap (driver, tyre); long runs = each team's
     longest run of 6+ timed laps on one set (pit out and in laps dropped, laps over 103% of the run median dropped
@@ -2690,8 +2732,12 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
         try:
             D = practice_data(oc, p.season, ck, sess)
         except Exception as e:
-            log.warning("%s: data not in: %s", kind, e)
-            return None
+            log.warning("%s: OpenF1 not available (%s), trying FastF1", kind, e)
+            try:
+                D = practice_data_ff1(p.season, p.event, fp)
+            except Exception as e2:
+                log.warning("%s: data not in: %s", kind, e2)
+                return None
         log.info("PRACTICE_JSON " + json.dumps(D, separators=(",", ":")))
         FP = fp.upper()
         if kind.startswith("fp_short_"):
