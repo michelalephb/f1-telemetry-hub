@@ -310,6 +310,57 @@ def topspeed_data(oc, year: int, ck: int) -> dict:
     return {"rows": rows, "laps": n_laps}
 
 
+FP_NAMES = {"fp1": "Practice 1", "fp2": "Practice 2", "fp3": "Practice 3"}
+
+
+def practice_data(oc, year: int, ck: int, sess: str) -> dict:
+    """Practice per team (Michel, 27 Nov): short runs = each team's best lap (driver, tyre); long runs = each team's
+    longest run of 6+ timed laps on one set (pit out and in laps dropped, laps over 103% of the run median dropped
+    as traffic or cool down), with every lap kept for the animation."""
+    sk = _session(oc, year, ck, sess)
+    if not sk:
+        raise RuntimeError(f"no {sess}")
+    d = oc.frame("drivers", session_key=sk)
+    team = {r["name_acronym"]: str(r.get("team_name") or "") for _, r in d.iterrows()}
+    codes, cols = _codes(oc, sk)
+    laps = oc.frame("laps", session_key=sk)
+    laps = laps[laps["lap_duration"].notna()].copy()
+    laps["code"] = laps["driver_number"].map(lambda n: codes.get(int(n)))
+    st = oc.frame("stints", session_key=sk)
+    comp = {}
+    runs = []
+    for _, r in st.dropna(subset=["lap_start", "lap_end"]).iterrows():
+        c = codes.get(int(r["driver_number"]))
+        cp = str(r.get("compound") or "").upper()
+        for ln in range(int(r["lap_start"]), int(r["lap_end"]) + 1):
+            comp[(c, ln)] = cp
+        mine = laps[(laps["code"] == c) & (laps["lap_number"] > r["lap_start"]) & (laps["lap_number"] < r["lap_end"])]
+        mine = mine[~mine["is_pit_out_lap"].fillna(False).astype(bool)]
+        v = mine["lap_duration"].to_numpy(float)
+        if len(v) < 6:
+            continue
+        keep = v[v <= np.median(v) * 1.03]
+        if len(keep) >= 6:
+            runs.append({"code": c, "compound": cp, "laps": [float(x) for x in keep], "median": float(np.median(keep))})
+    out = {}
+    for c, tm in team.items():
+        if not tm or c not in set(laps["code"]):
+            continue
+        g = laps[laps["code"] == c]
+        k = g["lap_duration"].idxmin()
+        b = {"code": c, "lap_s": float(g.loc[k, "lap_duration"]), "compound": comp.get((c, int(g.loc[k, "lap_number"])), "")}
+        t = out.setdefault(tm, {"team": tm, "color": cols.get(c), "best": b, "run": None})
+        if b["lap_s"] < t["best"]["lap_s"]:
+            t["best"], t["color"] = b, cols.get(c)
+    for rn in runs:
+        tm = team.get(rn["code"])
+        if tm in out:
+            cur = out[tm]["run"]
+            if cur is None or len(rn["laps"]) > len(cur["laps"]) or (len(rn["laps"]) == len(cur["laps"]) and rn["median"] < cur["median"]):
+                out[tm]["run"] = rn
+    return {"teams": list(out.values()), "session": sess}
+
+
 def overtake_data(oc, year: int, ck: int, rot: float) -> dict:
     """On track passes of a race from OpenF1 (Michel, 21 Nov: a template for every race). OpenF1's overtakes are
     every position swap, pit stops and penalties included, and may be incomplete; we keep on track passes only:
@@ -2630,6 +2681,55 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
                    "🗺️ The track fills in with the quickest team in each mini sector; the gaps move once per mini sector.",
                    "📐 OpenF1 telemetry, scaled to the official lap times. Sector winners from official timing.",
                    "💬 Who are you backing this weekend?")
+    elif kind.startswith("fp_short_") or kind.startswith("fp_long_"):   # practice per team (Michel, 27 Nov)
+        from . import reels_cam
+        fp = kind.split("_")[-1]
+        sess = FP_NAMES.get(fp)
+        if not sess:
+            return None
+        try:
+            D = practice_data(oc, p.season, ck, sess)
+        except Exception as e:
+            log.warning("%s: data not in: %s", kind, e)
+            return None
+        log.info("PRACTICE_JSON " + json.dumps(D, separators=(",", ":")))
+        FP = fp.upper()
+        if kind.startswith("fp_short_"):
+            T = [t for t in D["teams"] if t["best"]]
+            if len(T) < 8:
+                return None
+            reels_cam.team_reveal(p, T, video, [f"{FP}: one lap pace.", "Every team."], f"{name} {FP}, best lap per team")
+            T.sort(key=lambda t: t["best"]["lap_s"])
+            lead = T[0]["best"]["lap_s"]
+            soft = [t["team"] for t in T if t["best"]["compound"] == "SOFT"]
+            lines = [f"{k + 1}. {t['team']}: {drv(t['best']['code'], p.colors)} {lap_time(round(t['best']['lap_s'] * 1000))} "
+                     f"({(t['best']['compound'] or '?').lower()})" + ("" if k == 0 else f" +{t['best']['lap_s'] - lead:.3f}")
+                     for k, t in enumerate(T)]
+            cap = _cap(p, kind, f"⏱️ {FP} at {name}: the best lap of every team, revealed from slowest to fastest.",
+                       "\n".join(lines),
+                       f"🔴 Set on softs: {len(soft)} of {len(T)} teams. Practice: fuel loads and engine modes are unknown, "
+                       "so read the order as a hint, not a verdict.",
+                       "📐 OpenF1 lap times and tyre stints.", "💬 Who was your favourite driver today?")
+        else:
+            T = [t for t in D["teams"] if t["run"]]
+            if len(T) < 5:
+                return None
+            reels_cam.longrun_dots(p, T, video, [f"{FP}: race pace.", "Who is quickest over a run?"],
+                                   f"{name} {FP}, longest run per team", race_call=(fp == "fp2"))
+            T.sort(key=lambda t: t["run"]["median"])
+            lead = T[0]["run"]["median"]
+            lines = [f"{k + 1}. {t['team']}: {drv(t['run']['code'], p.colors)} {lap_time(round(t['run']['median'] * 1000))} "
+                     f"median over {len(t['run']['laps'])} laps on {t['run']['compound'].lower()}s"
+                     + ("" if k == 0 else f" (+{t['run']['median'] - lead:.3f})") for k, t in enumerate(T)]
+            gap2 = T[1]["run"]["median"] - lead if len(T) > 1 else 0
+            call = (f"🏁 For Sunday: {T[0]['team']} looks quickest on race runs, {gap2:.3f} s a lap clear of {T[1]['team']}."
+                    if gap2 >= 0.1 else f"🏁 For Sunday: {T[0]['team']} and {T[1]['team']} are within {gap2:.3f} s a lap. Too close to call.")
+            cap = _cap(p, kind, f"🔁 {FP} at {name}: each team's longest run on one set of tyres, one dot per lap.",
+                       "\n".join(lines),
+                       call if fp == "fp2" else "🔎 FP1 runs are short and fuel loads vary: FP2 gives the real race read.",
+                       "📐 Runs of 6+ timed laps on one set; pit laps and laps over 103% of the run median left out. "
+                       "Fuel loads and compounds differ between teams, so this is a hint, not a verdict. OpenF1 lap times and stints.",
+                       "💬 Who are you backing this weekend?")
     elif kind == "topspeed_race":                # every lap's speed trap, dot by dot (Michel, 24 Nov)
         from . import reels_cam
         try:

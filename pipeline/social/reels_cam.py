@@ -875,3 +875,151 @@ def speed_swarm(p, D: dict, out: Path, hook: list[str], sub: str, sec_per_lap: f
         r.add(c.fig, int(3.5 * FPS))
     plt.close(c.fig)
     return r.close()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Practice Reels (Michel, 27 Nov): short runs as a slowest to fastest reveal, long runs as one dot per lap.
+# ---------------------------------------------------------------------------------------------------------------
+TYRE_LETTER = {"SOFT": ("S", "#FF3333"), "MEDIUM": ("M", "#FFF200"), "HARD": ("H", "#F2F4F7"),
+               "INTERMEDIATE": ("I", "#39B54A"), "WET": ("W", "#00AEEF")}
+
+
+def _chip(c, x, y, compound: str, size: int = 13):
+    let, col = TYRE_LETTER.get(compound or "", ("?", P.MUTED))
+    return c.fig.text(x, y, let, fontsize=size, color=col, family=P.FONT, weight=700, ha="center", va="center",
+                      bbox=dict(boxstyle="circle,pad=0.28", fc="#0B0E14", ec=col, lw=1.6))
+
+
+def team_reveal(p, teams: list[dict], out: Path, hook: list[str], sub: str, step_s: float = 0.85,
+                src: str = "Lap times and tyres: OpenF1 (official timing). Fuel loads unknown") -> Path:
+    """Best lap per team, revealed from slowest to fastest; gap bars, tyre chip, the fastest lands last in gold."""
+    P.set_event(p)
+    T = sorted(teams, key=lambda t: t["best"]["lap_s"])
+    n = len(T)
+    lead = T[0]["best"]["lap_s"]
+    gmax = max(0.3, T[-1]["best"]["lap_s"] - lead)
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    for k, s in enumerate(hook):
+        c.text(0.5, 0.83 - k * 0.042, s, 44, weight=300)
+    c.text(0.5, 0.83 - len(hook) * 0.042 - 0.005, sub.upper(), 15, color=P.CYAN, weight=600, track=True)
+    y0, dy = 0.695, min(0.042, 0.46 / n)
+    rows = []
+    for k, t in enumerate(T):
+        y = y0 - k * dy
+        pos = c.text(0.07, y, f"{k + 1}", 15, color=P.MUTED, weight=300, ha="left")
+        nm = c.text(0.11, y + 0.006, t["team"].upper(), 15, color=t["color"] or P.TEXT, weight=600, ha="left", track=True)
+        cd = c.text(0.11, y - 0.011, t["best"]["code"], 11, color=P.MUTED, weight=600, ha="left", track=True)
+        ch = _chip(c, 0.47, y, t["best"]["compound"])
+        bar = plt.Rectangle((0.51, y - 0.008), 0.0, 0.016, transform=c.fig.transFigure, fc=t["color"] or P.TEXT, alpha=0.85)
+        c.fig.add_artist(bar)
+        tm = c.text(0.93, y, "", 17, color=P.TEXT, weight=300, ha="right")
+        arts = [pos, nm, cd, ch]
+        for a_ in arts:
+            a_.set_visible(False)
+        rows.append((arts, bar, tm, t))
+    verdict = c.text(0.5, 0.205, "", 22, color=P.GOLD, weight=400)
+    c.text(0.5, 0.175, src, 12, color=P.MUTED, weight=300)
+    c.footer()
+    r = Reel(out)
+    r.add(c.fig, int(0.8 * FPS))
+    grow = int(0.5 * FPS)
+    for k in range(n - 1, -1, -1):
+        arts, bar, tm, t = rows[k]
+        for a_ in arts:
+            a_.set_visible(True)
+        gap = t["best"]["lap_s"] - lead
+        w = 0.30 * gap / gmax if k else 0.004
+        if k == 0:
+            r.add(c.fig, int(0.6 * FPS))                     # a beat before the fastest lands
+        for f_ in range(grow):
+            u = (f_ + 1) / grow
+            bar.set_width(w * u * u * (3 - 2 * u))
+            r.add(c.fig)
+        tm.set_text(_clock(t["best"]["lap_s"]) if k == 0 else f"+{gap:.3f}")
+        tm.set_color(P.GOLD if k == 0 else P.TEXT)
+        r.add(c.fig, max(1, int(step_s * FPS) - grow))
+    verdict.set_text(f"Fastest: {T[0]['team']}, {T[0]['best']['code']} {_clock(lead)}")
+    r.add(c.fig, int(3.0 * FPS))
+    plt.close(c.fig)
+    return r.close()
+
+
+def longrun_dots(p, teams: list[dict], out: Path, hook: list[str], sub: str, race_call: bool = False,
+                 per_lap_s: float = 0.45, src: str = "Runs of 6+ timed laps on one set. OpenF1 lap times. Fuel loads unknown") -> Path:
+    """Each team's longest run, one dot per lap appearing lap by lap on a lap time axis, so the order only shows at the
+    end; then rows sort by median, gold median ticks, the best run and (FP2) the read for Sunday."""
+    P.set_event(p)
+    T = list(teams)
+    n = len(T)
+    med = [t["run"]["median"] for t in T]
+    start = sorted(range(n), key=lambda i: T[i]["team"])
+    end = sorted(range(n), key=lambda i: med[i])
+    allv = np.array([x for t in T for x in t["run"]["laps"]])
+    lo, hi = min(med) - 1.2, min(max(med) + 2.0, allv.max() + 0.3)
+    c = P.Card(H_REEL, story=True)
+    c.header(p)
+    for k, s in enumerate(hook):
+        c.text(0.5, 0.83 - k * 0.042, s, 44, weight=300)
+    c.text(0.5, 0.83 - len(hook) * 0.042 - 0.005, sub.upper(), 15, color=P.CYAN, weight=600, track=True)
+    ax = c.fig.add_axes([0.27, 0.262, 0.67, 0.448])
+    ax.set_facecolor("none")
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.set_xlim(lo, hi), ax.set_ylim(n - 0.5, -0.5)
+    ticks = np.arange(np.ceil(lo), hi, 1.0)
+    ax.set_xticks(ticks), ax.set_xticklabels([_clock(x)[:-2] for x in ticks])
+    ax.tick_params(axis="x", colors=P.MUTED, labelsize=11, length=0)
+    ax.set_yticks([])
+    ax.grid(axis="x", color="#232D3F", lw=1)
+    lap_t = c.text(0.94, 0.722, "", 16, color=P.TEXT, weight=300, ha="right")
+    rng = np.random.default_rng(5)
+    jit = [rng.uniform(-0.22, 0.22, len(t["run"]["laps"])) for t in T]
+    labs, chips, scat, ticks_ = [], [], [], []
+    for i, t in enumerate(T):
+        labs.append(ax.text(lo - (hi - lo) * 0.13, 0, t["team"].upper(), fontsize=12, color=t["color"] or P.TEXT,
+                            family=P.FONT, weight=700, ha="left", va="center"))
+        chips.append(ax.text(lo - (hi - lo) * 0.025, 0, TYRE_LETTER.get(t["run"]["compound"], ("?", P.MUTED))[0], fontsize=11,
+                             color=TYRE_LETTER.get(t["run"]["compound"], ("?", P.MUTED))[1], family=P.FONT, weight=700,
+                             ha="center", va="center"))
+        scat.append(ax.scatter([], [], s=46, c=t["color"] or P.TEXT, edgecolors="none", zorder=3))
+        ticks_.append(ax.plot([], [], color=P.GOLD, lw=3, zorder=5)[0])
+    verdict = c.text(0.5, 0.214, "", 20, color=P.GOLD, weight=500)
+    c.text(0.5, 0.192, "ONE DOT PER LAP    LETTER: TYRE", 12, color=P.MUTED, weight=600, track=True)
+    c.text(0.5, 0.173, src, 12, color=P.MUTED, weight=300)
+    c.footer()
+
+    def draw(k, y):
+        for i, t in enumerate(T):
+            v = t["run"]["laps"][:k]
+            scat[i].set_offsets(np.column_stack([v, y[i] + jit[i][:len(v)]]) if v else np.empty((0, 2)))
+            labs[i].set_y(y[i]), chips[i].set_y(y[i])
+
+    y0 = {i: float(start.index(i)) for i in range(n)}
+    r = Reel(out)
+    K = max(len(t["run"]["laps"]) for t in T)
+    per = max(1, int(per_lap_s * FPS))
+    for k in range(1, K + 1):
+        draw(k, y0)
+        lap_t.set_text(f"RUN LAP {k}")
+        r.add(c.fig, per)
+    y1 = {i: float(end.index(i)) for i in range(n)}
+    steps = int(1.1 * FPS)
+    for f_ in range(steps):
+        u = (f_ + 1) / steps
+        e = u * u * (3 - 2 * u)
+        draw(K, {i: y0[i] + (y1[i] - y0[i]) * e for i in range(n)})
+        r.add(c.fig)
+    lap_t.set_text("SORTED BY MEDIAN LAP")
+    for i in range(n):
+        ticks_[i].set_data([med[i], med[i]], [y1[i] - 0.32, y1[i] + 0.32])
+    b = end[0]
+    verdict.set_text(f"Best run: {T[b]['team']}, {_clock(med[b])} a lap")
+    r.add(c.fig, int(2.2 * FPS))
+    if race_call and n > 1:
+        g2 = med[end[1]] - med[b]
+        verdict.set_text(f"Sunday read: {T[b]['team']}, {g2:.3f} s a lap clear" if g2 >= 0.1 else
+                         f"Sunday read: {T[b]['team']} and {T[end[1]]['team']}, too close to call")
+        r.add(c.fig, int(2.5 * FPS))
+    plt.close(c.fig)
+    return r.close()
