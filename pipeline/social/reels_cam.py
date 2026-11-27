@@ -976,10 +976,12 @@ def longrun_dots(p, teams: list[dict], out: Path, hook: list[str], sub: str, rac
     rng = np.random.default_rng(5)
     jit = [rng.uniform(-0.22, 0.22, len(t["run"]["laps"])) for t in T]
     labs, chips, scat, ticks_ = [], [], [], []
+    from matplotlib.transforms import blended_transform_factory
+    tr = blended_transform_factory(ax.transAxes, ax.transData)
     for i, t in enumerate(T):
-        labs.append(ax.text(lo - (hi - lo) * 0.13, 0, t["team"].upper(), fontsize=12, color=t["color"] or P.TEXT,
+        labs.append(ax.text(-0.33, 0, t["team"].upper(), fontsize=13, color=t["color"] or P.TEXT, transform=tr,
                             family=P.FONT, weight=700, ha="left", va="center"))
-        chips.append(ax.text(lo - (hi - lo) * 0.025, 0, TYRE_LETTER.get(t["run"]["compound"], ("?", P.MUTED))[0], fontsize=11,
+        chips.append(ax.text(-0.035, 0, TYRE_LETTER.get(t["run"]["compound"], ("?", P.MUTED))[0], fontsize=12, transform=tr,
                              color=TYRE_LETTER.get(t["run"]["compound"], ("?", P.MUTED))[1], family=P.FONT, weight=700,
                              ha="center", va="center"))
         scat.append(ax.scatter([], [], s=46, c=t["color"] or P.TEXT, edgecolors="none", zorder=3))

@@ -337,7 +337,7 @@ def practice_data_ff1(year: int, event: str, fp: str) -> dict:
             continue
         k = g["t"].idxmin()
         b_ = {"code": c, "lap_s": float(g.loc[k, "t"]), "compound": str(g.loc[k, "Compound"] or "").upper()}
-        t = out.setdefault(tm, {"team": tm, "color": col.get(c), "best": b_, "run": None})
+        t = out.setdefault(tm, {"team": TEAM_SHORT.get(tm, tm), "color": col.get(c), "best": b_, "run": None})
         if b_["lap_s"] < t["best"]["lap_s"]:
             t["best"], t["color"] = b_, col.get(c)
         for (stn, cp), h in g.groupby(["Stint", "Compound"]):
@@ -391,7 +391,7 @@ def practice_data(oc, year: int, ck: int, sess: str) -> dict:
         g = laps[laps["code"] == c]
         k = g["lap_duration"].idxmin()
         b = {"code": c, "lap_s": float(g.loc[k, "lap_duration"]), "compound": comp.get((c, int(g.loc[k, "lap_number"])), "")}
-        t = out.setdefault(tm, {"team": tm, "color": cols.get(c), "best": b, "run": None})
+        t = out.setdefault(tm, {"team": TEAM_SHORT.get(tm, tm), "color": cols.get(c), "best": b, "run": None})
         if b["lap_s"] < t["best"]["lap_s"]:
             t["best"], t["color"] = b, cols.get(c)
     for rn in runs:
@@ -1669,7 +1669,8 @@ def overtakes_map(p, ref: dict, passes: list[dict], laps: int, out: Path, hook: 
 # checked facts for the championship Reel caption (Michel, 24 Nov). Source: crash.net, standings after the Mexico City GP
 TITLE_NOTES = {2026: "👑 Antonelli sealed the title in Mexico City, the youngest champion in F1 history."}
 
-TEAM_SHORT = {"McLaren": "McLaren", "Red Bull": "Red Bull", "Mercedes": "Mercedes", "Ferrari": "Ferrari",
+TEAM_SHORT = {"McLaren": "McLaren", "Red Bull": "Red Bull", "Red Bull Racing": "Red Bull", "Haas": "Haas", "Alpine": "Alpine",
+              "Kick Sauber": "Sauber", "Audi F1 Team": "Audi", "Cadillac": "Cadillac", "Racing Bulls": "Racing Bulls", "Mercedes": "Mercedes", "Ferrari": "Ferrari",
               "Williams": "Williams", "Aston Martin": "Aston Martin", "Alpine F1 Team": "Alpine", "Haas F1 Team": "Haas",
               "RB F1 Team": "Racing Bulls", "Sauber": "Sauber", "Cadillac F1 Team": "Cadillac", "Audi": "Audi"}
 
