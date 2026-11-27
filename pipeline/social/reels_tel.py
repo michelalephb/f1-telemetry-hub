@@ -345,7 +345,7 @@ def practice_data_ff1(year: int, event: str, fp: str) -> dict:
             v = h["t"].to_numpy(float)
             if len(v) < 6:
                 continue
-            keep = v[v <= np.median(v) * 1.03]
+            keep = v[v <= np.percentile(v, 20) * 1.03]
             if len(keep) < 6:
                 continue
             rn = {"code": c, "compound": str(cp).upper(), "laps": [float(x) for x in keep], "median": float(np.median(keep))}
@@ -357,8 +357,8 @@ def practice_data_ff1(year: int, event: str, fp: str) -> dict:
 
 def practice_data(oc, year: int, ck: int, sess: str) -> dict:
     """Practice per team (Michel, 27 Nov): short runs = each team's best lap (driver, tyre); long runs = each team's
-    longest run of 6+ timed laps on one set (pit out and in laps dropped, laps over 103% of the run median dropped
-    as traffic or cool down), with every lap kept for the animation."""
+    longest run of 6+ timed laps on one set (pit out and in laps dropped, laps more than 3% over the run's quicker
+    laps (20th percentile) dropped as traffic or cool down), with every lap kept for the animation."""
     sk = _session(oc, year, ck, sess)
     if not sk:
         raise RuntimeError(f"no {sess}")
@@ -381,7 +381,7 @@ def practice_data(oc, year: int, ck: int, sess: str) -> dict:
         v = mine["lap_duration"].to_numpy(float)
         if len(v) < 6:
             continue
-        keep = v[v <= np.median(v) * 1.03]
+        keep = v[v <= np.percentile(v, 20) * 1.03]     # push and cool down laps alternating is not a long run
         if len(keep) >= 6:
             runs.append({"code": c, "compound": cp, "laps": [float(x) for x in keep], "median": float(np.median(keep))})
     out = {}
@@ -2774,7 +2774,7 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             cap = _cap(p, kind, f"🔁 {FP} at {name}: each team's longest run on one set of tyres, one dot per lap.",
                        "\n".join(lines),
                        call if fp == "fp2" else "🔎 FP1 runs are short and fuel loads vary: FP2 gives the real race read.",
-                       "📐 Runs of 6+ timed laps on one set; pit laps and laps over 103% of the run median left out. "
+                       "📐 Runs of 6+ timed laps on one set; pit laps and laps more than 3% off the run's pace left out. "
                        "Fuel loads and compounds differ between teams, so this is a hint, not a verdict. OpenF1 lap times and stints.",
                        "💬 Who are you backing this weekend?")
     elif kind == "topspeed_race":                # every lap's speed trap, dot by dot (Michel, 24 Nov)
