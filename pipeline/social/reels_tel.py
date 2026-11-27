@@ -2489,6 +2489,9 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             rows, year, label = brake_rows_race(oc, p.season, ck, rot, tuple(zone["xy"]), "Practice 2", 5, frac), p.season, "FP2"
         if len(rows) < 8:
             return None
+        log.info("BRAKER_JSON " + json.dumps({"rows": rows, "zone": zone, "year": year, "label": label,   # local review render
+                                              "p": {"title": p.title, "season": p.season, "round": p.round, "country": p.country}},
+                                             default=float, separators=(",", ":")))
         braker(p, rows, zone, video, year, label)
         good = [r for r in rows if r.get("n", 0) >= 10 and r["err"] <= 10] or rows
         lead = good[0]
@@ -2506,6 +2509,9 @@ def build(p, kind: str, out: Path) -> tuple[Path, str] | None:
             except Exception:
                 return None
             what = f"fastest lap of FP2, {name} {p.season}"
+        log.info("GUESS_JSON " + json.dumps({"lap": lap, "what": what,                                    # local review render
+                                             "p": {"title": p.title, "season": p.season, "round": p.round, "country": p.country}},
+                                            default=float, separators=(",", ":")))
         guess(p, lap, video, what)
         cap = _cap(p, kind, f"🕵️ Who is it? The {what}.", "👀 One speed trace, no names. Watch to the end for the answer.",
                    "💬 Comment your guess before the reveal!", "ℹ️ Lap time: official timing. Telemetry: OpenF1.")
